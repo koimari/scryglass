@@ -46,6 +46,10 @@ from lol_kills.v2.tierlists.accepted_census import (
 SCHEMA_VERSION = "scryglass:future-value-research-run:v1"
 MODEL_RUNTIME_SCHEMA_VERSION = "scryglass:future-value-model-runtime:v1"
 FREEZE_SCHEMA_VERSION = "scryglass:future-value-source-freeze:v1"
+FREEZE_SCHEMA_V2_VERSION = "scryglass:future-value-source-freeze:v2"
+DUPLICATE_RESOLUTION_SCHEMA_VERSION = (
+    "scryglass:future-value-duplicate-resolution:v1"
+)
 CALIBRATION_PRIOR_SCHEMA_VERSION = "scryglass:future-value-calibration-prior-folds:v1"
 DEFAULT_FREEZE = Path(
     "data/lol/v2/evaluation/future-value-source-freeze-20260820.json"
@@ -54,6 +58,44 @@ DEFAULT_FREEZE = Path(
 
 class FutureValueTrainingError(RuntimeError):
     """The cloud research source does not match the frozen contract."""
+
+
+# These six bridge identities are the duplicate rows identified in the
+# Leaguepedia crosswalk audit. A v1 freeze from before that audit remains
+# valid. A later freeze which excludes one of these identities must carry
+# the source-row resolution block below.
+KNOWN_DUPLICATE_BRIDGE_GAME_IDS = frozenset(
+    {
+        "oe:game:89609382968cd2df470ef4045dc46ec6",
+        "oe:game:9016fd21e40958f2f16f2ddbb98189bc",
+        "oe:game:97451d300f5da565f5d47389b3d2013d",
+        "oe:game:c27543b86f23fbbc7a6653449b24ffda",
+        "oe:game:c30f963f1ab69d6618fbcfce8529359a",
+        "oe:game:d4a6c7a5ff332510ca4cb6741274b7ad",
+    }
+)
+_SUPPORTED_FREEZE_SCHEMA_VERSIONS = frozenset(
+    {FREEZE_SCHEMA_VERSION, FREEZE_SCHEMA_V2_VERSION}
+)
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+_DUPLICATE_ROW_ID_FIELDS = (
+    "game_uid",
+    "game_id",
+    "gameid",
+    "oe_gameid",
+    "oe_game_id",
+)
+_DUPLICATE_SEMANTIC_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "date": ("date", "DateTime UTC", "DateTime_UTC", "datetime_utc"),
+    "league": ("league", "League"),
+    "tournament": ("tournament", "Tournament"),
+    "patch": ("patch", "Patch"),
+    "blue_team": ("blue_team", "blue_teamname", "Team1", "team1"),
+    "red_team": ("red_team", "red_teamname", "Team2", "team2"),
+    "blue_team_key": ("blue_team_key", "BlueTeamKey", "team1_key"),
+    "red_team_key": ("red_team_key", "RedTeamKey", "team2_key"),
+    "y_blue_win": ("y_blue_win", "blue_result", "result_blue"),
+}
 
 
 def _sha256(path: Path) -> str:
@@ -77,6 +119,571 @@ def _canonical_bytes(value: object) -> bytes:
         raise FutureValueTrainingError("research receipt is not canonical JSON") from error
 
 
+def _canonical_mapping_sha256(mappings: Sequence[Mapping[str, Any]]) -> str:
+    """Hash duplicate mappings in a stable bridge-ID order."""
+
+    try:
+        rows = [dict(row) for row in mappings]
+        rows.sort(key=lambda row: str(row.get("bridge_game_id") or ""))
+    except (TypeError, ValueError) as error:
+        raise FutureValueTrainingError("duplicate resolution mappings are not canonical") from error
+    return hashlib.sha256(_canonical_bytes(rows)).hexdigest()
+
+
+def duplicate_resolution_mapping_sha256(
+    mappings: Sequence[Mapping[str, Any]],
+) -> str:
+    """Return the digest required by a source-freeze resolution block."""
+
+    return _canonical_mapping_sha256(mappings)
+
+
+def _duplicate_resolution_block(freeze: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Return the one supported duplicate block, rejecting two copies."""
+
+    top_level = freeze.get("duplicate_resolution")
+    accepted = freeze.get("accepted_census")
+    nested = accepted.get("duplicate_resolution") if isinstance(accepted, Mapping) else None
+    if top_level is not None and nested is not None:
+        if not isinstance(top_level, Mapping) or not isinstance(nested, Mapping):
+            raise FutureValueTrainingError("duplicate resolution block is invalid")
+        if _canonical_bytes(top_level) != _canonical_bytes(nested):
+            raise FutureValueTrainingError("duplicate resolution block is duplicated inconsistently")
+    block = top_level if top_level is not None else nested
+    if block is None:
+        return None
+    if not isinstance(block, Mapping):
+        raise FutureValueTrainingError("duplicate resolution block is invalid")
+    return block
+
+
+def _required_duplicate_bridge_ids(freeze: Mapping[str, Any]) -> set[str]:
+    """Return IDs that require a duplicate block in a migrated freeze."""
+
+    accepted = freeze.get("accepted_census")
+    excluded = set()
+    if isinstance(accepted, Mapping):
+        excluded = set(canonical_game_ids(accepted.get("excluded_game_ids") or ()))
+    explicit = freeze.get("duplicate_resolution_required_bridge_game_ids")
+    if explicit is not None:
+        if not isinstance(explicit, list):
+            raise FutureValueTrainingError(
+                "duplicate resolution required IDs are invalid"
+            )
+        explicit_ids = set(canonical_game_ids(explicit))
+        if len(explicit_ids) != len(explicit):
+            raise FutureValueTrainingError(
+                "duplicate resolution required IDs are not canonical and unique"
+            )
+    else:
+        explicit_ids = set()
+    return (excluded & KNOWN_DUPLICATE_BRIDGE_GAME_IDS) | explicit_ids
+
+
+def _validate_duplicate_resolution_structure(
+    freeze: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Validate block shape and digest before source rows are available."""
+
+    block = _duplicate_resolution_block(freeze)
+    required_ids = _required_duplicate_bridge_ids(freeze)
+    if block is None:
+        if required_ids:
+            raise FutureValueTrainingError(
+                "duplicate resolution block is required for excluded bridge IDs"
+            )
+        return None
+    if block.get("schema_version") != DUPLICATE_RESOLUTION_SCHEMA_VERSION:
+        raise FutureValueTrainingError("duplicate resolution schema is invalid")
+    survivor_rule = block.get("survivor_rule")
+    if not isinstance(survivor_rule, str) or not survivor_rule.strip():
+        raise FutureValueTrainingError("duplicate resolution survivor rule is missing")
+    mappings = block.get("mappings")
+    if not isinstance(mappings, list) or not mappings or any(
+        not isinstance(row, Mapping) for row in mappings
+    ):
+        raise FutureValueTrainingError("duplicate resolution mappings are invalid")
+    claimed = block.get("mapping_sha256")
+    if not isinstance(claimed, str) or _SHA256_RE.fullmatch(claimed) is None:
+        raise FutureValueTrainingError("duplicate resolution mapping digest is invalid")
+    if claimed.lower() != _canonical_mapping_sha256(mappings):
+        raise FutureValueTrainingError("duplicate resolution mapping digest changed")
+    bridge_ids: list[str] = []
+    survivor_ids: list[str] = []
+    for row in mappings:
+        bridge = row.get("bridge_game_id")
+        survivor = row.get("annual_survivor_game_id")
+        if not isinstance(bridge, str) or not bridge.strip():
+            raise FutureValueTrainingError("duplicate resolution bridge ID is missing")
+        if not isinstance(survivor, str) or not survivor.strip():
+            raise FutureValueTrainingError("duplicate resolution annual survivor is missing")
+        bridge_id = canonical_source_game_key(bridge)
+        survivor_id = canonical_source_game_key(survivor)
+        if bridge_id != bridge or survivor_id != survivor:
+            raise FutureValueTrainingError(
+                "duplicate resolution IDs are not canonical"
+            )
+        if row.get("survivor_rule") != survivor_rule:
+            raise FutureValueTrainingError(
+                "duplicate resolution mapping survivor rule does not match block"
+            )
+        bridge_ids.append(bridge_id)
+        survivor_ids.append(survivor_id)
+    if len(set(bridge_ids)) != len(bridge_ids):
+        raise FutureValueTrainingError("duplicate resolution bridge IDs are duplicated")
+    if len(set(survivor_ids)) != len(survivor_ids):
+        raise FutureValueTrainingError("duplicate resolution survivors are duplicated")
+    if required_ids and set(bridge_ids) != required_ids:
+        raise FutureValueTrainingError(
+            "duplicate resolution mappings do not cover required bridge IDs"
+        )
+    return block
+
+
+def _duplicate_value(value: object) -> object:
+    """Normalize JSON and parquet scalar values for semantic equality."""
+
+    if value is None:
+        return None
+    if isinstance(value, (pd.Timestamp, datetime)):
+        parsed = pd.to_datetime(value, errors="coerce", utc=True)
+        return None if pd.isna(parsed) else pd.Timestamp(parsed).isoformat()
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
+    return str(value).strip()
+
+
+def _duplicate_row_id(row: Mapping[str, Any]) -> str:
+    for field in _DUPLICATE_ROW_ID_FIELDS:
+        if field in row:
+            value = canonical_source_game_key(row.get(field))
+            if value:
+                return value
+    return ""
+
+
+def _duplicate_field_value(row: Mapping[str, Any], field: str) -> tuple[bool, object]:
+    aliases = _DUPLICATE_SEMANTIC_FIELD_ALIASES.get(field, (field,))
+    for alias in aliases:
+        if alias in row:
+            value = row.get(alias)
+            if field == "date" and value is not None:
+                parsed = pd.to_datetime(value, errors="coerce", utc=True)
+                if not pd.isna(parsed):
+                    return True, pd.Timestamp(parsed).isoformat()
+            return True, _duplicate_value(value)
+    return False, None
+
+
+def _duplicate_semantic_fields(
+    mapping: Mapping[str, Any],
+    bridge_row: Mapping[str, Any],
+    survivor_row: Mapping[str, Any],
+    bridge_actual: Mapping[str, Any],
+    survivor_actual: Mapping[str, Any],
+) -> None:
+    evidence = mapping.get("evidence")
+    if not isinstance(evidence, Mapping):
+        raise FutureValueTrainingError("duplicate resolution evidence is missing")
+    fields = evidence.get("semantic_fields", evidence.get("fields"))
+    if not isinstance(fields, list) or not fields or any(
+        not isinstance(field, str) or field not in _DUPLICATE_SEMANTIC_FIELD_ALIASES
+        for field in fields
+    ):
+        raise FutureValueTrainingError("duplicate resolution semantic fields are invalid")
+    if list(dict.fromkeys(fields)) != fields:
+        raise FutureValueTrainingError("duplicate resolution semantic fields are duplicated")
+    field_values = evidence.get("field_values")
+    if field_values is not None and not isinstance(field_values, Mapping):
+        raise FutureValueTrainingError("duplicate resolution evidence values are invalid")
+    for field in fields:
+        row_values: list[object] = []
+        for label, row in (
+            ("bridge source", bridge_row),
+            ("annual source", survivor_row),
+            ("bridge raw", bridge_actual),
+            ("annual raw", survivor_actual),
+        ):
+            present, value = _duplicate_field_value(row, field)
+            if not present:
+                raise FutureValueTrainingError(
+                    f"duplicate resolution {label} field is missing: {field}"
+                )
+            row_values.append(value)
+        if any(value != row_values[0] for value in row_values[1:]):
+            raise FutureValueTrainingError(
+                f"duplicate resolution semantic field changed: {field}"
+            )
+        if isinstance(field_values, Mapping):
+            expected = field_values.get(field)
+            _, normalized_expected = _duplicate_field_value({field: expected}, field)
+            if normalized_expected != row_values[0]:
+                raise FutureValueTrainingError(
+                    f"duplicate resolution evidence field changed: {field}"
+                )
+
+
+def _duplicate_file_record(
+    record: Any,
+    *,
+    label: str,
+) -> tuple[Path, bytes, dict[str, Any]]:
+    """Read one durable JSON artifact named by duplicate evidence."""
+
+    if not isinstance(record, Mapping):
+        raise FutureValueTrainingError(f"{label} file binding is missing")
+    raw_path = record.get("path", record.get("locator"))
+    expected_bytes = record.get("bytes")
+    expected_sha = record.get("sha256")
+    if (
+        not isinstance(raw_path, str)
+        or not raw_path.strip()
+        or not Path(raw_path).is_absolute()
+        or not isinstance(expected_bytes, int)
+        or isinstance(expected_bytes, bool)
+        or expected_bytes <= 0
+        or not isinstance(expected_sha, str)
+        or _SHA256_RE.fullmatch(expected_sha) is None
+    ):
+        raise FutureValueTrainingError(f"{label} file binding is invalid")
+    candidate = Path(raw_path)
+    if candidate.is_symlink():
+        raise FutureValueTrainingError(f"{label} file is a symlink")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise FutureValueTrainingError(f"{label} file is missing") from error
+    if resolved.is_symlink() or not resolved.is_file():
+        raise FutureValueTrainingError(f"{label} file is missing or unsafe")
+    current = Path(resolved.anchor)
+    for part in resolved.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise FutureValueTrainingError(f"{label} file path contains a symlink")
+    try:
+        raw = resolved.read_bytes()
+    except OSError as error:
+        raise FutureValueTrainingError(f"{label} file cannot be read") from error
+    actual_sha = hashlib.sha256(raw).hexdigest()
+    if len(raw) != expected_bytes or actual_sha != expected_sha.lower():
+        raise FutureValueTrainingError(f"{label} file bytes changed")
+    return resolved, raw, {
+        "path": str(resolved),
+        "bytes": len(raw),
+        "sha256": actual_sha,
+    }
+
+
+def _duplicate_json_artifact(
+    record: Any,
+    *,
+    label: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    path, raw, normalized = _duplicate_file_record(record, label=label)
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueTrainingError(f"{label} file is not valid JSON") from error
+    if not isinstance(value, Mapping):
+        raise FutureValueTrainingError(f"{label} JSON payload is invalid")
+    return dict(value), normalized
+
+
+def _duplicate_artifact_assignments(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Read assignments from the crosswalk or the closed duplicate audit."""
+
+    combined: list[Mapping[str, Any]] = []
+    for key in ("assignments", "mappings", "duplicate_mappings", "rows"):
+        rows = payload.get(key)
+        if isinstance(rows, list) and all(isinstance(row, Mapping) for row in rows):
+            combined.extend(rows)
+    issues = payload.get("issues")
+    if isinstance(issues, list) and all(isinstance(row, Mapping) for row in issues):
+        combined.extend(row for row in issues if row.get("kind") == "duplicate_source_assignment")
+    if not combined:
+        raise FutureValueTrainingError("duplicate identity artifact assignments are missing")
+    return combined
+
+
+def _duplicate_assignment_game_id(row: Mapping[str, Any]) -> str:
+    for key in ("oe_game_id", "bridge_game_id", "annual_survivor_game_id", "game_id", "game_uid"):
+        if key in row:
+            value = canonical_source_game_key(row.get(key))
+            if value:
+                return value
+    return ""
+
+
+def _duplicate_assignment_identity(row: Mapping[str, Any]) -> tuple[str, str]:
+    scoreboard = str(
+        row.get("scoreboard_game_id")
+        or row.get("ScoreboardGames.GameId")
+        or row.get("scoreboard_id")
+        or ""
+    ).strip()
+    riot = str(
+        row.get("scoreboard_riot_platform_game_id")
+        or row.get("RiotPlatformGameId")
+        or row.get("riot_platform_game_id")
+        or ""
+    ).strip()
+    return scoreboard, riot
+
+
+def _duplicate_identities_match(
+    left: tuple[str, str],
+    right: tuple[str, str],
+) -> bool:
+    """Compare scoreboard and Riot identities, allowing omitted evidence fields."""
+
+    return bool(
+        (not left[0] or not right[0] or left[0] == right[0])
+        and (not left[1] or not right[1] or left[1] == right[1])
+        and (left[0] or right[0] or left[1] or right[1])
+    )
+
+
+def _validate_duplicate_identity_source(
+    block: Mapping[str, Any],
+    freeze: Mapping[str, Any],
+) -> dict[str, tuple[str, str]]:
+    """Verify a durable crosswalk or closed duplicate-audit artifact."""
+
+    binding = block.get("source_binding")
+    if not isinstance(binding, Mapping):
+        raise FutureValueTrainingError("duplicate identity source binding is missing")
+    kind = binding.get("kind")
+    if kind not in {"leaguepedia_crosswalk", "duplicate_audit"}:
+        raise FutureValueTrainingError("duplicate identity source kind is invalid")
+    artifact_record = binding.get("artifact", binding.get("crosswalk_artifact"))
+    receipt_record = binding.get("receipt", binding.get("crosswalk_receipt"))
+    artifact, artifact_file = _duplicate_json_artifact(
+        artifact_record,
+        label="duplicate identity artifact",
+    )
+    receipt, receipt_file = _duplicate_json_artifact(
+        receipt_record,
+        label="duplicate identity receipt",
+    )
+    expected_receipt_file_sha = binding.get(
+        "expected_receipt_file_sha256",
+        binding.get("crosswalk_receipt_file_sha256"),
+    )
+    if (
+        not isinstance(expected_receipt_file_sha, str)
+        or _SHA256_RE.fullmatch(expected_receipt_file_sha) is None
+        or expected_receipt_file_sha.lower() != receipt_file["sha256"]
+    ):
+        raise FutureValueTrainingError("duplicate identity receipt file digest changed")
+    receipt_body = dict(receipt)
+    receipt_hash = receipt_body.pop("receipt_sha256", None)
+    if (
+        not isinstance(receipt_hash, str)
+        or _SHA256_RE.fullmatch(receipt_hash) is None
+        or hashlib.sha256(_canonical_bytes(receipt_body)).hexdigest() != receipt_hash.lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity receipt self-hash is invalid")
+    artifact_hash = artifact.get("crosswalk_sha256", artifact.get("artifact_sha256"))
+    if artifact_hash is not None:
+        if not isinstance(artifact_hash, str) or _SHA256_RE.fullmatch(artifact_hash) is None:
+            raise FutureValueTrainingError("duplicate identity artifact self-hash is invalid")
+        artifact_body = dict(artifact)
+        artifact_body.pop("crosswalk_sha256", None)
+        artifact_body.pop("artifact_sha256", None)
+        if hashlib.sha256(_canonical_bytes(artifact_body)).hexdigest() != artifact_hash.lower():
+            raise FutureValueTrainingError("duplicate identity artifact self-hash changed")
+    receipt_artifact = receipt.get("artifact")
+    if isinstance(receipt_artifact, Mapping):
+        if (
+            receipt_artifact.get("bytes") != artifact_file["bytes"]
+            or str(receipt_artifact.get("sha256") or "").lower()
+            != artifact_file["sha256"]
+        ):
+            raise FutureValueTrainingError("duplicate identity receipt artifact binding changed")
+    expected_source_receipt = binding.get("source_receipt_sha256")
+    expected_source_identity = binding.get("source_identity_sha256")
+    if expected_source_receipt is None and expected_source_identity is None:
+        raise FutureValueTrainingError("duplicate identity source binding is incomplete")
+    if expected_source_receipt is not None and (
+        not isinstance(expected_source_receipt, str)
+        or expected_source_receipt.lower()
+        != str(freeze.get("reference_source_receipt_sha256") or "").lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity source receipt changed")
+    if expected_source_receipt is not None and (
+        str(receipt.get("source_receipt_sha256") or "").lower()
+        != expected_source_receipt.lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity receipt source changed")
+    accepted = freeze.get("accepted_census")
+    accepted_identity = accepted.get("source_identity_sha256") if isinstance(accepted, Mapping) else None
+    if expected_source_identity is not None and (
+        not isinstance(expected_source_identity, str)
+        or expected_source_identity.lower() != str(accepted_identity or "").lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity source census changed")
+    if expected_source_identity is not None and (
+        str(receipt.get("source_identity_sha256") or "").lower()
+        != expected_source_identity.lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity receipt census changed")
+    assignments = _duplicate_artifact_assignments(artifact)
+    identity_by_game: dict[str, tuple[str, str]] = {}
+    for row in assignments:
+        scoreboard, riot = _duplicate_assignment_identity(row)
+        game_ids = {
+            value
+            for key in (
+                "oe_game_id",
+                "bridge_game_id",
+                "annual_survivor_game_id",
+                "game_id",
+                "game_uid",
+            )
+            if key in row
+            and (value := canonical_source_game_key(row.get(key)))
+        }
+        if not game_ids or not scoreboard and not riot:
+            continue
+        identity = (scoreboard, riot)
+        for game_id in game_ids:
+            previous = identity_by_game.get(game_id)
+            if previous is not None:
+                if previous[0] and identity[0] and previous[0] != identity[0]:
+                    raise FutureValueTrainingError(
+                        "duplicate identity artifact maps one ID inconsistently"
+                    )
+                if previous[1] and identity[1] and previous[1] != identity[1]:
+                    raise FutureValueTrainingError(
+                        "duplicate identity artifact maps one ID inconsistently"
+                    )
+                identity = (previous[0] or identity[0], previous[1] or identity[1])
+            identity_by_game[game_id] = identity
+    if not identity_by_game:
+        raise FutureValueTrainingError("duplicate identity artifact has no verified identities")
+    return identity_by_game
+
+
+def validate_duplicate_resolution_block(
+    maps: pd.DataFrame,
+    freeze: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Verify duplicate bridge rows against the raw map frame.
+
+    Older v1 freezes remain valid when they do not exclude an audited bridge
+    identity. A migrated freeze must carry one mapping for every such bridge.
+    The mapping includes source-row snapshots and declared semantic evidence.
+    """
+
+    block = _validate_duplicate_resolution_structure(freeze)
+    if block is None:
+        return None
+    identity_by_game = _validate_duplicate_identity_source(block, freeze)
+    row_ids = _row_game_ids(maps, "maps")
+    if row_ids.duplicated().any():
+        raise FutureValueTrainingError("raw maps contain duplicate canonical game IDs")
+    rows_by_id: dict[str, Mapping[str, Any]] = {
+        str(game_id): dict(row)
+        for game_id, (_, row) in zip(row_ids, maps.iterrows())
+    }
+    accepted = freeze.get("accepted_census")
+    if not isinstance(accepted, Mapping):
+        raise FutureValueTrainingError("source freeze accepted census is invalid")
+    excluded = set(canonical_game_ids(accepted.get("excluded_game_ids") or ()))
+    output: list[dict[str, Any]] = []
+    for mapping in block["mappings"]:
+        bridge_id = str(mapping["bridge_game_id"])
+        survivor_id = str(mapping["annual_survivor_game_id"])
+        if bridge_id not in rows_by_id or survivor_id not in rows_by_id:
+            raise FutureValueTrainingError(
+                "duplicate resolution IDs are missing from raw maps"
+            )
+        if bridge_id not in excluded:
+            raise FutureValueTrainingError("duplicate resolution bridge is not excluded")
+        if survivor_id in excluded:
+            raise FutureValueTrainingError("duplicate resolution survivor is excluded")
+        bridge_row = mapping.get("bridge_source_row", mapping.get("bridge_row"))
+        survivor_row = mapping.get(
+            "annual_survivor_source_row",
+            mapping.get("annual_source_row", mapping.get("survivor_row")),
+        )
+        if not isinstance(bridge_row, Mapping) or not isinstance(survivor_row, Mapping):
+            raise FutureValueTrainingError("duplicate resolution source rows are missing")
+        if _duplicate_row_id(bridge_row) != bridge_id:
+            raise FutureValueTrainingError("duplicate resolution bridge source row ID changed")
+        if _duplicate_row_id(survivor_row) != survivor_id:
+            raise FutureValueTrainingError("duplicate resolution survivor source row ID changed")
+        bridge_identity = identity_by_game.get(bridge_id)
+        survivor_identity = identity_by_game.get(survivor_id)
+        if bridge_identity is None or survivor_identity is None:
+            raise FutureValueTrainingError(
+                "duplicate identity artifact is missing one source ID"
+            )
+        if not _duplicate_identities_match(bridge_identity, survivor_identity):
+            raise FutureValueTrainingError(
+                "duplicate identity artifact does not prove one external game"
+            )
+        evidence = mapping.get("evidence")
+        if not isinstance(evidence, Mapping):
+            raise FutureValueTrainingError("duplicate resolution evidence is missing")
+        declared_identity = evidence.get("external_identity", evidence.get("identity"))
+        if not isinstance(declared_identity, Mapping):
+            raise FutureValueTrainingError("duplicate resolution external identity is missing")
+        declared_scoreboard = str(
+            declared_identity.get("scoreboard_game_id")
+            or declared_identity.get("scoreboard_id")
+            or ""
+        ).strip()
+        declared_riot = str(
+            declared_identity.get("scoreboard_riot_platform_game_id")
+            or declared_identity.get("riot_platform_game_id")
+            or ""
+        ).strip()
+        if not _duplicate_identities_match(
+            (declared_scoreboard, declared_riot), bridge_identity
+        ):
+            raise FutureValueTrainingError(
+                "duplicate resolution external identity changed"
+            )
+        _duplicate_semantic_fields(
+            mapping,
+            bridge_row,
+            survivor_row,
+            rows_by_id[bridge_id],
+            rows_by_id[survivor_id],
+        )
+        output.append(
+            {
+                "bridge_game_id": bridge_id,
+                "annual_survivor_game_id": survivor_id,
+                "survivor_rule": mapping["survivor_rule"],
+            }
+        )
+    return {
+        "schema_version": block["schema_version"],
+        "mapping_sha256": str(block["mapping_sha256"]).lower(),
+        "mapping_count": len(output),
+        "bridge_game_ids": [row["bridge_game_id"] for row in output],
+        "annual_survivor_game_ids": [
+            row["annual_survivor_game_id"] for row in output
+        ],
+    }
+
+
+# Private spelling retained for callers which treat source validators as
+# implementation details.
+_validate_duplicate_resolution_block = validate_duplicate_resolution_block
+
+
 def _load_freeze(path: Path) -> dict[str, Any]:
     if not path.is_file() or path.is_symlink():
         raise FutureValueTrainingError("future-value source freeze is missing or unsafe")
@@ -84,7 +691,7 @@ def _load_freeze(path: Path) -> dict[str, Any]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise FutureValueTrainingError("future-value source freeze cannot be read") from error
-    if not isinstance(value, dict) or value.get("schema_version") != FREEZE_SCHEMA_VERSION:
+    if not isinstance(value, dict) or value.get("schema_version") not in _SUPPORTED_FREEZE_SCHEMA_VERSIONS:
         raise FutureValueTrainingError("future-value source freeze schema is invalid")
     if value.get("source_mode") != "oe_only":
         raise FutureValueTrainingError("future-value source freeze is not OE-only")
@@ -128,6 +735,7 @@ def _load_freeze(path: Path) -> dict[str, Any]:
         or re.fullmatch(r"[0-9a-f]{64}", receipt_file_hash, re.I) is None
     ):
         raise FutureValueTrainingError("future-value durable source receipt binding is invalid")
+    _validate_duplicate_resolution_structure(value)
     return value
 
 
@@ -240,6 +848,7 @@ def frozen_census(
         raise FutureValueTrainingError("frozen accepted census is empty") from error
     if raw_census["source_identity_sha256"] != raw_identity:
         raise FutureValueTrainingError("unfiltered source census identity changed")
+    validate_duplicate_resolution_block(maps, freeze)
     excluded = set(canonical_game_ids(contract.get("excluded_game_ids") or ()))
     if not excluded or not excluded.issubset(set(raw_ids)):
         raise FutureValueTrainingError("frozen source exclusions are missing from the raw census")
@@ -1704,8 +2313,13 @@ if __name__ == "__main__":
 __all__ = [
     "CALIBRATION_PRIOR_SCHEMA_VERSION",
     "DEFAULT_FREEZE",
+    "DUPLICATE_RESOLUTION_SCHEMA_VERSION",
+    "FREEZE_SCHEMA_V2_VERSION",
     "FutureValueTrainingError",
+    "KNOWN_DUPLICATE_BRIDGE_GAME_IDS",
+    "duplicate_resolution_mapping_sha256",
     "frozen_census",
+    "validate_duplicate_resolution_block",
     "verify_annual_only",
     "verify_annual_sources",
     "verify_bridge_sources",
