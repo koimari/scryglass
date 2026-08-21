@@ -33,8 +33,13 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss, mean_squared_error, roc_auc_score
 
 from lol_kills.etl.aliases import normalize_team
+from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.research.controlled_draft_contribution import (
     validate_role_matched_champion_swap,
+)
+from lol_kills.v2.tierlists.accepted_census import (
+    canonical_game_ids,
+    identity_sha256,
 )
 
 
@@ -1526,6 +1531,534 @@ def _load_frames(maps_path: Path, players_path: Path, team_path: Path) -> tuple[
     teams["game_uid"] = teams["game_uid"].where(teams["game_uid"].notna(), teams["gameid"])
     teams["game_uid"] = teams["game_uid"].astype(str)
     return maps, players, teams
+
+
+# The full-census builder below is deliberately separate from the older Layer A
+# matrix builder.  Layer A has a locked historical league scope and many wide
+# atom columns.  Draft Score variant work needs one small, source-bound ledger
+# that can cover every accepted map.
+SCALING_LEDGER_SCHEMA = "scryglass:atomized-scaling-feature-ledger:v1"
+SCALING_LEDGER_COLUMNS = tuple(
+    column
+    for checkpoint in CHECKPOINTS
+    for metric in ("gold", "xp")
+    for column in (
+        f"forecast_{metric}_diff_{checkpoint}",
+        f"forecast_{metric}_support_{checkpoint}",
+        f"forecast_{metric}_player_coverage_{checkpoint}",
+        f"forecast_{metric}_available_{checkpoint}",
+        f"forecast_{metric}_missing_{checkpoint}",
+    )
+)
+
+
+def _scaling_frame(value: pd.DataFrame | Path | str, label: str) -> pd.DataFrame:
+    """Read one normalized frame without changing the caller's object."""
+
+    if isinstance(value, pd.DataFrame):
+        return value.copy()
+    path = Path(value)
+    if path.is_symlink() or not path.is_file():
+        raise AtomizedResearchError(f"{label} source is missing or unsafe")
+    if path.suffix.casefold() == ".parquet":
+        return pd.read_parquet(path)
+    if path.suffix.casefold() in {".csv", ".tsv"}:
+        return pd.read_csv(path, sep="\t" if path.suffix.casefold() == ".tsv" else ",")
+    raise AtomizedResearchError(f"{label} source format is unsupported")
+
+
+def _scaling_json_value(value: Any) -> Any:
+    """Convert frame scalars to finite, canonical JSON values."""
+
+    if value is None:
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (list, tuple)):
+        return [_scaling_json_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {
+            str(key): _scaling_json_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    try:
+        missing = bool(pd.isna(value))
+    except (TypeError, ValueError):
+        missing = False
+    if missing:
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _scaling_frame_digest(frame: pd.DataFrame, label: str) -> str:
+    """Hash all normalized row values, including missingness and column names."""
+
+    columns = sorted(str(column) for column in frame.columns if not str(column).startswith("_"))
+    rows: list[dict[str, Any]] = []
+    ordered = frame.sort_values(["_game_id", "date"], kind="stable") if "date" in frame else frame.sort_values(["_game_id"], kind="stable")
+    for row in ordered.to_dict("records"):
+        rows.append(
+            {
+                column: _scaling_json_value(row.get(column))
+                for column in columns
+            }
+        )
+    return _strict_canonical_sha256(
+        {
+            "label": label,
+            "columns": columns,
+            "rows": rows,
+        }
+    )
+
+
+def _scaling_source_receipt(
+    source_receipt: Mapping[str, Any],
+    *,
+    accepted_game_ids: Iterable[Any] | None,
+    source_receipt_sha256: str | None,
+) -> tuple[dict[str, Any], tuple[str, ...], pd.Timestamp]:
+    """Verify the source receipt and return its canonical census and cutoff."""
+
+    if not isinstance(source_receipt, Mapping):
+        raise AtomizedResearchError("scaling ledger needs a source receipt")
+    required = (
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "accepted_game_ids",
+        "receipt_sha256",
+    )
+    if any(field not in source_receipt for field in required):
+        raise AtomizedResearchError("scaling source receipt is incomplete")
+    raw_hash = str(source_receipt.get("receipt_sha256") or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", raw_hash):
+        raise AtomizedResearchError("scaling source receipt hash is invalid")
+    unsigned = {
+        key: value for key, value in source_receipt.items() if key != "receipt_sha256"
+    }
+    try:
+        expected_hash = hashlib.sha256(
+            json.dumps(
+                unsigned,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise AtomizedResearchError("scaling source receipt is not canonical") from exc
+    if expected_hash != raw_hash:
+        raise AtomizedResearchError("scaling source receipt hash does not match payload")
+    if source_receipt_sha256 is not None and str(source_receipt_sha256).lower() != raw_hash:
+        raise AtomizedResearchError("scaling source receipt hash differs from the supplied binding")
+    try:
+        raw_ids = tuple(str(value) for value in source_receipt["accepted_game_ids"])
+    except (TypeError, ValueError) as exc:
+        raise AtomizedResearchError("scaling source receipt game IDs are invalid") from exc
+    canonical_ids = tuple(canonical_game_ids(raw_ids))
+    if (
+        not raw_ids
+        or raw_ids != canonical_ids
+        or int(source_receipt["source_game_count"]) != len(raw_ids)
+        or str(source_receipt["source_identity_sha256"]).lower() != identity_sha256(raw_ids)
+    ):
+        raise AtomizedResearchError("scaling source receipt census identity is invalid")
+    if accepted_game_ids is not None:
+        supplied_ids = tuple(canonical_game_ids(accepted_game_ids))
+        if supplied_ids != raw_ids:
+            raise AtomizedResearchError("scaling accepted census differs from source receipt")
+    try:
+        cutoff = pd.Timestamp(source_receipt["source_as_of"])
+    except (TypeError, ValueError) as exc:
+        raise AtomizedResearchError("scaling source_as_of is invalid") from exc
+    if pd.isna(cutoff) or cutoff.tzinfo is None:
+        raise AtomizedResearchError("scaling source_as_of must include a timezone")
+    return dict(source_receipt), raw_ids, cutoff.tz_convert("UTC")
+
+
+def _scaling_role(value: Any) -> str:
+    token = str(value or "").strip().casefold()
+    role = {
+        "top": "top",
+        "jng": "jng",
+        "jg": "jng",
+        "jung": "jng",
+        "jungle": "jng",
+        "mid": "mid",
+        "middle": "mid",
+        "bot": "bot",
+        "adc": "bot",
+        "bottom": "bot",
+        "carry": "bot",
+        "sup": "sup",
+        "support": "sup",
+        "utility": "sup",
+    }.get(token)
+    if role not in LINEUP_ROLES:
+        raise AtomizedResearchError(f"invalid scaling lineup role {value!r}")
+    return role
+
+
+def _scaling_checkpoint_value(row: Mapping[str, Any], metric: str, checkpoint: int) -> float | None:
+    """Read one player checkpoint difference without filling a missing source."""
+
+    names = (
+        f"{metric}diffat{checkpoint}",
+        f"{metric}_diff_at_{checkpoint}",
+    )
+    fallback = (
+        f"{metric}at{checkpoint}",
+        f"opp_{metric}at{checkpoint}",
+    )
+    present = [name for name in names if name in row]
+    if present:
+        raw = row.get(present[0])
+    elif all(name in row for name in fallback):
+        left = _finite(row.get(fallback[0]))
+        right = _finite(row.get(fallback[1]))
+        if left is None or right is None:
+            return None
+        return left - right
+    else:
+        raise AtomizedResearchError(
+            f"scaling source misses {metric} checkpoint {checkpoint}"
+        )
+    if raw is None:
+        return None
+    try:
+        if bool(pd.isna(raw)):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise AtomizedResearchError(
+            f"scaling {metric} checkpoint {checkpoint} is invalid"
+        ) from exc
+    if not math.isfinite(value):
+        raise AtomizedResearchError(
+            f"scaling {metric} checkpoint {checkpoint} is non-finite"
+        )
+    return value
+
+
+def _scaling_lineup(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    game_id: str,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Normalize one exact five-player side per side."""
+
+    if len(rows) != 10:
+        raise AtomizedResearchError(f"scaling map {game_id} does not have ten players")
+    normalized: list[dict[str, Any]] = []
+    seen_slots: set[tuple[str, str]] = set()
+    seen_players: set[str] = set()
+    teams: dict[str, str] = {}
+    for raw in rows:
+        side = _side(raw.get("side")).casefold()
+        role = _scaling_role(raw.get("position") or raw.get("role"))
+        player = _player_id(raw)
+        team = _team_id(raw)
+        champion = str(raw.get("champion") or raw.get("champion_name") or "").strip()
+        if not champion:
+            raise AtomizedResearchError(f"scaling map {game_id} has a blank champion")
+        if (side, role) in seen_slots:
+            raise AtomizedResearchError(f"scaling map {game_id} has a duplicate role")
+        if player in seen_players:
+            raise AtomizedResearchError(f"scaling map {game_id} has a duplicate player")
+        if side in teams and teams[side] != team:
+            raise AtomizedResearchError(f"scaling map {game_id} has mixed side teams")
+        seen_slots.add((side, role))
+        seen_players.add(player)
+        teams[side] = team
+        normalized.append({**dict(raw), "side": side, "position": role, "playerid": player, "teamid": team, "champion": champion})
+    expected = {(side, role) for side in ("blue", "red") for role in LINEUP_ROLES}
+    if seen_slots != expected or set(teams) != {"blue", "red"} or teams["blue"] == teams["red"]:
+        raise AtomizedResearchError(f"scaling map {game_id} does not have two exact five-player sides")
+    return normalized, teams
+
+
+def _scaling_topology(gold: Sequence[float | None], xp: Sequence[float | None], available: bool) -> dict[str, Any]:
+    """Use the shared deterministic phase-shape contract without a module cycle."""
+
+    try:
+        from lol_kills.research.future_phase_curve import phase_curve_measures, phase_shape_features
+    except (ImportError, AttributeError) as exc:
+        raise AtomizedResearchError("phase topology producer is unavailable") from exc
+    output = dict(phase_shape_features(gold, xp, available=available))
+    measures = phase_curve_measures(gold, xp)
+    output.update(
+        {
+            "forecast_scaling_index": measures.get("scaling_index"),
+            "forecast_snowball_index": measures.get("snowball_index"),
+        }
+    )
+    return output
+
+
+def build_scaling_feature_ledger(
+    maps: pd.DataFrame | Path | str | Mapping[str, Any],
+    players: pd.DataFrame | Path | str | None = None,
+    teams: pd.DataFrame | Path | str | None = None,
+    *,
+    source_receipt: Mapping[str, Any],
+    accepted_game_ids: Iterable[Any] | None = None,
+    source_receipt_sha256: str | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Build the slim, full-census, strictly prior checkpoint forecast ledger.
+
+    A map receives forecasts before any map at that timestamp updates history.
+    The current map's checkpoint values are update-only.  Missing cell values
+    stay missing and produce explicit availability flags.  The returned frame
+    has one row per accepted map and contains no current checkpoint targets.
+    """
+
+    if players is None and teams is None and isinstance(maps, Mapping):
+        frames = maps
+        maps = frames.get("maps") if frames.get("maps") is not None else frames.get("maps_frame")
+        players = frames.get("players") if frames.get("players") is not None else frames.get("players_frame")
+        teams = frames.get("teams") if frames.get("teams") is not None else frames.get("teams_frame")
+    if maps is None or players is None or teams is None:
+        raise AtomizedResearchError("scaling ledger needs maps, players, and teams")
+    bound_source, accepted_ids, cutoff = _scaling_source_receipt(
+        source_receipt,
+        accepted_game_ids=accepted_game_ids,
+        source_receipt_sha256=source_receipt_sha256,
+    )
+    maps_frame = _scaling_frame(maps, "maps")
+    players_frame = _scaling_frame(players, "players")
+    teams_frame = _scaling_frame(teams, "teams")
+
+    def add_game_id(frame: pd.DataFrame, label: str) -> pd.DataFrame:
+        value = frame.copy()
+        source_column = "game_uid" if "game_uid" in value.columns else (
+            "gameid" if "gameid" in value.columns else "game_id" if "game_id" in value.columns else None
+        )
+        if source_column is None:
+            raise AtomizedResearchError(f"{label} has no canonical game ID column")
+        fallback = value["gameid"] if "gameid" in value.columns else None
+        value["_game_id"] = [
+            canonical_source_game_key(raw, fallback.loc[index] if fallback is not None else None)
+            for index, raw in value[source_column].items()
+        ]
+        if value["_game_id"].eq("").any():
+            raise AtomizedResearchError(f"{label} contains an empty game ID")
+        return value
+
+    maps_frame = add_game_id(maps_frame, "maps")
+    players_frame = add_game_id(players_frame, "players")
+    teams_frame = add_game_id(teams_frame, "teams")
+    accepted_set = set(accepted_ids)
+    for label, frame in (("maps", maps_frame), ("players", players_frame), ("teams", teams_frame)):
+        ids = set(frame["_game_id"].astype(str))
+        if ids != accepted_set:
+            missing = sorted(accepted_set - ids)
+            extra = sorted(ids - accepted_set)
+            raise AtomizedResearchError(
+                f"{label} census mismatch missing={len(missing)} extra={len(extra)}"
+            )
+    if len(maps_frame) != len(accepted_ids) or maps_frame["_game_id"].duplicated().any():
+        raise AtomizedResearchError("maps must contain exactly one row per accepted game")
+    maps_frame["date"] = pd.to_datetime(maps_frame.get("date"), utc=True, errors="coerce")
+    if maps_frame["date"].isna().any() or maps_frame["date"].gt(cutoff).any():
+        raise AtomizedResearchError("maps contain an invalid or post-census date")
+    # Player and team dates are bound to the map date.  Their source dates are
+    # not used for ordering and cannot silently create a second chronology.
+    map_dates = maps_frame.set_index("_game_id")["date"]
+    players_frame["date"] = players_frame["_game_id"].map(map_dates)
+    teams_frame["date"] = teams_frame["_game_id"].map(map_dates)
+    source_frame_digests = {
+        "maps": _scaling_frame_digest(maps_frame, "maps"),
+        "players": _scaling_frame_digest(players_frame, "players"),
+        "teams": _scaling_frame_digest(teams_frame, "teams"),
+    }
+    source_row_digest = _strict_canonical_sha256(source_frame_digests)
+    expected_row_digest = bound_source.get("source_row_value_sha256") or bound_source.get("row_value_sha256")
+    if expected_row_digest is not None and str(expected_row_digest).lower() != source_row_digest:
+        raise AtomizedResearchError("scaling source row values differ from the receipt")
+    expected_frame_digests = bound_source.get("source_frame_sha256") or bound_source.get("frame_digests")
+    if isinstance(expected_frame_digests, Mapping) and any(
+        str(expected_frame_digests.get(label) or "").lower() != digest
+        for label, digest in source_frame_digests.items()
+        if label in expected_frame_digests
+    ):
+        raise AtomizedResearchError("scaling source frame values differ from the receipt")
+
+    players_by_game = {str(key): value for key, value in players_frame.groupby("_game_id", sort=False)}
+    teams_by_game = {str(key): value for key, value in teams_frame.groupby("_game_id", sort=False)}
+    states: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    champion_states: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    output: list[dict[str, Any]] = []
+    batch_receipts: dict[str, str] = {}
+    ordered_maps = maps_frame.sort_values(["date", "_game_id"], kind="stable")
+    for timestamp, same_time in ordered_maps.groupby("date", sort=False):
+        game_ids = sorted(str(value) for value in same_time["_game_id"])
+        expected_batch_receipt = _rating_batch_receipt_sha256(
+            timestamp=timestamp,
+            game_ids=game_ids,
+            policy=RATING_BATCH_POLICY,
+        )
+        batch_receipts[pd.Timestamp(timestamp).isoformat()] = expected_batch_receipt
+        pending: list[tuple[str, list[dict[str, Any]]]] = []
+        for map_row in same_time.to_dict("records"):
+            game_id = str(map_row["_game_id"])
+            player_group = players_by_game.get(game_id)
+            team_group = teams_by_game.get(game_id)
+            if player_group is None or team_group is None or len(team_group) != 2:
+                raise AtomizedResearchError(f"scaling map {game_id} has incomplete source rows")
+            lineup, player_teams = _scaling_lineup(player_group.to_dict("records"), game_id=game_id)
+            team_sides: dict[str, str] = {}
+            for raw_team in team_group.to_dict("records"):
+                side = _side(raw_team.get("side")).casefold()
+                team = _team_id(raw_team)
+                if side in team_sides or team in team_sides.values():
+                    raise AtomizedResearchError(f"scaling map {game_id} has duplicate team side")
+                team_sides[side] = team
+            if set(team_sides) != {"blue", "red"} or team_sides != player_teams:
+                raise AtomizedResearchError(f"scaling map {game_id} team and player identities differ")
+            by_side = {
+                side: [row for row in lineup if row["side"] == side]
+                for side in ("blue", "red")
+            }
+            feature_row: dict[str, Any] = {
+                "game_id": game_id,
+                "date": pd.Timestamp(timestamp).tz_convert("UTC"),
+            }
+            phase_available = True
+            gold_values: list[float] = []
+            xp_values: list[float] = []
+            for checkpoint in CHECKPOINTS:
+                for metric in ("gold", "xp"):
+                    blue_keys = [
+                        (_player_id(row), str(row["champion"]), checkpoint, metric)
+                        for row in by_side["blue"]
+                    ]
+                    red_keys = [
+                        (_player_id(row), str(row["champion"]), checkpoint, metric)
+                        for row in by_side["red"]
+                    ]
+                    blue_fallback = [
+                        (str(row["champion"]), checkpoint, metric)
+                        for row in by_side["blue"]
+                    ]
+                    red_fallback = [
+                        (str(row["champion"]), checkpoint, metric)
+                        for row in by_side["red"]
+                    ]
+                    blue_total, blue_support, blue_coverage, blue_missing = _equal_weight_team_forecast(
+                        states,
+                        blue_keys,
+                        fallback_state=champion_states,
+                        fallback_keys=blue_fallback,
+                    )
+                    red_total, red_support, red_coverage, red_missing = _equal_weight_team_forecast(
+                        states,
+                        red_keys,
+                        fallback_state=champion_states,
+                        fallback_keys=red_fallback,
+                    )
+                    available = not (blue_missing or red_missing)
+                    phase_available = phase_available and available
+                    difference = float(blue_total - red_total) if available else 0.0
+                    feature_row[f"forecast_{metric}_diff_{checkpoint}"] = difference
+                    feature_row[f"forecast_{metric}_support_{checkpoint}"] = int(min(blue_support, red_support))
+                    feature_row[f"forecast_{metric}_player_coverage_{checkpoint}"] = float(
+                        min(blue_coverage, red_coverage)
+                    )
+                    feature_row[f"forecast_{metric}_available_{checkpoint}"] = float(available)
+                    feature_row[f"forecast_{metric}_missing_{checkpoint}"] = float(not available)
+                    if metric == "gold":
+                        gold_values.append(difference)
+                    else:
+                        xp_values.append(difference)
+            feature_row.update(_scaling_topology(gold_values, xp_values, phase_available))
+            output.append(feature_row)
+            pending.append((game_id, lineup))
+
+        # Strict prior policy: every map at this timestamp scores before any
+        # map at this timestamp updates the shared histories.
+        for game_id, lineup in pending:
+            for row in lineup:
+                player = _player_id(row)
+                champion = str(row["champion"])
+                for checkpoint in CHECKPOINTS:
+                    for metric in ("gold", "xp"):
+                        value = _scaling_checkpoint_value(row, metric, checkpoint)
+                        if value is None:
+                            continue
+                        states[(player, champion, checkpoint, metric)].add(value)
+                        champion_states[(champion, checkpoint, metric)].add(value)
+
+    ledger = pd.DataFrame(output).sort_values(["date", "game_id"], kind="stable").reset_index(drop=True)
+    if len(ledger) != len(accepted_ids) or set(ledger["game_id"].astype(str)) != accepted_set:
+        raise AtomizedResearchError("scaling ledger output census mismatch")
+    forbidden = {
+        column
+        for column in ledger.columns
+        if column.startswith(("target_", "observed_", "current_"))
+        or re.search(r"(?:^|_)(?:gold|xp)at(?:10|15|20|25)$", column)
+    }
+    if forbidden:
+        raise AtomizedResearchError(f"scaling ledger emitted current-state fields: {sorted(forbidden)}")
+    output_rows = [
+        {
+            str(column): _scaling_json_value(value)
+            for column, value in row.items()
+        }
+        for row in ledger.to_dict("records")
+    ]
+    row_value_digest = _strict_canonical_sha256(output_rows)
+    implementation_sha = sha256_path(Path(__file__))
+    receipt = {
+        "schema_version": SCALING_LEDGER_SCHEMA,
+        "status": "research_only",
+        "authority": False,
+        "public_authority": False,
+        "source_receipt_sha256": str(bound_source["receipt_sha256"]).lower(),
+        "source_identity_sha256": str(bound_source["source_identity_sha256"]).lower(),
+        "source_as_of": pd.Timestamp(cutoff).isoformat().replace("+00:00", "Z"),
+        "accepted_game_count": len(accepted_ids),
+        "accepted_game_ids": list(accepted_ids),
+        "implementation_sha256": implementation_sha,
+        "source_frame_sha256": source_frame_digests,
+        "source_row_value_sha256": source_row_digest,
+        "row_value_digest_sha256": row_value_digest,
+        "same_timestamp_policy": RATING_BATCH_POLICY,
+        "same_timestamp_batching": "score_all_maps_then_update_all_maps",
+        "same_timestamp_batch_receipts": batch_receipts,
+        "columns": list(ledger.columns),
+        "rows": len(ledger),
+        "checkpoint_targets": "update_only_after_current_map_scoring",
+    }
+    receipt["receipt_sha256"] = _strict_canonical_sha256(receipt)
+    return ledger, receipt
+
+
+def build_scaling_feature_ledger_from_frames(
+    frames: Mapping[str, Any],
+    *,
+    source_receipt: Mapping[str, Any],
+    accepted_game_ids: Iterable[Any] | None = None,
+    source_receipt_sha256: str | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Mapping-based entry point for callers that already hold normalized frames."""
+
+    return build_scaling_feature_ledger(
+        frames,
+        source_receipt=source_receipt,
+        accepted_game_ids=accepted_game_ids,
+        source_receipt_sha256=source_receipt_sha256,
+    )
 
 
 def _controlled_feature_lineup(
