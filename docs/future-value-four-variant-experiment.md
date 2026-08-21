@@ -47,6 +47,25 @@ The evaluator uses non-overlapping chronological validation intervals and whole-
 
 All four variants must share the same validation game IDs. The report includes log loss, Brier score, AUC, calibration, side-swap error, coverage, missingness, patch transfer, regional transfer, roster-change slices, and series-boundary evidence.
 
+### Calibration prelude contract
+
+Build the strict-prior prelude with the later outer evaluation start cutoff. The cutoff must be a UTC ISO-8601 timestamp. The prelude validation interval must end strictly before this timestamp.
+
+```bash
+python3 -m benchmarks.build_future_value_calibration_prelude \
+  --source-root <accepted-source-root> \
+  --source-receipt <accepted-source-receipt.json> \
+  --crosswalk <series-crosswalk.json> \
+  --crosswalk-receipt <series-crosswalk-receipt.json> \
+  --crosswalk-receipt-file-sha256 <sha256> \
+  --producer-root <empty-temporary-root> \
+  --outer-evaluation-start <outer-evaluation-start-utc> \
+  --fold-count 8 \
+  --output <calibration-prelude.json>
+```
+
+The receipt stores the normalized cutoff in `fold_protocol.outer_evaluation_start`. A prelude with a validation end at or after the cutoff fails before producer artifacts are written.
+
 The downstream report measures:
 
 - player and team value changes

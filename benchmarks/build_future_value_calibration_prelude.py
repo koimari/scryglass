@@ -5,6 +5,11 @@ on the first whole-series training fold and records only that fold's held-out
 raw logits.  The rows are suitable as strict-prior inputs to the later
 three-fold evaluation.
 
+The caller must provide the later evaluation's UTC start cutoff with
+``--outer-evaluation-start``.  The prelude validation interval must end
+strictly before that cutoff.  This keeps a prelude from entering the
+evaluation interval by accident.
+
 The command keeps producer artifacts outside the repository.  The receipt
 binds their paths and hashes, the frozen source, the series crosswalk, and
 the model producer code.
@@ -47,6 +52,41 @@ VARIANT_NAMES = tuple(variant.value for variant in RATING_VARIANT_ORDER)
 
 class PreludeError(RuntimeError):
     """The calibration prelude cannot be built safely."""
+
+
+def _utc_timestamp(value: object, label: str) -> pd.Timestamp:
+    """Parse one explicit UTC timestamp used by the prelude contract."""
+
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError) as error:
+        raise PreludeError(f"{label} is invalid") from error
+    if pd.isna(timestamp) or timestamp.tzinfo is None:
+        raise PreludeError(f"{label} must include a UTC timezone")
+    return timestamp.tz_convert("UTC")
+
+
+def _validate_outer_evaluation_cutoff(
+    prelude_fold: Mapping[str, Any],
+    *,
+    outer_evaluation_start: object,
+) -> pd.Timestamp:
+    """Require the prelude validation interval to precede evaluation."""
+
+    evaluation_start = _utc_timestamp(
+        outer_evaluation_start,
+        "outer evaluation start cutoff",
+    )
+    validation_end = _utc_timestamp(
+        prelude_fold.get("validation_end"),
+        "prelude validation end",
+    )
+    if validation_end >= evaluation_start:
+        raise PreludeError(
+            "prelude validation end must be strictly earlier than the outer "
+            "evaluation start cutoff"
+        )
+    return evaluation_start
 
 
 def _canonical(value: object) -> bytes:
@@ -385,6 +425,7 @@ def build_prelude(
     crosswalk_receipt_path: Path,
     crosswalk_receipt_file_sha256: str,
     producer_root: Path,
+    outer_evaluation_start: str | pd.Timestamp,
     fold_count: int = 4,
 ) -> dict[str, Any]:
     source_receipt = _load_json(source_receipt_path, "source receipt")
@@ -416,6 +457,10 @@ def build_prelude(
     if not folds or int(folds[0]["fold"]) != 1:
         raise PreludeError("prelude chronological fold is missing")
     prelude_fold = folds[0]
+    evaluation_start = _validate_outer_evaluation_cutoff(
+        prelude_fold,
+        outer_evaluation_start=outer_evaluation_start,
+    )
     identity = model_frame[["game_id", "date", "series_id"]].copy()
     series_by_game = dict(
         zip(identity["game_id"].astype(str), identity["series_id"].astype(str))
@@ -518,6 +563,9 @@ def build_prelude(
         "fold_protocol": {
             "fold_count": int(fold_count),
             "prelude_fold": 0,
+            "outer_evaluation_start": evaluation_start.isoformat().replace(
+                "+00:00", "Z"
+            ),
             "validation_interval": {
                 "train_end": str(prelude_fold["train_end"]),
                 "validation_start": str(prelude_fold["validation_start"]),
@@ -573,6 +621,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--crosswalk-receipt", required=True, type=Path)
     parser.add_argument("--crosswalk-receipt-file-sha256", required=True)
     parser.add_argument("--producer-root", required=True, type=Path)
+    parser.add_argument(
+        "--outer-evaluation-start",
+        required=True,
+        help="UTC ISO-8601 start cutoff for the later outer evaluation",
+    )
     parser.add_argument("--fold-count", type=int, default=4)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
@@ -590,6 +643,7 @@ def main(argv: list[str] | None = None) -> int:
         crosswalk_receipt_path=args.crosswalk_receipt.resolve(),
         crosswalk_receipt_file_sha256=str(args.crosswalk_receipt_file_sha256),
         producer_root=args.producer_root.resolve(),
+        outer_evaluation_start=str(args.outer_evaluation_start),
         fold_count=int(args.fold_count),
     )
     output_path.write_bytes(_canonical(payload))
