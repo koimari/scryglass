@@ -809,6 +809,48 @@ def test_future_component_value_mutation_is_rejected_by_ledger_hash(tmp_path: Pa
         _load_future(model_path, 1)
 
 
+def test_future_source_uses_variant_accepted_census(tmp_path: Path) -> None:
+    game_ids = [f"g{i}" for i in range(1, 7)]
+    source_path, source_root = _source(tmp_path, game_ids)
+    source = json.loads(source_path.read_text())
+    _, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
+    model_path = evaluation / "future_player_form" / "model.json"
+    model = json.loads(model_path.read_text())
+    model["source"]["normalized_source_files"] = source["source_files"]
+    authority = {
+        "research_only": True,
+        "public_player_rating": False,
+        "public_team_rating": False,
+        "public_probability": False,
+        "promotion": False,
+        "deployment": False,
+        "recommendation": False,
+        "odds": False,
+        "expected_value": False,
+        "betting": False,
+    }
+    model["authority"] = authority
+    payload = model["variants"]["future_player_form"]
+    payload["authority"] = authority
+    payload["source"] = {
+        "source_as_of": source["source_as_of"],
+        "source_game_count": source["source_game_count"],
+        "source_identity_sha256": source["source_identity_sha256"],
+        "source_receipt_sha256": source["receipt_sha256"],
+        "accepted_game_ids": game_ids,
+    }
+    _write_json(model_path, model)
+
+    frame, _ = _load_future(model_path, 1, source=source)
+    assert set(frame["game_id"]) == set(game_ids)
+
+    model = json.loads(model_path.read_text())
+    model["variants"]["future_player_form"]["source"]["accepted_game_ids"] = game_ids[:-1]
+    _write_json(model_path, model)
+    with pytest.raises(FourWayDraftScoreError, match="accepted census changed"):
+        _load_future(model_path, 1, source=source)
+
+
 def test_source_receipt_without_source_files_is_rejected_even_when_resealed(tmp_path: Path) -> None:
     source_path, _ = _source(tmp_path, ["g1", "g2"])
     source = json.loads(source_path.read_text())

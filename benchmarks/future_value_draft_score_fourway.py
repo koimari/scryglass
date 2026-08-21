@@ -1016,6 +1016,12 @@ def _load_future(
     if require_receipt and expected_artifact_sha256 is None:
         raise FourWayDraftScoreError("expected future player form model hash is required")
     model = _load_json(model_path, "future player form evaluation")
+    variants = model.get("variants")
+    if not isinstance(variants, Mapping) or "future_player_form" not in variants:
+        raise FourWayDraftScoreError("future player form evaluation is missing")
+    payload = variants["future_player_form"]
+    if not isinstance(payload, Mapping):
+        raise FourWayDraftScoreError("future player form variant is invalid")
     source_files_present = isinstance(source, Mapping) and isinstance(source.get("source_files"), Mapping)
     model_source = model.get("source")
     if source is not None and source_files_present:
@@ -1025,7 +1031,14 @@ def _load_future(
             expected = source.get("receipt_sha256") if field == "source_receipt_sha256" else source.get(field)
             if str(model_source.get(field)) != str(expected):
                 raise FourWayDraftScoreError(f"future player form source binding changed: {field}")
-        model_ids = {str(value) for value in model_source.get("accepted_game_ids", [])}
+        variant_source = payload.get("source")
+        if not isinstance(variant_source, Mapping):
+            raise FourWayDraftScoreError("future player form variant source binding is missing")
+        for field in ("source_as_of", "source_game_count", "source_identity_sha256", "source_receipt_sha256"):
+            expected = source.get("receipt_sha256") if field == "source_receipt_sha256" else source.get(field)
+            if str(variant_source.get(field)) != str(expected):
+                raise FourWayDraftScoreError(f"future player form variant source binding changed: {field}")
+        model_ids = {str(value) for value in variant_source.get("accepted_game_ids", [])}
         if model_ids != {str(value) for value in source.get("accepted_game_ids", [])}:
             raise FourWayDraftScoreError("future player form accepted census changed")
         normalized = model_source.get("normalized_source_files")
@@ -1046,10 +1059,6 @@ def _load_future(
         or any(model_authority.get(field) is not False for field in ("public_player_rating", "public_team_rating", "public_probability", "promotion", "deployment"))
     ):
         raise FourWayDraftScoreError("future player form model authority changed")
-    variants = model.get("variants")
-    if not isinstance(variants, Mapping) or "future_player_form" not in variants:
-        raise FourWayDraftScoreError("future player form evaluation is missing")
-    payload = variants["future_player_form"]
     if source_files_present:
         payload_authority = payload.get("authority")
         if (
