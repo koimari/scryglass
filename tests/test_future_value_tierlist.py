@@ -76,6 +76,42 @@ def test_trust_manifest_requires_external_file_hash(tmp_path: Path) -> None:
         load_trust_manifest(path, expected_raw_sha256=raw_hash)
 
 
+def test_v11_shadow_freeze_binds_the_completed_evaluation_files() -> None:
+    path = REPO_ROOT / "data/lol/v2/evaluation/future-value-tierlist-shadow-freeze-v2.json"
+    expected_hash = (
+        "782d86edc3b80aeba59c68239c3d35d7d1382567b38202ff08618c77c9b4a3b2"
+    )
+    assert sha256_path(path) == expected_hash
+    trust = load_trust_manifest(path, expected_raw_sha256=expected_hash)
+    assert trust["source"]["source_game_count"] == 17764
+    assert trust["source"]["model_eligible_game_count"] == 16553
+    assert trust["source"]["source_identity_sha256"] == (
+        "591820cb87bcb847da449af11349c9f75f4993a9295998cd46db17e1535c5cfb"
+    )
+    assert trust["source"]["model_eligible_identity_sha256"] == (
+        "c2804529b489ea68a05aef4bdc594ba6babb97c32fa19e2b90a589fba693a044"
+    )
+    assert trust["evaluations"] == {
+        "both": {
+            "locator": "both/model.json",
+            "raw_sha256": "1e4fc6b13f2d80cc73e982acffbdae8ff1f4a239ed0cbb95b55e0ec28a7afbcc",
+        },
+        "current_only": {
+            "locator": "current_only/model.json",
+            "raw_sha256": "1d6ac7dc2b4809d02e6aa55b651f09faa1aa38be56c0da2c70792e895e1109e4",
+        },
+        "future_player_form": {
+            "locator": "future_player_form/model.json",
+            "raw_sha256": "39ddc0adebd18b2a6b29e26c3e14190db45a9690dc13f996dbd708acd8509f0c",
+        },
+        "scaling_curve": {
+            "locator": "scaling_curve/model.json",
+            "raw_sha256": "fdc0d379dbdb3462bc1021f56725d4564ddfc811467d5b061114cc1d64069aa5",
+        },
+    }
+    assert fourway_benchmark.PINNED_TRUST_MANIFEST_RAW_SHA256 == expected_hash
+
+
 def test_implementation_binding_rejects_a_dirty_tree(monkeypatch: pytest.MonkeyPatch) -> None:
     real_run = subprocess.run
 

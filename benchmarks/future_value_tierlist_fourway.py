@@ -18,7 +18,6 @@ from lol_kills.research.future_value_rating import (
 )
 from lol_kills.research.future_value_tierlist import (
     AUTHORITY,
-    PINNED_TRUST_MANIFEST_RAW_SHA256,
     VARIANTS,
     FutureValueTierListError,
     build_fourway_diff,
@@ -31,6 +30,13 @@ from lol_kills.research.future_value_tierlist import (
     validate_common_prediction_universe,
 )
 from lol_kills.v2.tierlists.pooled_candidate import build_pooled_candidate
+
+
+# This benchmark has its own external freeze for the v11 evaluation files.
+# The shared Tier module keeps the earlier freeze for other consumers.
+PINNED_TRUST_MANIFEST_RAW_SHA256 = (
+    "782d86edc3b80aeba59c68239c3d35d7d1382567b38202ff08618c77c9b4a3b2"
+)
 
 
 def _load_json(path: Path, label: str) -> dict[str, Any]:
