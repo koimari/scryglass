@@ -295,7 +295,10 @@ def _partition_payload(artifact: Mapping[str, Any]) -> dict[str, Any]:
     missing = [name for name in required if name not in partition]
     if missing:
         raise PhaseRebuildError("phase series partition is incomplete: " + ", ".join(missing))
-    if artifact.get("cross_model_series_partition", {}).get("status") != "comparable":
+    cross_model = artifact.get("cross_model_series_partition")
+    if not isinstance(cross_model, Mapping):
+        raise PhaseRebuildError("phase artifact has no cross-model partition evidence")
+    if cross_model.get("status") != "comparable":
         raise PhaseRebuildError("phase artifact did not bind a comparable shared partition")
     if not partition.get("reference_assignment_match"):
         raise PhaseRebuildError("phase artifact did not match the reference assignments")
@@ -308,6 +311,16 @@ def _partition_payload(artifact: Mapping[str, Any]) -> dict[str, Any]:
     reference_assignment = str(partition["reference_assignment_sha256"]).lower()
     if len(reference_assignment) != 64:
         raise PhaseRebuildError("phase artifact reference assignment hash is invalid")
+    if bool(cross_model.get("proxy_authority_blocker")) is not bool(
+        partition["proxy_authority_blocker"]
+    ):
+        raise PhaseRebuildError(
+            "phase artifact cross-model proxy blocker differs from partition evidence"
+        )
+    if partition["proxy_authority_blocker"] is not True:
+        raise PhaseRebuildError(
+            "phase artifact lost the retained proxy authority blocker"
+        )
     return dict(partition)
 
 
@@ -554,6 +567,9 @@ def rebuild_phase_artifacts(
         "reference_assignment_verified": bool(
             fit_partition["reference_assignment_verified"]
         ),
+        "proxy_authority_blocker": bool(
+            fit_partition["proxy_authority_blocker"]
+        ),
     }
     source_payload = {
         "source_as_of": receipt["source_as_of"],
@@ -639,6 +655,7 @@ def rebuild_phase_artifacts(
             "reference_assignment_verified"
         ],
         "series_partition_proxy_authority_blocker": fit_partition["proxy_authority_blocker"],
+        "proxy_authority_blocker": bool(fit_partition["proxy_authority_blocker"]),
         "feature_columns": list(FEATURE_COLUMNS),
         "feature_family": fit["feature_family"],
         "curve_definitions": fit["curve_definitions"],
@@ -702,6 +719,9 @@ def rebuild_phase_artifacts(
             "reference_assignment_verified"
         ],
         "series_partition_proxy_authority_blocker": evaluation_partition["proxy_authority_blocker"],
+        "proxy_authority_blocker": bool(
+            evaluation_partition["proxy_authority_blocker"]
+        ),
         "blockers": sorted(set(candidate_blockers)),
         "numerical_warnings": numeric_warnings,
     }
@@ -741,6 +761,8 @@ def rebuild_phase_artifacts(
             "validation_folds_valid": validation_folds_valid,
         },
         "partition": fit_partition,
+        "cross_model_series_partition": fit["cross_model_series_partition"],
+        "proxy_authority_blocker": bool(fit_partition["proxy_authority_blocker"]),
         "numerical_warnings": numeric_warnings,
         "outputs": {
             "candidate": candidate_reference,

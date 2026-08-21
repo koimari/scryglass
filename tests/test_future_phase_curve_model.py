@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import lol_kills.research.future_value_rating as future_value_rating
+from benchmarks.rebuild_future_phase import _partition_payload
 
 from lol_kills.research.future_phase_curve import (
     FuturePhaseCurveError,
@@ -691,6 +692,8 @@ def test_verified_mixed_partition_binds_hashes_and_keeps_proxy_blocker(
         "model_eligible_game_ids"
     ]
     assert artifact["cross_model_series_partition"]["status"] == "non_comparable"
+    assert artifact["cross_model_series_partition"]["proxy_authority_blocker"] is True
+    assert artifact["series_partition"]["proxy_authority_blocker"] is True
     assert artifact["series_partition_proxy_authority_blocker"] is True
     assert artifact["series_identity"]["authoritative"] is False
     assert artifact["series_identity"]["blockers"]
@@ -714,6 +717,8 @@ def test_verified_mixed_partition_evaluation_uses_shared_series_clusters(
     )
     assert report["cluster_column"] == "series_id"
     assert report["cross_model_series_partition"]["status"] == "non_comparable"
+    assert report["cross_model_series_partition"]["proxy_authority_blocker"] is True
+    assert report["series_partition"]["proxy_authority_blocker"] is True
     assert report["series_partition_mapping_sha256"] == "a" * 64
     assert report["series_partition_eligible_game_count"] == len(frame)
     assert report["series_identity"]["authoritative"] is False
@@ -771,6 +776,9 @@ def test_verified_mixed_partition_requires_full_reference_digest(
         series_partition_assignment_sha256=expected_eligible,
     )
     assert artifact["cross_model_series_partition"]["status"] == "comparable"
+    assert artifact["cross_model_series_partition"]["proxy_authority_blocker"] is True
+    assert artifact["series_partition"]["proxy_authority_blocker"] is True
+    assert _partition_payload(artifact)["proxy_authority_blocker"] is True
     assert artifact["series_partition_reference_game_count"] == len(reference_frame)
     assert artifact["series_partition_reference_identity_sha256"] == identity_sha256(
         reference_frame["game_uid"].tolist()

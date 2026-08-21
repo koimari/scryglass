@@ -616,6 +616,9 @@ def _series_identity_report(frame: pd.DataFrame) -> dict[str, Any]:
             "reference_assignment_match": partition_binding.get(
                 "reference_assignment_match", False
             ),
+            "proxy_authority_blocker": bool(
+                partition_binding.get("proxy_authority_blocker", False)
+            ),
             "key_fields": list(
                 partition_binding.get("key_fields")
                 or MIXED_SERIES_PARTITION_KEY_FIELDS
