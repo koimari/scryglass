@@ -29,11 +29,18 @@ from lol_kills.research.future_value_downstream import (
     FutureValueDownstreamError,
     SOURCE_FIELDS,
     SOURCE_RECEIPT_SCHEMA_VERSION,
-    SOURCE_RECEIPT_STATUS,
     _validate_source_receipt,
     required_artifact_specs,
 )
 from lol_kills.research.future_value_rating import RatingVariant
+from lol_kills.research.future_value_rating import FUTURE_PLAYER_FORM_SIDE_FEATURES
+from lol_kills.research.future_value_draft_score import (
+    CURVE_ATOM_INTERACTION_FEATURES,
+    CURRENT_RATING_SIGNED_MAP_FEATURES,
+    PHASE_RAW_FEATURES,
+    PHASE_SHAPE_FEATURES,
+    STATIC_COMPOSITION_FEATURES,
+)
 
 
 SCHEMA_VERSION = "scryglass:future-value-downstream-diff:v1"
@@ -48,7 +55,6 @@ VARIANT_NAMES = (
 
 FUTURE_FORM_FAMILY = "future_player_form"
 SCALING_FAMILY = "scaling_curve"
-CURRENT_FAMILY = "current_rating"
 STATIC_COMPOSITION_COMPONENTS = (
     "base",
     "synergy",
@@ -59,7 +65,78 @@ STATIC_COMPOSITION_COMPONENTS = (
     "archetype_interactions",
     "composition",
 )
-DRAFT_SCORE_COMPONENTS = STATIC_COMPOSITION_COMPONENTS
+# These names are the serialized Draft Score component ledger.  The
+# component registry is explicit so a new field cannot enter a comparison by
+# matching a loose keyword.
+DRAFT_SCORE_COMPONENTS = (
+    "composition_base_logit",
+    "composition_synergy_logit",
+    "composition_counter_logit",
+    "composition_same_role_logit",
+    "composition_ally_synergy_logit",
+    "composition_enemy_counter_logit",
+    "composition_archetype_interactions_logit",
+    "current_rating_logit",
+    "future_player_form_logit",
+    "scaling_raw_logit",
+    "scaling_shape_logit",
+    "curve_atom_interaction_logit",
+    "crossfit_composition_total",
+    "crossfit_champion_main",
+    "crossfit_role_champion",
+    "crossfit_ally_synergy",
+    "crossfit_archetype_synergy",
+    "crossfit_enemy_counter",
+    "crossfit_archetype_counter",
+    "crossfit_same_role",
+    "composite_logit",
+)
+REQUIRED_DRAFT_SCORE_COMPONENT_FIELDS = (
+    "base",
+    "synergy",
+    "counter",
+    "same_role",
+    "ally_synergy",
+    "enemy_counter",
+    "archetype_interactions",
+    "current_rating_logit",
+    "future_player_form_logit",
+    "scaling_raw_logit",
+    "scaling_shape_logit",
+    "curve_atom_interaction_logit",
+    "crossfit_composition_total",
+    "crossfit_champion_main",
+    "crossfit_role_champion",
+    "crossfit_ally_synergy",
+    "crossfit_archetype_synergy",
+    "crossfit_enemy_counter",
+    "crossfit_archetype_counter",
+    "crossfit_same_role",
+    "composite_logit",
+)
+_RECONSTRUCTION_COMPONENT_FIELDS = tuple(
+    field
+    for field in REQUIRED_DRAFT_SCORE_COMPONENT_FIELDS
+    if field != "composite_logit"
+    and (
+        not field.startswith("crossfit_")
+    or field == "crossfit_composition_total"
+    )
+)
+_DRAFT_COMPONENT_FIELD_MAP = {
+    **{
+        name: name.removeprefix("composition_").removesuffix("_logit")
+        for name in STATIC_COMPOSITION_FEATURES
+    },
+    **{name: name for name in REQUIRED_DRAFT_SCORE_COMPONENT_FIELDS},
+    "base": "base",
+    "synergy": "synergy",
+    "counter": "counter",
+    "same_role": "same_role",
+    "ally_synergy": "ally_synergy",
+    "enemy_counter": "enemy_counter",
+    "archetype_interactions": "archetype_interactions",
+}
 
 _TARGET_KEYS = frozenset(
     {
@@ -86,40 +163,11 @@ _TARGET_KEYS = frozenset(
         "won",
     }
 )
-_SOURCE_RECEIPT_KEYS = frozenset(
-    {
-        "schema_version",
-        "status",
-        "accepted_game_ids",
-        "source_files",
-        "authority",
-        "receipt_sha256",
-    }
-)
-_DYNAMIC_KEYWORDS = {
-    FUTURE_FORM_FAMILY: (
-        "future",
-        "form",
-        "player_form",
-        "prior_team",
-        "roster_continuity",
-        "rank_3_player_atom",
-        "champion_role_atom",
-        "support_mean",
-        "missing_rate",
-    ),
-    SCALING_FAMILY: (
-        "scal",
-        "curve",
-        "forecast",
-        "phase",
-        "snowball",
-        "comeback",
-        "slope",
-        "checkpoint",
-    ),
-}
+# Legacy aliases are kept only for the exact atomized fields that have a
+# declared producer.  Free-form component name matching is unsafe here.
 _COMPONENT_ALIASES = {
+    **{name.removeprefix("composition_").removesuffix("_logit"): name.removeprefix("composition_").removesuffix("_logit") for name in STATIC_COMPOSITION_FEATURES},
+    **{name: name.removeprefix("composition_").removesuffix("_logit") for name in STATIC_COMPOSITION_FEATURES},
     "archetype": "archetype_interactions",
     "archetype_interaction": "archetype_interactions",
     "archetype_interactions": "archetype_interactions",
@@ -131,21 +179,128 @@ _COMPONENT_ALIASES = {
     "counter": "counter",
     "same_role": "same_role",
     "base": "base",
-    "composition": "composition",
-    "compositions": "composition",
-    "blue": "composition",
-    "red": "composition",
-    "blue_champions": "composition",
-    "red_champions": "composition",
-    "blue_champs": "composition",
-    "red_champs": "composition",
-    "picks": "composition",
-    "bans": "composition",
 }
 _AGGREGATE_KEYS = frozenset(
-    {"score", "draft_score", "draft_edge", "edge", "component_total", "reconstructed_score"}
+    {"score", "draft_score", "draft_edge", "edge", "component_total", "reconstructed_score", "composite_logit"}
 )
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+_PROVENANCE_FIELDS = frozenset(
+    {
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "source_receipt_sha256",
+        "authority_receipt_sha256",
+        "receipt_sha256",
+        "schema_version",
+        "status",
+        "authority",
+        "research_only",
+        "public_authority",
+        "public_player_rating",
+        "public_team_rating",
+        "public_probability",
+        "promotion",
+        "deployment",
+        "odds",
+        "expected_value",
+        "recommendation",
+        "betting",
+        "accepted_game_ids",
+        "source_files",
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
+        "model_eligible_game_ids",
+        "bytes",
+        "sha256",
+        "locator",
+        "path",
+    }
+)
+_AUTHORITY_KEYWORDS = (
+    "public",
+    "promotion",
+    "deployment",
+    "probability",
+    "odds",
+    "expected_value",
+    "recommendation",
+    "betting",
+)
+
+
+def _registry(*fields: str, future: Iterable[str] = (), scaling: Iterable[str] = ()) -> Mapping[str, frozenset[str]]:
+    """Build one explicit artifact field registry."""
+
+    return MappingProxyType(
+        {
+            "common": frozenset(fields) | _PROVENANCE_FIELDS,
+            FUTURE_FORM_FAMILY: frozenset(future),
+            SCALING_FAMILY: frozenset(scaling),
+        }
+    )
+
+
+_IDENTITY_FIELDS = frozenset(
+    {
+        "player_id", "player", "id", "name", "team_key", "team_id", "team",
+        "game_uid", "game_id", "match_id", "champion", "role", "position",
+        "scope", "patch", "tier", "tier_label", "rank", "rank_tier", "band",
+        "league", "competition_tier", "pack_id", "release_id",
+    }
+)
+_RATING_FIELDS = frozenset(
+    {
+        "mu_total", "mu_effective", "mu_regional", "mu_meta", "sigma", "rating_p10",
+        "rating", "score", "win_rate", "delta", "games", "n_maps",
+    }
+)
+_FUTURE_FIELDS = frozenset(
+    {
+        "future_value", "future_player_value", "future_team_value", "team_value",
+        "future_player_form_logit", "future_team_context_logit", "future_quality_logit",
+        *FUTURE_PLAYER_FORM_SIDE_FEATURES,
+    }
+)
+_SCALING_FIELDS = frozenset(
+    {
+        *PHASE_RAW_FEATURES,
+        *PHASE_SHAPE_FEATURES,
+        *CURVE_ATOM_INTERACTION_FEATURES,
+        "forecast_gold_diff_10", "forecast_gold_diff_15", "forecast_gold_diff_20", "forecast_gold_diff_25",
+        "forecast_xp_diff_10", "forecast_xp_diff_15", "forecast_xp_diff_20", "forecast_xp_diff_25",
+        "scaling_curve", "snowball_index", "comeback_resilience", "curve_available", "curve_missing",
+    }
+)
+_DRAFT_FIELDS = frozenset(
+    {
+        *REQUIRED_DRAFT_SCORE_COMPONENT_FIELDS,
+        *DRAFT_SCORE_COMPONENTS,
+        "draft_score", "draft_edge", "score", "edge", "target", "y", "y_blue_win",
+        "blue_result", "red_result", "result", "winner", "winning_side",
+    }
+)
+_ARTIFACT_FIELD_REGISTRIES: Mapping[str, Mapping[str, frozenset[str]]] = MappingProxyType(
+    {
+        "player_ratings": _registry(*(_IDENTITY_FIELDS | _RATING_FIELDS), future=_FUTURE_FIELDS, scaling=_SCALING_FIELDS),
+        "team_ratings": _registry(*(_IDENTITY_FIELDS | _RATING_FIELDS), future=_FUTURE_FIELDS, scaling=_SCALING_FIELDS),
+        # Tier identity is deliberately exact.  ``scope`` is the canonical
+        # competition scope, and aliases such as league are not identity.
+        "tierlists": _registry(
+            "champion", "role", "scope", "patch", "tier", "tier_label", "rank", "rank_tier", "band",
+            "score", "rating", "win_rate", "delta", "games",
+        ),
+        "draft_score": _registry(*(_IDENTITY_FIELDS | _DRAFT_FIELDS), future=_FUTURE_FIELDS, scaling=_SCALING_FIELDS),
+        "profiles": _registry(*(_IDENTITY_FIELDS | _RATING_FIELDS), future=_FUTURE_FIELDS, scaling=_SCALING_FIELDS),
+        "matches": _registry(*(_IDENTITY_FIELDS | _RATING_FIELDS | _DRAFT_FIELDS), future=_FUTURE_FIELDS, scaling=_SCALING_FIELDS),
+        "public_manifest": _registry(
+            "pack_id", "release_id", "id", "source_game_count", "team_rating_rows", "player_rating_rows",
+            "total_files", "total_bytes", "source_as_of", "source_identity_sha256",
+        ),
+    }
+)
+ARTIFACT_FIELD_REGISTRIES = _ARTIFACT_FIELD_REGISTRIES
 
 
 class DownstreamDiffError(FutureValueDownstreamError):
@@ -278,6 +433,9 @@ class _ArtifactData:
     raw_rows: tuple[dict[str, Any], ...]
     duplicate_ids: tuple[str, ...]
     missing_identity_count: int
+    field_paths: frozenset[str]
+    source_bindings: tuple[dict[str, Any], ...]
+    source_receipt_hashes: tuple[str, ...]
     bytes: int
     sha256: str
 
@@ -320,7 +478,9 @@ def _read_json(path: Path) -> Any:
 def _has_symlink_component(path: Path) -> bool:
     current = Path(path)
     while True:
-        if current.is_symlink():
+        # macOS exposes the standard temporary roots through these stable
+        # system aliases.  A caller-created link below them remains unsafe.
+        if current.is_symlink() and current not in {Path("/var"), Path("/tmp")}:
             return True
         parent = current.parent
         if parent == current:
@@ -372,10 +532,22 @@ def _identity_part(row: Mapping[str, Any], fields: Sequence[str]) -> str | None:
 
 
 def _row_identity(row: Mapping[str, Any], spec: DownstreamArtifactSpec) -> str | None:
+    if spec.name == "tierlists":
+        # Tier rows must remain comparable across variants.  Scope, patch,
+        # role, and champion form the complete identity.  League aliases and
+        # display names cannot silently change a row's key.
+        exact_groups: tuple[tuple[str, ...], ...] = (
+            ("scope",),
+            ("patch",),
+            ("role",),
+            ("champion",),
+        )
+    else:
+        exact_groups = spec.identity_groups
     parts: list[str] = []
-    for group in spec.identity_groups:
+    for group in exact_groups:
         value = _identity_part(row, group)
-        if value is None and len(spec.identity_groups) == 1 and row.get("_container_key") is not None:
+        if value is None and len(exact_groups) == 1 and row.get("_container_key") is not None:
             value = str(row["_container_key"]).strip() or None
         if value is None:
             return None
@@ -383,24 +555,14 @@ def _row_identity(row: Mapping[str, Any], spec: DownstreamArtifactSpec) -> str |
     return "|".join(parts)
 
 
-def _contains_value_field(value: Any, spec: DownstreamArtifactSpec) -> bool:
-    if isinstance(value, Mapping):
-        if any(field in value for field in spec.value_fields):
-            return True
-        return any(_contains_value_field(child, spec) for child in value.values())
-    if isinstance(value, (list, tuple)):
-        return any(_contains_value_field(child, spec) for child in value)
-    return False
-
-
 def _collect_rows(value: Any, spec: DownstreamArtifactSpec, *, container_key: str | None = None, depth: int = 0) -> list[dict[str, Any]]:
     if depth > 12:
         return []
     if isinstance(value, list):
-        rows: list[dict[str, Any]] = []
+        list_rows: list[dict[str, Any]] = []
         for child in value:
-            rows.extend(_collect_rows(child, spec, container_key=container_key, depth=depth + 1))
-        return rows
+            list_rows.extend(_collect_rows(child, spec, container_key=container_key, depth=depth + 1))
+        return list_rows
     if not isinstance(value, Mapping):
         return []
     row = dict(value)
@@ -408,7 +570,8 @@ def _collect_rows(value: Any, spec: DownstreamArtifactSpec, *, container_key: st
         row.setdefault("_container_key", container_key)
     rows: list[dict[str, Any]] = []
     identity = _row_identity(row, spec)
-    if identity is not None and (_contains_value_field(value, spec) or spec.name == "public_manifest"):
+    has_direct_value = any(field in value for field in spec.value_fields)
+    if has_direct_value or spec.name == "public_manifest":
         rows.append(row)
     if spec.name == "public_manifest":
         return rows
@@ -436,7 +599,12 @@ def _payload_rows(payload: Any, spec: DownstreamArtifactSpec) -> list[dict[str, 
     return _collect_rows(payload, spec)
 
 
-def _load_artifact(root: Path, spec: DownstreamArtifactSpec) -> _ArtifactData:
+def _load_artifact(
+    root: Path,
+    spec: DownstreamArtifactSpec,
+    *,
+    expected_source: Mapping[str, Any] | None = None,
+) -> _ArtifactData:
     paths = _safe_artifact_paths(root, spec)
     payloads = tuple(_read_json(path) for path in paths)
     raw_rows = tuple(row for payload in payloads for row in _payload_rows(payload, spec))
@@ -453,6 +621,17 @@ def _load_artifact(root: Path, spec: DownstreamArtifactSpec) -> _ArtifactData:
         else:
             by_id[identity] = row
     digest = hashlib.sha256(b"".join(_sha256(path).encode("ascii") for path in paths)).hexdigest()
+    field_paths = frozenset().union(*(_field_paths(payload) for payload in payloads))
+    source_bindings: tuple[dict[str, Any], ...] = ()
+    source_receipt_hashes: tuple[str, ...] = ()
+    if expected_source is not None:
+        source_bindings, source_receipt_hashes, provenance_blockers = _artifact_provenance(
+            payloads,
+            expected=expected_source,
+            artifact_name=spec.name,
+        )
+        if provenance_blockers:
+            raise DownstreamDiffError(";".join(provenance_blockers))
     return _ArtifactData(
         spec=spec,
         paths=paths,
@@ -461,6 +640,9 @@ def _load_artifact(root: Path, spec: DownstreamArtifactSpec) -> _ArtifactData:
         raw_rows=raw_rows,
         duplicate_ids=tuple(sorted(duplicates)),
         missing_identity_count=missing_identity,
+        field_paths=field_paths,
+        source_bindings=source_bindings,
+        source_receipt_hashes=source_receipt_hashes,
         bytes=sum(path.stat().st_size for path in paths),
         sha256=digest,
     )
@@ -507,10 +689,10 @@ def _find_source_bindings(value: Any, *, depth: int = 0) -> list[dict[str, Any]]
                 found.extend(_find_source_bindings(child, depth=depth + 1))
         return found
     if isinstance(value, (list, tuple)):
-        found: list[dict[str, Any]] = []
+        list_found: list[dict[str, Any]] = []
         for child in value:
-            found.extend(_find_source_bindings(child, depth=depth + 1))
-        return found
+            list_found.extend(_find_source_bindings(child, depth=depth + 1))
+        return list_found
     return []
 
 
@@ -522,17 +704,35 @@ def _find_receipt_hashes(value: Any, *, depth: int = 0) -> list[str]:
         for key, child in value.items():
             if key in {"source_receipt_sha256", "authority_receipt_sha256"} and isinstance(child, str):
                 found.append(child)
-            elif key == "receipt_sha256" and value.get("schema_version") != SOURCE_RECEIPT_SCHEMA_VERSION and isinstance(child, str):
+            elif key == "receipt_sha256" and isinstance(child, str):
                 found.append(child)
             if isinstance(child, (Mapping, list, tuple)):
                 found.extend(_find_receipt_hashes(child, depth=depth + 1))
         return found
     if isinstance(value, (list, tuple)):
-        found: list[str] = []
+        list_found: list[str] = []
         for child in value:
-            found.extend(_find_receipt_hashes(child, depth=depth + 1))
-        return found
+            list_found.extend(_find_receipt_hashes(child, depth=depth + 1))
+        return list_found
     return []
+
+
+def _find_accepted_game_id_lists(value: Any, *, depth: int = 0) -> list[tuple[str, ...]]:
+    if depth > 16:
+        return []
+    found: list[tuple[str, ...]] = []
+    if isinstance(value, Mapping):
+        raw_ids = value.get("accepted_game_ids")
+        if isinstance(raw_ids, list) and all(isinstance(item, str) for item in raw_ids):
+            found.append(tuple(raw_ids))
+        for child in value.values():
+            if isinstance(child, (Mapping, list, tuple)):
+                found.extend(_find_accepted_game_id_lists(child, depth=depth + 1))
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            if isinstance(child, (Mapping, list, tuple)):
+                found.extend(_find_accepted_game_id_lists(child, depth=depth + 1))
+    return found
 
 
 def _validate_embedded_receipts(value: Any, *, depth: int = 0) -> None:
@@ -555,36 +755,29 @@ def _validate_embedded_receipts(value: Any, *, depth: int = 0) -> None:
 
 
 def _coerce_expected_source(value: Mapping[str, Any] | Path) -> dict[str, Any]:
+    receipt_path: Path | None = None
     if isinstance(value, Mapping):
         raw = dict(value)
     else:
-        path = Path(value)
-        if path.is_symlink() or not path.is_file():
+        receipt_path = Path(value)
+        if receipt_path.is_symlink() or not receipt_path.is_file():
             raise DownstreamDiffError("canonical source receipt is missing or unsafe")
-        raw_value = _read_json(path)
+        raw_value = _read_json(receipt_path)
         if not isinstance(raw_value, Mapping):
             raise DownstreamDiffError("canonical source receipt is not an object")
         raw = dict(raw_value)
-    if raw.get("schema_version") == SOURCE_RECEIPT_SCHEMA_VERSION:
-        try:
-            raw = _validate_source_receipt(raw)
-        except FutureValueDownstreamError as error:
-            raise DownstreamDiffError(str(error)) from error
-    binding = _source_binding(raw)
-    if binding is None:
-        raise DownstreamDiffError("canonical source binding is invalid")
-    result = dict(binding)
-    for key in ("accepted_game_ids", "source_receipt_sha256", "receipt_sha256"):
-        if key in raw:
-            result[key] = raw[key]
-    if "receipt_sha256" in raw:
-        receipt_hash = raw.get("receipt_sha256")
-        if not isinstance(receipt_hash, str) or _SHA256_RE.fullmatch(receipt_hash) is None:
-            raise DownstreamDiffError("canonical source receipt hash is invalid")
-        payload = dict(raw)
-        payload.pop("receipt_sha256", None)
-        if hashlib.sha256(_canonical_json(payload)).hexdigest() != receipt_hash:
-            raise DownstreamDiffError("canonical source receipt hash does not match payload")
+    if raw.get("schema_version") != SOURCE_RECEIPT_SCHEMA_VERSION:
+        raise DownstreamDiffError("canonical verified source receipt is required")
+    try:
+        validated = _validate_source_receipt(raw, receipt_path=receipt_path)
+    except FutureValueDownstreamError as error:
+        raise DownstreamDiffError(str(error)) from error
+    result = {
+        field: validated[field]
+        for field in SOURCE_FIELDS
+    }
+    result["accepted_game_ids"] = list(validated["accepted_game_ids"])
+    result["receipt_sha256"] = validated["receipt_sha256"]
     return result
 
 
@@ -612,11 +805,144 @@ def _flatten_leaves(value: Any, *, prefix: str = "") -> dict[str, Any]:
             result.update(_flatten_leaves(child, prefix=path))
         return result
     if isinstance(value, list):
-        result: dict[str, Any] = {}
+        list_result: dict[str, Any] = {}
         for index, child in enumerate(value):
-            result.update(_flatten_leaves(child, prefix=f"{prefix}[{index}]"))
-        return result
+            list_result.update(_flatten_leaves(child, prefix=f"{prefix}[{index}]"))
+        return list_result
     return {prefix: value} if prefix else {}
+
+
+def _canonical_field_path(path: str) -> str:
+    """Return a list-index-independent field path for registry checks."""
+
+    return re.sub(r"\[\d+\]", "[]", path)
+
+
+def _field_name(path: str) -> str:
+    return _canonical_field_path(path).rsplit(".", 1)[-1].removesuffix("[]").casefold()
+
+
+def _registry_for(spec: DownstreamArtifactSpec) -> Mapping[str, frozenset[str]]:
+    try:
+        return _ARTIFACT_FIELD_REGISTRIES[spec.name]
+    except KeyError as error:
+        raise DownstreamDiffError(f"artifact has no explicit field registry: {spec.name}") from error
+
+
+def _registered_field_names(spec: DownstreamArtifactSpec) -> frozenset[str]:
+    registry = _registry_for(spec)
+    return frozenset().union(*registry.values())
+
+
+def _field_family(spec: DownstreamArtifactSpec, field: str) -> str | None:
+    registry = _registry_for(spec)
+    for family in (FUTURE_FORM_FAMILY, SCALING_FAMILY):
+        if field in registry[family]:
+            return family
+    return None
+
+
+def _field_paths(value: Any) -> frozenset[str]:
+    return frozenset(_canonical_field_path(path) for path in _flatten_leaves(value))
+
+
+def _validate_authority_flags(value: Any, *, path: str = "artifact", depth: int = 0) -> list[str]:
+    """Find every forbidden true authority flag in a JSON artifact."""
+
+    if depth > 32:
+        return [f"{path}:authority_scan_depth_exceeded"]
+    found: list[str] = []
+    if isinstance(value, Mapping):
+        for raw_key, child in value.items():
+            key = str(raw_key).casefold().replace("-", "_")
+            child_path = f"{path}.{raw_key}"
+            if any(token in key for token in _AUTHORITY_KEYWORDS):
+                true_value = (isinstance(child, bool) and child) or (
+                    isinstance(child, str) and child.casefold().strip() in {"true", "yes", "1"}
+                )
+                if true_value:
+                    found.append(child_path)
+            if isinstance(child, (Mapping, list, tuple)):
+                found.extend(_validate_authority_flags(child, path=child_path, depth=depth + 1))
+    elif isinstance(value, (list, tuple)):
+        for index, child in enumerate(value):
+            if isinstance(child, (Mapping, list, tuple)):
+                found.extend(_validate_authority_flags(child, path=f"{path}[{index}]", depth=depth + 1))
+    return found
+
+
+def _artifact_provenance(
+    payloads: Sequence[Any],
+    *,
+    expected: Mapping[str, Any],
+    artifact_name: str,
+) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...], list[str]]:
+    """Require one matching source binding and receipt hash per artifact."""
+
+    bindings = tuple(binding for payload in payloads for binding in _find_source_bindings(payload))
+    receipt_hashes = tuple(
+        receipt_hash
+        for payload in payloads
+        for receipt_hash in _find_receipt_hashes(payload)
+        if isinstance(receipt_hash, str)
+    )
+    census_lists = tuple(
+        ids
+        for payload in payloads
+        for ids in _find_accepted_game_id_lists(payload)
+    )
+    blockers: list[str] = []
+    if not bindings:
+        blockers.append(f"{artifact_name}_source_binding_missing")
+    elif any(not _same_source(binding, expected) for binding in bindings):
+        blockers.append(f"{artifact_name}_source_binding_mismatch")
+    expected_ids = tuple(str(item) for item in expected.get("accepted_game_ids", ()))
+    if not census_lists:
+        blockers.append(f"{artifact_name}_accepted_game_ids_missing")
+    elif any(ids != expected_ids for ids in census_lists):
+        blockers.append(f"{artifact_name}_accepted_game_ids_mismatch")
+    expected_hash = expected.get("receipt_sha256")
+    if not isinstance(expected_hash, str) or _SHA256_RE.fullmatch(expected_hash) is None:
+        blockers.append(f"{artifact_name}_canonical_receipt_hash_missing")
+    elif not receipt_hashes:
+        blockers.append(f"{artifact_name}_source_receipt_hash_missing")
+    elif any(receipt_hash != expected_hash for receipt_hash in receipt_hashes):
+        blockers.append(f"{artifact_name}_source_receipt_hash_mismatch")
+    return bindings, receipt_hashes, blockers
+
+
+def _field_registry_checks(
+    baseline: _ArtifactData,
+    candidate: _ArtifactData,
+    candidate_spec: VariantSpec,
+) -> dict[str, list[str]]:
+    """Check the full field union and the exact family allowance."""
+
+    allowed = _registered_field_names(baseline.spec)
+    unknown = sorted(
+        path
+        for path in (baseline.field_paths | candidate.field_paths)
+        if _field_name(path) not in allowed
+    )
+    added = sorted(candidate.field_paths - baseline.field_paths)
+    removed = sorted(baseline.field_paths - candidate.field_paths)
+    disallowed_added: list[str] = []
+    disallowed_removed: list[str] = []
+    for path in added:
+        family = _field_family(baseline.spec, _field_name(path))
+        if family is None or family not in candidate_spec.changed_families:
+            disallowed_added.append(path)
+    for path in removed:
+        family = _field_family(baseline.spec, _field_name(path))
+        if family is None or family not in candidate_spec.changed_families:
+            disallowed_removed.append(path)
+    return {
+        "unknown_fields": unknown,
+        "added_fields": added,
+        "removed_fields": removed,
+        "disallowed_added_fields": disallowed_added,
+        "disallowed_removed_fields": disallowed_removed,
+    }
 
 
 def _leaf_key(path: str) -> str:
@@ -642,14 +968,6 @@ def _component_signature(row: Mapping[str, Any]) -> dict[str, Any]:
         if canonical in STATIC_COMPOSITION_COMPONENTS:
             selected[path] = _canonical_value(value)
     return selected
-
-
-def _family_for_path(path: str) -> str | None:
-    text = path.casefold()
-    for family, keywords in _DYNAMIC_KEYWORDS.items():
-        if any(keyword in text for keyword in keywords):
-            return family
-    return None
 
 
 def _numeric(value: Any) -> float | None:
@@ -712,16 +1030,18 @@ def _row_id(row: Mapping[str, Any], identity_fields: Sequence[str] | None = None
 
 def _rank_rows(rows: Mapping[str, Mapping[str, Any]] | Sequence[Mapping[str, Any]], value_field: str, *, identity_fields: Sequence[str] | None = None, descending: bool = True) -> dict[str, int]:
     if isinstance(rows, Mapping):
-        source = [(str(identity), row) for identity, row in rows.items()]
+        source: list[tuple[str | None, Mapping[str, Any]]] = [
+            (str(identity), row) for identity, row in rows.items()
+        ]
     else:
         source = [(None, row) for row in rows]
     values: list[tuple[str, float]] = []
     for mapped_identity, row in source:
         identity = mapped_identity if mapped_identity is not None and identity_fields is None else _row_id(row, identity_fields)
-        value = row.get(value_field)
-        if identity is None or _numeric(value) is None:
+        value = _numeric(row.get(value_field))
+        if identity is None or value is None:
             continue
-        values.append((identity, float(value)))
+        values.append((identity, value))
     values.sort(key=lambda item: ((-item[1] if descending else item[1]), item[0]))
     return {identity: rank for rank, (identity, _value) in enumerate(values, start=1)}
 
@@ -770,17 +1090,25 @@ def rank_movement_metrics(
             "entrants": entrants,
             "exits": exits,
         }
+    # The deterministic tie break above gives each common row a unique rank.
+    # Count inversions with a Fenwick tree so a full leaderboard stays
+    # O(n log n) instead of quadratic in the number of rows.
+    ordered_common = sorted(common, key=lambda key: old_rank[key])
+    seen = [0] * (len(common) + 2)
     inversions = 0
-    pair_count = 0
-    for index, left in enumerate(common):
-        for right in common[index + 1 :]:
-            old_order = old_rank[left] - old_rank[right]
-            candidate_order = candidate_rank[left] - candidate_rank[right]
-            if old_order == 0 or candidate_order == 0:
-                continue
-            pair_count += 1
-            if old_order * candidate_order < 0:
-                inversions += 1
+    for index, identity in enumerate(ordered_common):
+        rank = candidate_rank[identity]
+        cursor = rank
+        prior = 0
+        while cursor:
+            prior += seen[cursor]
+            cursor -= cursor & -cursor
+        inversions += index - prior
+        cursor = rank
+        while cursor < len(seen):
+            seen[cursor] += 1
+            cursor += cursor & -cursor
+    pair_count = len(common) * (len(common) - 1) // 2
     top25 = top_k.get("25", {"entrants": [], "exits": []})
     return {
         "value_field": value_field,
@@ -818,10 +1146,14 @@ def tier_transition_metrics(
     """Return tier transitions for matched rows."""
 
     def keyed(rows: Mapping[str, Mapping[str, Any]] | Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
-        source = rows.values() if isinstance(rows, Mapping) else rows
         result: dict[str, Mapping[str, Any]] = {}
-        for row in source:
-            identity = _row_id(row, identity_fields)
+        source = rows.items() if isinstance(rows, Mapping) else ((None, row) for row in rows)
+        for mapped_identity, row in source:
+            identity = (
+                str(mapped_identity)
+                if mapped_identity is not None and identity_fields is None
+                else _row_id(row, identity_fields)
+            )
             if identity is not None:
                 result[identity] = row
         return result
@@ -908,9 +1240,11 @@ def _component_values(row: Mapping[str, Any]) -> dict[str, float]:
     values: dict[str, float] = {}
     for path, value in _flatten_leaves(row).items():
         key = _leaf_key(path)
-        component = _COMPONENT_ALIASES.get(key)
+        component = _DRAFT_COMPONENT_FIELD_MAP.get(key)
+        if component is None:
+            component = _COMPONENT_ALIASES.get(key)
         number = _numeric(value)
-        if component in DRAFT_SCORE_COMPONENTS and component != "composition" and number is not None:
+        if component is not None and component != "composite_logit" and number is not None:
             values[component] = number
     return values
 
@@ -928,13 +1262,24 @@ def _aggregate_values(row: Mapping[str, Any]) -> dict[str, float]:
 def _reconstruction_report(rows: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
     checked = 0
     failures: list[dict[str, Any]] = []
+    missing_components: list[dict[str, Any]] = []
     maximum = 0.0
     for identity, row in sorted(rows.items()):
         components = _component_values(row)
         aggregates = _aggregate_values(row)
-        if len(components) < 2 or not aggregates:
+        missing = sorted(
+            field
+            for field in REQUIRED_DRAFT_SCORE_COMPONENT_FIELDS
+            if field not in components and field != "composite_logit"
+        )
+        if "composite_logit" not in _aggregate_values(row):
+            missing.append("composite_logit")
+        if missing:
+            missing_components.append({"identity": identity, "fields": missing})
             continue
-        expected = sum(components.values())
+        if not aggregates:
+            continue
+        expected = sum(components[field] for field in _RECONSTRUCTION_COMPONENT_FIELDS)
         for aggregate_path, aggregate in aggregates.items():
             checked += 1
             error = aggregate - expected
@@ -942,8 +1287,10 @@ def _reconstruction_report(rows: Mapping[str, Mapping[str, Any]]) -> dict[str, A
             if abs(error) > 1e-9:
                 failures.append({"identity": identity, "aggregate": aggregate_path, "error": error})
     return {
-        "status": "passed" if not failures else "failed",
+        "status": "passed" if not failures and not missing_components else "failed",
         "rows_checked": checked,
+        "rows_missing_components": len(missing_components),
+        "missing_components": missing_components,
         "maximum_absolute_error": maximum,
         "failures": failures,
     }
@@ -958,10 +1305,14 @@ def draft_score_component_diff_metrics(
     """Compare Draft Score components and verify score reconstruction."""
 
     def keyed(rows: Mapping[str, Mapping[str, Any]] | Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
-        source = rows.values() if isinstance(rows, Mapping) else rows
         result: dict[str, Mapping[str, Any]] = {}
-        for row in source:
-            identity = _row_id(row, identity_fields)
+        source = rows.items() if isinstance(rows, Mapping) else ((None, row) for row in rows)
+        for mapped_identity, row in source:
+            identity = (
+                str(mapped_identity)
+                if mapped_identity is not None and identity_fields is None
+                else _row_id(row, identity_fields)
+            )
             if identity is not None:
                 result[identity] = row
         return result
@@ -969,7 +1320,7 @@ def draft_score_component_diff_metrics(
     old = keyed(old_rows)
     candidate = keyed(candidate_rows)
     common = sorted(set(old) & set(candidate))
-    component_names = set()
+    component_names: set[str] = set()
     for row in (*old.values(), *candidate.values()):
         component_names.update(_component_values(row))
     component_deltas: dict[str, dict[str, Any]] = {}
@@ -990,9 +1341,9 @@ def draft_score_component_diff_metrics(
     static_identical = True
     changed_static: list[str] = []
     for identity in common:
-        left = _component_signature(old[identity])
-        right = _component_signature(candidate[identity])
-        if left != right:
+        static_left = _component_signature(old[identity])
+        static_right = _component_signature(candidate[identity])
+        if static_left != static_right:
             static_identical = False
             changed_static.append(identity)
     return {
@@ -1045,7 +1396,7 @@ def _row_target_and_component_checks(
         left_leaves = _flatten_leaves(left)
         right_leaves = _flatten_leaves(right)
         for path in sorted(set(left_leaves) & set(right_leaves)):
-            family = _family_for_path(path)
+            family = _field_family(baseline.spec, _field_name(path))
             if family is None or family in spec.changed_families:
                 continue
             if _canonical_value(left_leaves[path]) != _canonical_value(right_leaves[path]):
@@ -1228,6 +1579,12 @@ def compare_downstream_variants(
     if len(set(root_paths)) != len(root_paths):
         blockers.append("shared_variant_root")
     specs = tuple(artifact_specs or required_artifact_specs())
+    spec_names = tuple(spec.name for spec in specs)
+    if len(set(spec_names)) != len(spec_names):
+        raise DownstreamDiffError("artifact specifications contain duplicates")
+    unknown_specs = sorted(set(spec_names) - set(_ARTIFACT_FIELD_REGISTRIES))
+    if unknown_specs:
+        raise DownstreamDiffError("artifact has no explicit field registry: " + ",".join(unknown_specs))
     loaded: dict[str, dict[str, _ArtifactData]] = {}
     source_counts: dict[str, int] = {}
     for name, root in resolved_roots.items():
@@ -1246,6 +1603,10 @@ def compare_downstream_variants(
                         receipt = _validate_source_receipt(receipt, receipt_path=receipt_path)
                     except FutureValueDownstreamError as error:
                         raise DownstreamDiffError(str(error)) from error
+                    if list(receipt.get("accepted_game_ids", ())) != list(expected.get("accepted_game_ids", ())):
+                        blockers.append(f"{name}_accepted_game_ids_mismatch")
+                    if receipt.get("receipt_sha256") != expected.get("receipt_sha256"):
+                        blockers.append(f"{name}_source_receipt_mismatch")
                 root_bindings = _find_source_bindings(receipt)
                 all_bindings.extend(root_bindings)
                 if not root_bindings:
@@ -1254,9 +1615,21 @@ def compare_downstream_variants(
                 blockers.append(f"{name}_source_receipt_invalid")
         else:
             blockers.append(f"{name}_source_binding_missing")
+        if receipt_path.is_file() and not receipt_path.is_symlink():
+            try:
+                receipt_payload = _read_json(receipt_path)
+                authority_paths = _validate_authority_flags(
+                    receipt_payload,
+                    path=f"{name}.source_receipt",
+                )
+                blockers.extend(
+                    f"{name}_forbidden_authority_{path}" for path in authority_paths
+                )
+            except DownstreamDiffError:
+                pass
         for spec in specs:
             try:
-                artifact = _load_artifact(root, spec)
+                artifact = _load_artifact(root, spec, expected_source=expected)
             except DownstreamDiffError as error:
                 message = str(error)
                 if "nonfinite" in message:
@@ -1265,6 +1638,15 @@ def compare_downstream_variants(
                     blockers.append(f"{name}_{spec.name}_symlink_or_unsafe")
                 else:
                     blockers.append(f"{name}_{spec.name}_missing_or_invalid")
+                for reason in (
+                    "source_binding_mismatch",
+                    "accepted_game_ids_mismatch",
+                    "source_receipt_hash_mismatch",
+                    "source_receipt_hash_missing",
+                    "source_binding_missing",
+                ):
+                    if reason in message:
+                        blockers.append(f"{name}_{spec.name}_{reason}")
                 continue
             loaded[name][spec.name] = artifact
             try:
@@ -1275,8 +1657,17 @@ def compare_downstream_variants(
                     blockers.append(f"{name}_{spec.name}_nonfinite")
                 else:
                     blockers.append(f"{name}_{spec.name}_source_receipt_invalid")
-            source_counts[name] = source_counts.get(name, 0) + len(_find_source_bindings(artifact.payloads))
-            all_bindings.extend(_find_source_bindings(artifact.payloads))
+            for payload in artifact.payloads:
+                authority_paths = _validate_authority_flags(
+                    payload,
+                    path=f"{name}.{spec.name}",
+                )
+                blockers.extend(
+                    f"{name}_{spec.name}_forbidden_authority_{path}"
+                    for path in authority_paths
+                )
+            source_counts[name] = source_counts.get(name, 0) + len(artifact.source_bindings)
+            all_bindings.extend(artifact.source_bindings)
             if artifact.duplicate_ids:
                 blockers.append(f"{name}_{spec.name}_duplicate_identity_rows")
             if artifact.missing_identity_count:
@@ -1297,14 +1688,10 @@ def compare_downstream_variants(
                 except DownstreamDiffError:
                     pass
             for spec in specs:
-                artifact = loaded.get(name, {}).get(spec.name)
-                if artifact is None:
+                candidate_artifact = loaded.get(name, {}).get(spec.name)
+                if candidate_artifact is None:
                     continue
-                hashes = [
-                    receipt_hash
-                    for payload in artifact.payloads
-                    for receipt_hash in _find_receipt_hashes(payload)
-                ]
+                hashes = list(candidate_artifact.source_receipt_hashes)
                 if any(receipt_hash != expected["receipt_sha256"] for receipt_hash in hashes):
                     blockers.append(f"{name}_source_receipt_hash_mismatch")
     baseline = loaded.get(BASELINE_VARIANT, {})
@@ -1340,6 +1727,15 @@ def compare_downstream_variants(
             if added or removed:
                 blockers.append(f"{name}_{spec.name}_row_loss")
             row_checks = _row_target_and_component_checks(baseline_data, current, get_variant_spec(name), blockers)
+            registry_checks = _field_registry_checks(
+                baseline_data,
+                current,
+                get_variant_spec(name),
+            )
+            if registry_checks["unknown_fields"]:
+                blockers.append(f"{name}_{spec.name}_unknown_fields")
+            if registry_checks["disallowed_added_fields"] or registry_checks["disallowed_removed_fields"]:
+                blockers.append(f"{name}_{spec.name}_field_union_changed")
             deltas = _paired_numeric_deltas(baseline_data.rows, current.rows)
             comparison = {
                 "old_rows": len(old_ids),
@@ -1349,6 +1745,7 @@ def compare_downstream_variants(
                 "removed_rows": removed,
                 "deltas": deltas,
                 "numeric_delta_stats": deltas,
+                "field_registry": registry_checks,
                 **row_checks,
             }
             fields = _rank_fields(spec, (*baseline_data.rows.values(), *current.rows.values()))
@@ -1427,10 +1824,24 @@ def write_downstream_diff_report(path: Path, report: Mapping[str, Any]) -> None:
 
     if report.get("schema_version") != SCHEMA_VERSION:
         raise DownstreamDiffError("downstream diff report schema is invalid")
+    authority_paths = _validate_authority_flags(report, path="report")
+    if authority_paths:
+        raise DownstreamDiffError(
+            "downstream diff report grants forbidden authority: "
+            + ",".join(authority_paths)
+        )
     destination = Path(path)
-    if destination.is_symlink():
-        raise DownstreamDiffError("downstream diff report destination is a symlink")
+    if _has_symlink_component(destination):
+        raise DownstreamDiffError(
+            "downstream diff report destination or parent is a symlink"
+        )
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if _has_symlink_component(destination.parent) or destination.parent.is_symlink():
+        raise DownstreamDiffError(
+            "downstream diff report destination parent is a symlink"
+        )
+    if destination.exists() and not destination.is_file():
+        raise DownstreamDiffError("downstream diff report destination is not a file")
     destination.write_text(
         json.dumps(dict(report), ensure_ascii=True, allow_nan=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -1438,10 +1849,12 @@ def write_downstream_diff_report(path: Path, report: Mapping[str, Any]) -> None:
 
 
 __all__ = [
+    "ARTIFACT_FIELD_REGISTRIES",
     "ALL_VARIANT_SPECS",
     "BASELINE_VARIANT",
     "DIFF_SCHEMA_VERSION",
     "DRAFT_SCORE_COMPONENTS",
+    "REQUIRED_DRAFT_SCORE_COMPONENT_FIELDS",
     "DownstreamDiffError",
     "FUTURE_FORM_FAMILY",
     "SCALING_FAMILY",
