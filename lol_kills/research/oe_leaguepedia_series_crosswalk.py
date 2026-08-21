@@ -62,6 +62,21 @@ def _payload_hash(value: Sequence[Mapping[str, Any]]) -> tuple[str, int]:
     return _sha256_bytes(raw), len(raw)
 
 
+def _assignment_rows(
+    assignments: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    rows = [dict(row) for row in assignments]
+    try:
+        rows.sort(key=lambda row: str(row["oe_game_id"]))
+    except (KeyError, TypeError) as error:
+        raise CrosswalkError("crosswalk assignments are invalid") from error
+    return rows
+
+
+def _assignment_sha256(assignments: Sequence[Mapping[str, Any]]) -> str:
+    return _sha256_bytes(_canonical_json_bytes(_assignment_rows(assignments)))
+
+
 def _parse_timestamp(value: Any, *, field: str) -> datetime:
     raw = str(value or "").strip()
     if not raw:
@@ -465,8 +480,9 @@ def _prepared_scoreboard_rows(rows: Sequence[Mapping[str, Any]], issues: list[di
                 raise CrosswalkError(f"duplicate GameId: {game_id}")
             teams = _row_team_set(row, label=f"scoreboard[{index}]")
             stamp = _timestamp(row, label=f"scoreboard[{index}]")
+            tournament = _first(row, ("Tournament", "tournament"))
             seen.add(game_id)
-            prepared.append({**row, "_game_id": game_id, "_prefix": prefix, "_order": order, "_teams": teams, "_stamp": stamp})
+            prepared.append({**row, "_game_id": game_id, "_prefix": prefix, "_order": order, "_teams": teams, "_stamp": stamp, "_tournament": tournament})
         except CrosswalkError as error:
             issues.append({"kind": "invalid_scoreboard_row", "index": index, "error": str(error)})
     return prepared
@@ -664,6 +680,17 @@ def build_oe_leaguepedia_series_crosswalk(
             })
             continue
         schedule_row, schedule_evidence = schedule_candidates[0]
+        scoreboard_tournament = str(selected.get("_tournament") or "").strip()
+        if not scoreboard_tournament:
+            issues.append(
+                {
+                    "kind": "scoreboard_tournament_missing",
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                    "series_id": match_id,
+                }
+            )
+            continue
         used_scoreboard_ids.add(scoreboard_id)
         assignments.append({
             "oe_game_id": oe["_game_id"],
@@ -677,6 +704,7 @@ def build_oe_leaguepedia_series_crosswalk(
             "source_league": oe["_league"],
             "source_tournament": oe["_tournament"] or None,
             "source_patch": oe["_patch"] or None,
+            "scoreboard_tournament": scoreboard_tournament,
             "scoreboard_game_id_prefix": selected["_prefix"],
             "evidence": {**evidence, "schedule": schedule_evidence},
             "outcome_used": False,
@@ -684,6 +712,48 @@ def build_oe_leaguepedia_series_crosswalk(
         })
 
     assignments.sort(key=lambda row: (row["oe_timestamp"], row["oe_game_id"]))
+    assignments_by_series: dict[str, list[dict[str, Any]]] = {}
+    for assignment in assignments:
+        assignments_by_series.setdefault(str(assignment["series_id"]), []).append(
+            assignment
+        )
+    conflicting_series: set[str] = set()
+    for series_id, series_assignments in assignments_by_series.items():
+        values_by_key: dict[str, str] = {}
+        for assignment in series_assignments:
+            value = str(assignment.get("scoreboard_tournament") or "").strip()
+            key = _norm(value)
+            if not key:
+                issues.append(
+                    {
+                        "kind": "series_tournament_missing",
+                        "series_id": series_id,
+                        "oe_game_ids": sorted(
+                            str(row["oe_game_id"]) for row in series_assignments
+                        ),
+                    }
+                )
+                conflicting_series.add(series_id)
+                break
+            values_by_key.setdefault(key, value)
+        if len(values_by_key) > 1:
+            conflicting_series.add(series_id)
+            issues.append(
+                {
+                    "kind": "series_tournament_conflict",
+                    "series_id": series_id,
+                    "scoreboard_tournaments": sorted(values_by_key.values()),
+                    "oe_game_ids": sorted(
+                        str(row["oe_game_id"]) for row in series_assignments
+                    ),
+                }
+            )
+    if conflicting_series:
+        assignments = [
+            assignment
+            for assignment in assignments
+            if str(assignment["series_id"]) not in conflicting_series
+        ]
     selected_ids = [row["_game_id"] for row in oe_prepared]
     mapped_ids = [row["oe_game_id"] for row in assignments]
     if len(assignments) != len(oe_prepared):
@@ -706,6 +776,7 @@ def build_oe_leaguepedia_series_crosswalk(
         item = series.setdefault(assignment["series_id"], {
             "series_id": assignment["series_id"],
             "normalized_team_set": assignment["normalized_team_set"],
+            "scoreboard_tournament": assignment["scoreboard_tournament"],
             "game_orders": [],
             "oe_game_ids": [],
         })
@@ -769,12 +840,19 @@ def build_oe_leaguepedia_series_crosswalk(
             "unmatched_policy": "reject_assignment_and_record_issue",
             "outcome_used": False,
             "outcome_policy": "ignored_and_never_used_for_matching",
+            "tournament_binding": {
+                "source": "ScoreboardGames.Tournament",
+                "assignment_field": "scoreboard_tournament",
+                "series_policy": "one_non_empty_value_per_series",
+                "conflict_policy": "reject_series",
+            },
         },
         "coverage": coverage,
         "assignments": assignments,
         "series": sorted(series.values(), key=lambda item: item["series_id"]),
         "issues": issues,
     }
+    result["assignment_sha256"] = _assignment_sha256(assignments)
     result["crosswalk_sha256"] = _sha256_bytes(_canonical_json_bytes(result))
     return result
 
@@ -796,6 +874,57 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
     assignments = payload.get("assignments")
     if not isinstance(assignments, list) or any(row.get("outcome_used") is not False for row in assignments if isinstance(row, Mapping)):
         raise CrosswalkError("crosswalk assignments are not outcome-free")
+    claimed_assignment_hash = payload.get("assignment_sha256")
+    if claimed_assignment_hash is not None:
+        claimed_assignment_hash = str(claimed_assignment_hash).lower()
+        if not _HEX64.fullmatch(claimed_assignment_hash):
+            raise CrosswalkError("crosswalk assignment hash is invalid")
+        if claimed_assignment_hash != _assignment_sha256(assignments):
+            raise CrosswalkError("crosswalk assignment hash does not match payload")
+    join_contract = payload.get("join_contract")
+    tournament_binding = (
+        join_contract.get("tournament_binding")
+        if isinstance(join_contract, Mapping)
+        else None
+    )
+    if tournament_binding is not None:
+        if not isinstance(tournament_binding, Mapping) or dict(tournament_binding) != {
+            "source": "ScoreboardGames.Tournament",
+            "assignment_field": "scoreboard_tournament",
+            "series_policy": "one_non_empty_value_per_series",
+            "conflict_policy": "reject_series",
+        }:
+            raise CrosswalkError("crosswalk tournament binding is invalid")
+        assignments_by_series: dict[str, set[str]] = {}
+        for row in assignments:
+            if not isinstance(row, Mapping):
+                raise CrosswalkError("crosswalk assignment is invalid")
+            series_id = str(row.get("series_id") or "").strip()
+            tournament = str(row.get("scoreboard_tournament") or "").strip()
+            if not series_id or not tournament:
+                raise CrosswalkError("crosswalk assignment tournament is missing")
+            assignments_by_series.setdefault(series_id, set()).add(_norm(tournament))
+        if any(len(values) != 1 for values in assignments_by_series.values()):
+            raise CrosswalkError("crosswalk series tournament is conflicting")
+        series_rows = payload.get("series")
+        if not isinstance(series_rows, list):
+            raise CrosswalkError("crosswalk series summaries are missing")
+        summary_by_series: dict[str, str] = {}
+        for row in series_rows:
+            if not isinstance(row, Mapping):
+                raise CrosswalkError("crosswalk series summary is invalid")
+            series_id = str(row.get("series_id") or "").strip()
+            tournament = str(row.get("scoreboard_tournament") or "").strip()
+            if not series_id or not tournament:
+                raise CrosswalkError("crosswalk series tournament is missing")
+            if series_id in summary_by_series:
+                raise CrosswalkError("crosswalk series summary is duplicated")
+            summary_by_series[series_id] = _norm(tournament)
+        if summary_by_series != {
+            series_id: next(iter(values))
+            for series_id, values in assignments_by_series.items()
+        }:
+            raise CrosswalkError("crosswalk series tournament summary does not match assignments")
     coverage = payload.get("coverage")
     if not isinstance(coverage, Mapping) or coverage.get("complete") is not True:
         if payload.get("status") != "partial_authoritative_coverage":

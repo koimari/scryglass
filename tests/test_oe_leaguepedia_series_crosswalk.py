@@ -38,8 +38,8 @@ def _fixture() -> tuple[list[dict[str, object]], list[dict[str, object]], list[d
         {"gameid": "oe-2", "date": "2026-08-14T15:54:54Z", "league": "LEC", "patch": "16.16", "teams": ["Fnatic", "G2 Esports"], "result": "red"},
     ]
     scoreboard = [
-        {"GameId": "match-1_1", "DateTime UTC": "2026-08-14 15:07:55", "Team1": "G2 Esports", "Team2": "Fnatic", "Patch": "26.16", "OverviewPage": "LEC/2026 Summer", "Winner": "G2"},
-        {"GameId": "match-1_2", "DateTime UTC": "2026-08-14 15:54:54", "Team1": "Fnatic", "Team2": "G2 Esports", "Patch": "26.16", "OverviewPage": "LEC/2026 Summer", "Winner": "Fnatic"},
+        {"GameId": "match-1_1", "DateTime UTC": "2026-08-14 15:07:55", "Team1": "G2 Esports", "Team2": "Fnatic", "Patch": "26.16", "OverviewPage": "LEC/2026 Summer", "Tournament": "LEC 2026 Summer", "Winner": "G2"},
+        {"GameId": "match-1_2", "DateTime UTC": "2026-08-14 15:54:54", "Team1": "Fnatic", "Team2": "G2 Esports", "Patch": "26.16", "OverviewPage": "LEC/2026 Summer", "Tournament": "LEC 2026 Summer", "Winner": "Fnatic"},
     ]
     schedule = [
         {"MatchId": "match-1", "DateTime UTC": "2026-08-14 15:00:00", "Team1": "G2 Esports", "Team2": "Fnatic", "Patch": "26.16", "OverviewPage": "LEC/2026 Summer", "Winner": "G2"},
@@ -107,10 +107,100 @@ def test_complete_crosswalk_binds_exact_prefix_and_keeps_outcomes_out() -> None:
     assert result["status"] == "complete_authoritative_coverage"
     assert result["coverage"]["mapped_game_count"] == 2
     assert [row["series_id"] for row in result["assignments"]] == ["match-1", "match-1"]
+    assert [row["scoreboard_tournament"] for row in result["assignments"]] == [
+        "LEC 2026 Summer",
+        "LEC 2026 Summer",
+    ]
+    assert result["series"][0]["scoreboard_tournament"] == "LEC 2026 Summer"
+    assert result["join_contract"]["tournament_binding"]["source"] == "ScoreboardGames.Tournament"
+    assert result["assignment_sha256"]
     assert [row["scoreboard_game_order"] for row in result["assignments"]] == [1, 2]
     assert all(row["outcome_used"] is False for row in result["assignments"])
     assert result["source_records"]["oe"]["integrity_verified"] is True
     verify_crosswalk(result)
+
+
+def test_missing_scoreboard_tournament_is_unmapped_and_fail_closed() -> None:
+    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    del scoreboard[0]["Tournament"]
+    records, raw = _refresh_records(
+        records, raw, {"scoreboardgames": scoreboard}
+    )
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+        raw_source_bytes=raw,
+    )
+    assert result["status"] == "rejected_incomplete"
+    assert [row["oe_game_id"] for row in result["assignments"]] == ["oe-2"]
+    assert any(issue["kind"] == "scoreboard_tournament_missing" for issue in result["issues"])
+
+    partial = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+        raw_source_bytes=raw,
+        allow_partial=True,
+    )
+    assert partial["status"] == "partial_authoritative_coverage"
+    assert all(row["scoreboard_tournament"] for row in partial["assignments"])
+
+
+def test_conflicting_scoreboard_tournaments_reject_the_series() -> None:
+    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    scoreboard[1]["Tournament"] = "LEC 2026 Playoffs"
+    records, raw = _refresh_records(
+        records, raw, {"scoreboardgames": scoreboard}
+    )
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+        raw_source_bytes=raw,
+        allow_partial=True,
+    )
+    assert result["status"] == "partial_authoritative_coverage"
+    assert result["assignments"] == []
+    conflict = [
+        issue for issue in result["issues"] if issue["kind"] == "series_tournament_conflict"
+    ]
+    assert len(conflict) == 1
+    assert conflict[0]["scoreboard_tournaments"] == [
+        "LEC 2026 Playoffs",
+        "LEC 2026 Summer",
+    ]
+
+
+def test_tournament_assignment_tamper_changes_hash_and_fails_verification() -> None:
+    result = _build()
+    result["assignments"][0]["scoreboard_tournament"] = "forged"
+    with pytest.raises(CrosswalkError, match="self-hash"):
+        verify_crosswalk(result)
+
+    replay = _build()
+    replay["assignments"][0]["scoreboard_tournament"] = "forged"
+    replay.pop("crosswalk_sha256")
+    replay["assignment_sha256"] = hashlib.sha256(
+        _canonical(
+            sorted(replay["assignments"], key=lambda row: str(row["oe_game_id"]))
+        )
+    ).hexdigest()
+    replay["crosswalk_sha256"] = hashlib.sha256(_canonical(replay)).hexdigest()
+    with pytest.raises(CrosswalkError, match="conflicting"):
+        verify_crosswalk(replay)
 
 
 def test_outcome_mutations_do_not_change_assignments() -> None:

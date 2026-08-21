@@ -196,6 +196,9 @@ def _alias_lookup(binding: Mapping[str, Any]) -> dict[str, str]:
 def _write_receipt(output: Path, artifact_path: Path, result: Mapping[str, Any], source_receipt: Mapping[str, Any]) -> str:
     assignments = [dict(row) for row in result["assignments"]]
     mapped_ids = sorted(str(row["oe_game_id"]) for row in assignments)
+    assignment_hash = str(result.get("assignment_sha256") or "").lower()
+    if assignment_hash != _leaguepedia_assignment_sha256(assignments):
+        raise CrosswalkError("crosswalk assignment hash does not match assignments")
     artifact_raw = artifact_path.read_bytes()
     accepted_ids = list(source_receipt["accepted_game_ids"])
     receipt: dict[str, Any] = {
@@ -213,7 +216,7 @@ def _write_receipt(output: Path, artifact_path: Path, result: Mapping[str, Any],
         "accepted_game_count": len(accepted_ids),
         "accepted_game_identity_sha256": identity_sha256(accepted_ids),
         "assignment_count": len(assignments),
-        "assignment_sha256": _leaguepedia_assignment_sha256(assignments),
+        "assignment_sha256": assignment_hash,
         "mapped_game_count": len(mapped_ids),
         "mapped_game_identity_sha256": identity_sha256(mapped_ids),
         "mapped_game_ids": mapped_ids,
