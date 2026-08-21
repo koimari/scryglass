@@ -314,6 +314,64 @@ def test_resealed_raw_tournament_overview_mutation_fails_verification() -> None:
         verify_crosswalk(result)
 
 
+def test_invalid_raw_tournament_rows_replay_exact_builder_issues() -> None:
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
+    tournaments.append({"Name": "Incomplete Tournament"})
+    records, raw = _refresh_records(records, raw, {"tournaments": tournaments})
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+        raw_source_bytes=raw,
+        allow_partial=True,
+    )
+
+    assert result["status"] == "partial_authoritative_coverage"
+    assert len(result["assignments"]) == 2
+    assert [
+        issue
+        for issue in result["issues"]
+        if issue["kind"] == "invalid_tournament_row"
+    ] == [
+        {
+            "kind": "invalid_tournament_row",
+            "index": 1,
+            "reason": "Name, OverviewPage, and League are required",
+        }
+    ]
+    verify_crosswalk(result)
+
+    omitted = json.loads(json.dumps(result))
+    omitted["issues"] = [
+        issue
+        for issue in omitted["issues"]
+        if issue["kind"] != "invalid_tournament_row"
+    ]
+    omitted.pop("crosswalk_sha256")
+    omitted["crosswalk_sha256"] = hashlib.sha256(_canonical(omitted)).hexdigest()
+    with pytest.raises(CrosswalkError, match="invalid tournament issues differ"):
+        verify_crosswalk(omitted)
+
+    added = json.loads(json.dumps(result))
+    added["raw_sources"]["tournaments"].append({"League": "LEC"})
+    tournament_payload = _canonical(added["raw_sources"]["tournaments"])
+    added["source_records"]["tournaments"]["payload_sha256"] = hashlib.sha256(
+        tournament_payload
+    ).hexdigest()
+    added["source_records"]["tournaments"]["payload_bytes"] = len(
+        tournament_payload
+    )
+    added.pop("crosswalk_sha256")
+    added["crosswalk_sha256"] = hashlib.sha256(_canonical(added)).hexdigest()
+    with pytest.raises(CrosswalkError, match="invalid tournament issues differ"):
+        verify_crosswalk(added)
+
+
 def test_safe_capture_path_rejects_symlink_leaf_and_ancestor(tmp_path: Path) -> None:
     root = tmp_path / "capture"
     root.mkdir()

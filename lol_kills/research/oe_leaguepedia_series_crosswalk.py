@@ -1152,8 +1152,20 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
             tournaments_by_name = _prepared_tournament_rows(
                 raw_sources["tournaments"], tournament_issues
             )
-            if tournament_issues:
-                raise CrosswalkError("crosswalk raw tournament identity is invalid")
+            recorded_issues = payload.get("issues")
+            if not isinstance(recorded_issues, list) or any(
+                not isinstance(issue, Mapping) for issue in recorded_issues
+            ):
+                raise CrosswalkError("crosswalk issue records are invalid")
+            recorded_tournament_issues = [
+                dict(issue)
+                for issue in recorded_issues
+                if issue.get("kind") == "invalid_tournament_row"
+            ]
+            if recorded_tournament_issues != tournament_issues:
+                raise CrosswalkError(
+                    "crosswalk invalid tournament issues differ from raw source"
+                )
             competition_mapping = payload.get("competition_mapping")
             if not isinstance(competition_mapping, Mapping):
                 raise CrosswalkError("crosswalk competition mapping is missing")
