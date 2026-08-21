@@ -222,12 +222,30 @@ def _crosswalk_summary(
         and crosswalk_receipt.get("mapped_game_identity_sha256") == mapped_identity_hash
     )
     bridge_authority = crosswalk.get("authority") if artifact_present else None
+    receipt_authority = (
+        crosswalk_receipt.get("authority") if receipt_present else None
+    )
+    artifact_authoritative_series = (
+        isinstance(bridge_authority, Mapping)
+        and bridge_authority.get("authoritative_series") is True
+    )
+    receipt_authoritative_series = (
+        isinstance(receipt_authority, Mapping)
+        and receipt_authority.get("authoritative_series") is True
+    )
     bridge_authority_safe = (
         isinstance(bridge_authority, Mapping)
         and bridge_authority.get("research_only") is True
         and bridge_authority.get("public") is False
         and bridge_authority.get("promotion") is False
         and bridge_authority.get("deployment") is False
+    )
+    receipt_authority_safe = (
+        isinstance(receipt_authority, Mapping)
+        and receipt_authority.get("research_only") is True
+        and receipt_authority.get("public") is False
+        and receipt_authority.get("promotion") is False
+        and receipt_authority.get("deployment") is False
     )
     full_source_binding = (
         isinstance(source_binding, Mapping)
@@ -258,6 +276,9 @@ def _crosswalk_summary(
         and assignment_ids_are_full
         and assignment_outcome_free
         and bridge_authority_safe
+        and receipt_authority_safe
+        and artifact_authoritative_series
+        and receipt_authoritative_series
     )
     return {
         "status": "verified_full_coverage_candidate" if complete else "unavailable",
@@ -295,6 +316,12 @@ def _crosswalk_summary(
         "receipt_artifact_binding_matches": receipt_artifact_binding_matches,
         "receipt_mapped_identity_matches": receipt_mapped_identity_matches,
         "bridge_authority_safe": bridge_authority_safe,
+        "receipt_authority_safe": receipt_authority_safe,
+        "artifact_authoritative_series": artifact_authoritative_series,
+        "receipt_authoritative_series": receipt_authoritative_series,
+        "authoritative_series_flags_match": (
+            artifact_authoritative_series and receipt_authoritative_series
+        ),
         "authoritative_for_accepted_census": complete,
     }
 
@@ -483,6 +510,12 @@ def build_series_authority_audit(
         blockers.append("leaguepedia_oe_crosswalk_receipt_missing")
     if not crosswalk_summary["authoritative_for_accepted_census"]:
         blockers.append("leaguepedia_oe_bridge_is_not_full_source_bound_coverage")
+    if (
+        crosswalk_summary["artifact_present"]
+        and crosswalk_summary["receipt_present"]
+        and not crosswalk_summary["authoritative_series_flags_match"]
+    ):
+        blockers.append("leaguepedia_oe_bridge_authoritative_series_flag_missing")
     if (
         crosswalk_summary["artifact_present"]
         and crosswalk_summary["receipt_present"]
@@ -724,6 +757,13 @@ def verify_series_authority_audit(
         else None
     )
     if isinstance(bridge, Mapping):
+        if bridge.get("authoritative_for_accepted_census") is True and (
+            bridge.get("artifact_authoritative_series") is not True
+            or bridge.get("receipt_authoritative_series") is not True
+        ):
+            raise SeriesAuthorityAuditError(
+                "series authority audit bridge lacks dual authoritative-series flags"
+            )
         for name in ("artifact_file", "receipt_file"):
             record = bridge.get(name)
             if record is not None and not _valid_file_record(record):

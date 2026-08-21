@@ -17,6 +17,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.research.future_value_rating import (
     CURRENT_RATING_SIGNED_MAP_FEATURES,
     RATING_VARIANT_ORDER,
@@ -44,6 +45,49 @@ SCHEMA_VERSION = "scryglass:future-value-four-variant-ledger-bundle:v1"
 
 class FourVariantBundleError(RuntimeError):
     """The four-variant ledger bundle cannot be built safely."""
+
+
+def _accepted_map_frame(
+    frame: pd.DataFrame,
+    *,
+    source_receipt: Mapping[str, Any],
+) -> pd.DataFrame:
+    """Drop source extras before constructing any model or series metadata."""
+
+    raw_expected = source_receipt.get("accepted_game_ids")
+    if not isinstance(raw_expected, list):
+        raise FourVariantBundleError("source receipt accepted map IDs are invalid")
+    expected = tuple(str(value) for value in raw_expected)
+    if not expected or tuple(sorted(expected)) != expected or len(set(expected)) != len(expected):
+        raise FourVariantBundleError("source receipt accepted map IDs are not canonical")
+    if "game_uid" in frame.columns:
+        fallback = frame["gameid"] if "gameid" in frame.columns else None
+        values = [
+            canonical_source_game_key(
+                value,
+                fallback.loc[index] if fallback is not None else None,
+            )
+            for index, value in frame["game_uid"].items()
+        ]
+    elif "gameid" in frame.columns:
+        values = [canonical_source_game_key(value) for value in frame["gameid"]]
+    else:
+        raise FourVariantBundleError("maps have no canonical game identity")
+    ids = pd.Series(values, index=frame.index, dtype="string")
+    if ids.isna().any() or ids.str.strip().eq("").any():
+        raise FourVariantBundleError("maps have an empty canonical game identity")
+    if ids.duplicated().any():
+        raise FourVariantBundleError("maps contain duplicate canonical game IDs")
+    missing = sorted(set(expected) - set(ids.astype(str)))
+    if missing:
+        raise FourVariantBundleError(
+            f"maps are missing {len(missing)} accepted game IDs"
+        )
+    selected = frame.loc[ids.isin(expected)].copy()
+    selected_ids = tuple(sorted(ids.loc[selected.index].astype(str)))
+    if selected_ids != expected or len(selected) != len(expected):
+        raise FourVariantBundleError("accepted map census is not exactly one row per game")
+    return selected
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -561,6 +605,7 @@ def build_bundle(
     source_receipt = _load_json(source_receipt_path, "source receipt")
     validate_future_value_source_receipt_payload(source_receipt)
     maps = pd.read_parquet(source_root / "maps.parquet")
+    maps = _accepted_map_frame(maps, source_receipt=source_receipt)
     players = pd.read_parquet(source_root / "oe_player_games.parquet")
     teams = pd.read_parquet(source_root / "oe_team_games.parquet")
     crosswalk_assignments: Sequence[Mapping[str, Any]] = ()

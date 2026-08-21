@@ -709,17 +709,11 @@ def _phase_file_record(
 
 def _phase_reference_game_ids(source_receipt: Mapping[str, Any]) -> tuple[str, ...]:
     accepted = tuple(canonical_game_ids(source_receipt["accepted_game_ids"]))
-    extras_value = source_receipt.get("source_extra_game_ids")
-    if not isinstance(extras_value, Mapping):
-        extras_value = {}
-    raw_extra_ids = extras_value.get("maps") or ()
-    if not isinstance(raw_extra_ids, (list, tuple)):
-        raise FutureValueTrainingError("phase reference extra game IDs are invalid")
-    extras = tuple(canonical_game_ids(raw_extra_ids))
-    reference_ids = tuple(canonical_game_ids((*accepted, *extras)))
-    if len(reference_ids) != len(accepted) + len(extras):
-        raise FutureValueTrainingError("phase reference census contains duplicate IDs")
-    return reference_ids
+    if not accepted or list(accepted) != [str(value) for value in source_receipt["accepted_game_ids"]]:
+        raise FutureValueTrainingError("phase reference accepted IDs are not canonical")
+    # Source extras describe rows that were rejected from the accepted census.
+    # They are never part of phase, series, or evaluation metadata.
+    return accepted
 
 
 def _verify_phase_source_receipt_file(
@@ -1053,6 +1047,42 @@ def _row_game_ids(frame: pd.DataFrame, label: str) -> pd.Series:
     return ids
 
 
+def _accepted_map_frame(
+    frame: pd.DataFrame,
+    *,
+    source_receipt: Mapping[str, Any],
+) -> pd.DataFrame:
+    """Return only the accepted map census before any series binding.
+
+    Normalized source files can carry rows outside the accepted receipt.  Those
+    rows are valid source evidence for the raw census, but they must not reach
+    a Leaguepedia crosswalk, a series partition, or a model evaluation.  A
+    duplicate canonical identity is unsafe even when the duplicate is outside
+    the accepted set because it makes source selection ambiguous.
+    """
+
+    raw_expected = source_receipt.get("accepted_game_ids")
+    if not isinstance(raw_expected, list):
+        raise FutureValueTrainingError("source receipt accepted map IDs are invalid")
+    expected = tuple(canonical_game_ids(raw_expected))
+    if not expected or list(expected) != [str(value) for value in raw_expected]:
+        raise FutureValueTrainingError("source receipt accepted map IDs are not canonical")
+    ids = _row_game_ids(frame, "maps")
+    if ids.duplicated().any():
+        raise FutureValueTrainingError("maps contain duplicate canonical game IDs")
+    available = set(ids.astype(str))
+    missing = sorted(set(expected) - available)
+    if missing:
+        raise FutureValueTrainingError(
+            f"maps are missing {len(missing)} accepted game IDs"
+        )
+    selected = frame.loc[ids.isin(expected)].copy()
+    selected_ids = tuple(sorted(ids.loc[selected.index].astype(str)))
+    if selected_ids != expected or len(selected) != len(expected):
+        raise FutureValueTrainingError("accepted map census is not exactly one row per game")
+    return selected
+
+
 def _code_hashes(repo_root: Path) -> dict[str, str]:
     """Bind every producer module used by the four-way research run."""
 
@@ -1254,28 +1284,30 @@ def run_model_evaluation(
         ):
             raise FutureValueTrainingError(f"normalized model source changed: {label}")
         frame = pd.read_parquet(path)
-        if label == "maps" and crosswalk_path is not None and crosswalk_receipt_path is not None:
-            bound_full_maps = bind_verified_leaguepedia_series_crosswalk(
-                frame,
-                crosswalk_path=crosswalk_path,
-                receipt_path=crosswalk_receipt_path,
-                source_receipt=source_receipt,
-                expected_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
-            )
-            full_series_frame = _map_model_frame(
-                bound_full_maps,
-                verified_source_receipt=source_receipt,
-                verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
-                verified_crosswalk_receipt_file_sha256=str(
+        if label == "maps":
+            frame = _accepted_map_frame(frame, source_receipt=source_receipt)
+            if crosswalk_path is not None and crosswalk_receipt_path is not None:
+                bound_full_maps = bind_verified_leaguepedia_series_crosswalk(
+                    frame,
+                    crosswalk_path=crosswalk_path,
+                    receipt_path=crosswalk_receipt_path,
+                    source_receipt=source_receipt,
+                    expected_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+                )
+                full_series_frame = _map_model_frame(
+                    bound_full_maps,
+                    verified_source_receipt=source_receipt,
+                    verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+                    verified_crosswalk_receipt_file_sha256=str(
+                        crosswalk_receipt_file_sha256
+                    ),
+                )
+                verified_series_model_frame = full_series_frame[
+                    full_series_frame["game_id"].astype(str).isin(eligible_ids)
+                ].copy()
+                verified_series_model_frame.attrs["crosswalk_receipt_file_sha256"] = str(
                     crosswalk_receipt_file_sha256
-                ),
-            )
-            verified_series_model_frame = full_series_frame[
-                full_series_frame["game_id"].astype(str).isin(eligible_ids)
-            ].copy()
-            verified_series_model_frame.attrs["crosswalk_receipt_file_sha256"] = str(
-                crosswalk_receipt_file_sha256
-            )
+                )
         ids = _row_game_ids(frame, label)
         selected = frame.loc[ids.isin(eligible_ids)].copy()
         selected["game_uid"] = ids.loc[selected.index].to_numpy()
