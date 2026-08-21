@@ -215,6 +215,16 @@ def _finite_probability(value: object, label: str) -> float:
     return number
 
 
+def offset_values_sha256(offsets: Mapping[str, float]) -> str:
+    """Hash one canonical, ordered map of game logits."""
+
+    rows = [
+        {"game_id": game_id, "logit": float(offsets[game_id])}
+        for game_id in sorted(offsets)
+    ]
+    return sha256_bytes(canonical_json_bytes(rows))
+
+
 def _required_utc_timestamp(value: object, label: str) -> pd.Timestamp:
     """Parse a required timezone-aware UTC timestamp."""
 
@@ -325,6 +335,14 @@ def _validate_fold_chronology(
         series_safety = ledger_binding.get("series_safety")
         if not isinstance(series_safety, Mapping) or series_safety.get("policy") != "whole_series_disjoint":
             raise FutureValueTierListError(f"{variant} fold {fold} series safety is missing")
+        train_series_identity = _require_hash(
+            series_safety.get("train_series_identity_sha256"),
+            f"{variant} fold {fold} train series identity",
+        )
+        validation_series_identity = _require_hash(
+            series_safety.get("validation_series_identity_sha256"),
+            f"{variant} fold {fold} validation series identity",
+        )
 
         fold_audit.append(
             {
@@ -334,6 +352,13 @@ def _validate_fold_chronology(
                 "fit_date_max": fit_max.isoformat().replace("+00:00", "Z"),
                 "validation_interval_start": interval_start.isoformat().replace("+00:00", "Z"),
                 "validation_interval_end": interval_end.isoformat().replace("+00:00", "Z"),
+                "series_disjointness": {
+                    "status": "ledger_hash_bound_not_recomputed",
+                    "policy": "whole_series_disjoint",
+                    "train_series_identity_sha256": train_series_identity,
+                    "validation_series_identity_sha256": validation_series_identity,
+                    "limitation": "exact train and validation cluster IDs are not present in the feature ledger",
+                },
             }
         )
 
@@ -360,20 +385,20 @@ def _validate_fold_chronology(
         dates = frame.set_index("game_uid")["date"]
         for fold_record in folds:
             fold = int(fold_record["fold"])
-            interval_start = _required_utc_timestamp(
-                fold_record["validation_interval_start"],
-                f"{variant} fold {fold} validation_interval_start",
+            validation_start = _required_utc_timestamp(
+                fold_record["validation_start"],
+                f"{variant} fold {fold} validation_start",
             )
-            interval_end = _required_utc_timestamp(
-                fold_record["validation_interval_end"],
-                f"{variant} fold {fold} validation_interval_end",
+            validation_end = _required_utc_timestamp(
+                fold_record["validation_end"],
+                f"{variant} fold {fold} validation_end",
             )
             missing = sorted(set(by_fold[fold]) - set(dates.index))
             if missing:
                 raise FutureValueTierListError(f"{variant} fold {fold} scored maps are missing")
             fold_dates = dates.loc[by_fold[fold]]
-            if bool((fold_dates < interval_start).any()) or bool((fold_dates > interval_end).any()):
-                raise FutureValueTierListError(f"{variant} fold {fold} scored dates leave the validation interval")
+            if bool((fold_dates < validation_start).any()) or bool((fold_dates > validation_end).any()):
+                raise FutureValueTierListError(f"{variant} fold {fold} scored dates leave the validation window")
         date_check = "verified_against_frozen_maps"
     return {"status": "verified", "date_check": date_check, "folds": sorted(fold_audit, key=lambda item: item["fold"])}
 
@@ -489,11 +514,14 @@ def load_prediction_offsets(
         ledger.get("game_identity_sha256"), f"{variant} game identity"
     ):
         raise FutureValueTierListError(f"{variant} prediction game identity changed")
+    offsets_hash = offset_values_sha256(offsets)
     return offsets, targets, {
         "variant": variant,
+        "producer": f"future_value_rating:{variant}",
         "artifact_locator": str(path),
         "artifact_raw_sha256": expected,
         "prediction_ledger_sha256": str(ledger["sha256"]),
+        "offsets_sha256": offsets_hash,
         "variant_receipt_sha256": str(result.get("variant_receipt", {}).get("receipt_sha256") or ""),
         "blockers": sorted(str(value) for value in result.get("blockers", [])),
         "chronology": chronology,
@@ -556,7 +584,6 @@ def make_offset_provenance(
     """Seal the exact selected-map offset vector for the pooled builder."""
 
     ordered_ids = sorted(offsets)
-    rows = [{"game_id": game_id, "logit": float(offsets[game_id])} for game_id in ordered_ids]
     payload: dict[str, Any] = {
         "schema_version": PRE_MAP_OFFSET_PROVENANCE_SCHEMA,
         "status": "research_only",
@@ -566,7 +593,7 @@ def make_offset_provenance(
         "source_receipt_sha256": _require_hash(source_receipt_sha256, "source receipt hash"),
         "source_identity_sha256": identity_sha256(ordered_ids),
         "source_game_count": len(ordered_ids),
-        "offsets_sha256": sha256_bytes(canonical_json_bytes(rows)),
+        "offsets_sha256": offset_values_sha256(offsets),
     }
     payload["receipt_sha256"] = sha256_bytes(canonical_json_bytes(payload))
     return payload
@@ -607,6 +634,8 @@ def validate_candidate(
     variant: str,
     universe: Mapping[str, Any],
     expected_source_receipt_sha256: str,
+    expected_offsets_sha256: str,
+    expected_producer: str,
 ) -> dict[str, Any]:
     """Validate one pooled candidate independently of the worker result.
 
@@ -646,6 +675,9 @@ def validate_candidate(
             raise FutureValueTierListError(f"{variant} candidate {field} changed")
     if candidate_source.get("source_identity_sha256") != expected_game_identity:
         raise FutureValueTierListError(f"{variant} candidate source identity changed")
+    expected_offsets = _require_hash(expected_offsets_sha256, f"{variant} expected offsets hash")
+    if expected_producer != f"future_value_rating:{variant}":
+        raise FutureValueTierListError(f"{variant} expected producer is not trusted")
     override = candidate.get("pre_map_offset_override")
     if not isinstance(override, Mapping) or override.get("applied") is not True:
         raise FutureValueTierListError(f"{variant} candidate offset override is missing")
@@ -672,12 +704,16 @@ def validate_candidate(
         raise FutureValueTierListError(f"{variant} candidate offset provenance status changed")
     if provenance.get("authority") is not False or provenance.get("timing") != "strict_prior_pre_map":
         raise FutureValueTierListError(f"{variant} candidate offset timing changed")
+    if provenance.get("producer") != expected_producer:
+        raise FutureValueTierListError(f"{variant} candidate offset producer changed")
     if provenance.get("source_receipt_sha256") != _require_hash(
         expected_source_receipt_sha256, f"{variant} expected source receipt"
     ):
         raise FutureValueTierListError(f"{variant} candidate offset source receipt changed")
     if provenance.get("source_identity_sha256") != expected_game_identity or provenance.get("source_game_count") != expected_game_count:
         raise FutureValueTierListError(f"{variant} candidate offset source census changed")
+    if expected_offsets != offsets_hash:
+        raise FutureValueTierListError(f"{variant} candidate offset values differ from the verified model")
     if provenance.get("offsets_sha256") != offsets_hash or override.get("offsets_sha256") != offsets_hash:
         raise FutureValueTierListError(f"{variant} candidate offset values changed")
     claimed_receipt = _require_hash(provenance.get("receipt_sha256"), f"{variant} offset receipt hash")
@@ -689,6 +725,7 @@ def validate_candidate(
         "source_identity_sha256": str(expected_game_identity),
         "game_count": expected_game_count,
         "offsets_sha256": offsets_hash,
+        "producer": expected_producer,
     }
 
 
@@ -795,11 +832,18 @@ def build_fourway_diff(
     if "source_identity_sha256" not in source or "source_receipt_sha256" not in source:
         raise FutureValueTierListError("four-way source binding is incomplete")
     for variant in VARIANTS:
+        binding = model_bindings.get(variant)
+        if not isinstance(binding, Mapping):
+            raise FutureValueTierListError(f"{variant} model binding is missing")
+        if "offsets_sha256" not in binding or "producer" not in binding:
+            raise FutureValueTierListError(f"{variant} model offset binding is incomplete")
         validate_candidate(
             candidates[variant],
             variant=variant,
             universe=universe,
             expected_source_receipt_sha256=str(source["source_receipt_sha256"]),
+            expected_offsets_sha256=str(binding["offsets_sha256"]),
+            expected_producer=str(binding["producer"]),
         )
     rows_by_variant = {variant: _candidate_rows(candidates[variant]) for variant in VARIANTS}
     reference_keys = set(rows_by_variant[REFERENCE_VARIANT])
