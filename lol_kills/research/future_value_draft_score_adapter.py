@@ -27,6 +27,7 @@ PUBLIC_DRAFT_RECORDS_SCHEMA = "scryglass:draft-records:v1"
 ARTIFACT_RECEIPT_SCHEMA = "scryglass:public-draft-artifact-receipt:v1"
 CROSSFIT_RECEIPT_SCHEMA = "scryglass:public-crossfit-draft-receipt:v1"
 PUBLIC_DESCRIPTIVE_AUTHORITY_SCHEMA = "scryglass:draft-authority:v1"
+PUBLIC_DESCRIPTIVE_AUTHORITY_RECEIPT_SCHEMA = "scryglass:draft-authority-receipt:v1"
 SOURCE_BOUND_ATOM_LEDGER_SCHEMA = "scryglass:future-value-draft-score-atom-ledger:v1"
 CANONICAL_EDGE_COMPONENTS = core.STATIC_COMPOSITION_COMPONENTS
 _CROSSFIT_RECEIPT_FIELDS = frozenset(
@@ -43,6 +44,10 @@ _CROSSFIT_RECEIPT_FIELDS = frozenset(
         "artifact_locator",
         "artifact_bytes",
         "artifact_sha256",
+        "fit_window_end",
+        "fit_game_dates",
+        "chronological_evaluation_suitable",
+        "chronological_evaluation_reason",
         "receipt_sha256",
     }
 )
@@ -97,6 +102,8 @@ def _safe_relative_path(root: Path, value: object, label: str) -> Path:
 def verify_public_descriptive_authority(
     authority_path: Path | str,
     *,
+    authority_receipt_path: Path | str,
+    expected_authority_file_sha256: str,
     repository_root: Path | str | None = None,
 ) -> PublicDescriptiveAuthorityBinding:
     """Verify the independent static descriptive model and its source files.
@@ -106,8 +113,14 @@ def verify_public_descriptive_authority(
     record, the model bytes, the recipe bytes, and the scorer code bytes.
     """
 
-    authority_file = _file(authority_path, "descriptive authority receipt")
-    payload, raw = _json(authority_file, "descriptive authority receipt")
+    authority_file = _file(authority_path, "descriptive authority file")
+    payload, authority_raw = _json(authority_file, "descriptive authority file")
+    expected_authority_hash = _require_sha(
+        expected_authority_file_sha256,
+        "expected descriptive authority file SHA-256",
+    )
+    if _sha_bytes(authority_raw) != expected_authority_hash:
+        raise DraftScoreAdapterError("descriptive authority file changed")
     if payload.get("schema_version") != PUBLIC_DESCRIPTIVE_AUTHORITY_SCHEMA:
         raise DraftScoreAdapterError("descriptive authority schema is invalid")
     if payload.get("status") != "descriptive" or payload.get("estimand") != "composition_only":
@@ -124,9 +137,103 @@ def verify_public_descriptive_authority(
     model_sha = _verify_file(model_file, expected_bytes=model_file.stat().st_size, expected_sha256=payload["artifact_sha256"], label="descriptive model")
     recipe_sha = _verify_file(recipe_file, expected_bytes=recipe_file.stat().st_size, expected_sha256=payload["recipe_sha256"], label="descriptive recipe")
     scorer_sha = _verify_file(scorer_file, expected_bytes=scorer_file.stat().st_size, expected_sha256=payload["scorer_code_sha256"], label="descriptive scorer")
+    receipt_file = _file(authority_receipt_path, "descriptive authority receipt")
+    receipt, receipt_raw = _json(receipt_file, "descriptive authority receipt")
+    receipt_fields = {
+        "schema_version",
+        "authority_locator",
+        "authority_bytes",
+        "authority_sha256",
+        "authority_id",
+        "model_version",
+        "model_locator",
+        "model_bytes",
+        "model_sha256",
+        "recipe_locator",
+        "recipe_bytes",
+        "recipe_sha256",
+        "scorer_locator",
+        "scorer_bytes",
+        "scorer_sha256",
+        "authority",
+        "receipt_sha256",
+    }
+    if set(receipt) != receipt_fields or receipt.get("schema_version") != PUBLIC_DESCRIPTIVE_AUTHORITY_RECEIPT_SCHEMA:
+        raise DraftScoreAdapterError("descriptive authority receipt schema is invalid")
+    claimed_receipt_hash = _require_sha(
+        receipt.get("receipt_sha256"), "descriptive authority receipt_sha256"
+    )
+    unsigned_receipt = dict(receipt)
+    unsigned_receipt.pop("receipt_sha256", None)
+    if _sha(unsigned_receipt) != claimed_receipt_hash:
+        raise DraftScoreAdapterError("descriptive authority receipt self-hash changed")
+    if receipt.get("authority") != {
+        "research_only": True,
+        "public_probability": False,
+        "deployment": False,
+    }:
+        raise DraftScoreAdapterError("descriptive authority receipt grants authority")
+    receipt_base = receipt_file.parent
+    receipt_paths = {
+        "authority": _file(
+            Path(str(receipt["authority_locator"]))
+            if Path(str(receipt["authority_locator"])).is_absolute()
+            else receipt_base / str(receipt["authority_locator"]),
+            "descriptive authority receipt authority file",
+        ),
+        "model": _file(
+            Path(str(receipt["model_locator"]))
+            if Path(str(receipt["model_locator"])).is_absolute()
+            else receipt_base / str(receipt["model_locator"]),
+            "descriptive authority receipt model",
+        ),
+        "recipe": _file(
+            Path(str(receipt["recipe_locator"]))
+            if Path(str(receipt["recipe_locator"])).is_absolute()
+            else receipt_base / str(receipt["recipe_locator"]),
+            "descriptive authority receipt recipe",
+        ),
+        "scorer": _file(
+            Path(str(receipt["scorer_locator"]))
+            if Path(str(receipt["scorer_locator"])).is_absolute()
+            else receipt_base / str(receipt["scorer_locator"]),
+            "descriptive authority receipt scorer",
+        ),
+    }
+    expected_paths = {
+        "authority": authority_file,
+        "model": model_file,
+        "recipe": recipe_file,
+        "scorer": scorer_file,
+    }
+    expected_hashes = {
+        "authority": expected_authority_hash,
+        "model": model_sha,
+        "recipe": recipe_sha,
+        "scorer": scorer_sha,
+    }
+    for label in expected_paths:
+        if receipt_paths[label] != expected_paths[label]:
+            raise DraftScoreAdapterError(
+                f"descriptive authority receipt {label} locator changed"
+            )
+        _verify_file(
+            receipt_paths[label],
+            expected_bytes=receipt.get(f"{label}_bytes"),
+            expected_sha256=receipt.get(f"{label}_sha256"),
+            label=f"descriptive authority receipt {label}",
+        )
+        if str(receipt.get(f"{label}_sha256") or "").lower() != expected_hashes[label]:
+            raise DraftScoreAdapterError(
+                f"descriptive authority receipt {label} hash changed"
+            )
+    if receipt.get("authority_id") != payload.get("authority_id") or receipt.get(
+        "model_version"
+    ) != payload.get("model_version"):
+        raise DraftScoreAdapterError("descriptive authority receipt identity changed")
     return PublicDescriptiveAuthorityBinding(
-        authority_path=authority_file,
-        authority_receipt_sha256=_sha_bytes(raw),
+        authority_path=receipt_file,
+        authority_receipt_sha256=_sha_bytes(receipt_raw),
         model_path=model_file,
         model_sha256=model_sha,
         recipe_path=recipe_file,
@@ -237,6 +344,70 @@ def _manifest_record(manifest: Mapping[str, Any], draft_path: Path, manifest_pat
     if not isinstance(record.get("bytes"), int) or not str(record.get("sha256") or ""):
         raise DraftScoreAdapterError("public manifest draft artifact record is incomplete")
     return record
+
+
+def _verify_public_manifest_receipt(
+    manifest_path: Path,
+    receipt_path: Path | str,
+    *,
+    expected_receipt_file_sha256: str,
+) -> Mapping[str, Any]:
+    receipt_file = _file(receipt_path, "public manifest receipt")
+    receipt, raw = _json(receipt_file, "public manifest receipt")
+    expected_file_hash = _require_sha(
+        expected_receipt_file_sha256, "expected public manifest receipt SHA-256"
+    )
+    if _sha_bytes(raw) != expected_file_hash:
+        raise DraftScoreAdapterError("public manifest receipt file changed")
+    fields = {
+        "schema_version",
+        "status",
+        "variant",
+        "release_id",
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "source_receipt_sha256",
+        "accepted_game_ids_sha256",
+        "authority",
+        "files",
+        "freeze_sha256",
+    }
+    if set(receipt) != fields or receipt.get("schema_version") != "scryglass:future-value-four-variant-freeze:v1":
+        raise DraftScoreAdapterError("public manifest receipt schema is invalid")
+    claimed = _require_sha(receipt.get("freeze_sha256"), "public manifest receipt self-hash")
+    unsigned = dict(receipt)
+    unsigned.pop("freeze_sha256", None)
+    if _sha(unsigned) != claimed:
+        raise DraftScoreAdapterError("public manifest receipt self-hash changed")
+    authority = receipt.get("authority")
+    if not isinstance(authority, Mapping) or authority.get("research_only") is not True:
+        raise DraftScoreAdapterError("public manifest receipt authority is invalid")
+    if any(value is not False for key, value in authority.items() if key != "research_only"):
+        raise DraftScoreAdapterError("public manifest receipt grants authority")
+    files = receipt.get("files")
+    if not isinstance(files, list):
+        raise DraftScoreAdapterError("public manifest receipt files are invalid")
+    candidates = []
+    for record in files:
+        if not isinstance(record, Mapping) or set(record) != {"path", "bytes", "sha256"}:
+            raise DraftScoreAdapterError("public manifest receipt file record is invalid")
+        locator = Path(str(record["path"]))
+        candidate = receipt_file.parent / locator
+        try:
+            if candidate.resolve() == manifest_path.resolve():
+                candidates.append(record)
+        except OSError:
+            continue
+    if len(candidates) != 1:
+        raise DraftScoreAdapterError("public manifest receipt does not bind the manifest")
+    _verify_file(
+        manifest_path,
+        expected_bytes=candidates[0].get("bytes"),
+        expected_sha256=candidates[0].get("sha256"),
+        label="public manifest",
+    )
+    return receipt
 
 
 def _find_source_identity(value: object) -> str | None:
@@ -364,6 +535,8 @@ def adapt_public_descriptive_draft_records(
     manifest_path: Path | str,
     source_receipt_path: Path | str,
     *,
+    manifest_receipt_path: Path | str,
+    expected_manifest_receipt_sha256: str,
     output_dir: Path | str | None = None,
     source_root: Path | str | None = None,
 ) -> PublicDraftAtomAdapterResult:
@@ -373,6 +546,11 @@ def adapt_public_descriptive_draft_records(
     pack_manifest_path = _file(manifest_path, "public pack manifest")
     source_path = _file(source_receipt_path, "canonical source receipt")
     manifest, _manifest_raw = _json(pack_manifest_path, "public pack manifest")
+    _verify_public_manifest_receipt(
+        pack_manifest_path,
+        manifest_receipt_path,
+        expected_receipt_file_sha256=expected_manifest_receipt_sha256,
+    )
     draft, draft_raw = _json(draft_path, "public draft records")
     record = _manifest_record(manifest, draft_path, pack_manifest_path)
     _verify_file(draft_path, expected_bytes=record.get("bytes"), expected_sha256=record.get("sha256"), label="public draft records")
@@ -523,6 +701,10 @@ def adapt_verified_public_descriptive_draft_records(
     source_receipt_path: Path | str,
     *,
     authority_path: Path | str,
+    authority_receipt_path: Path | str,
+    expected_authority_file_sha256: str,
+    manifest_receipt_path: Path | str,
+    expected_manifest_receipt_sha256: str,
     repository_root: Path | str,
     output_dir: Path | str | None = None,
     source_root: Path | str | None = None,
@@ -537,12 +719,16 @@ def adapt_verified_public_descriptive_draft_records(
 
     authority = verify_public_descriptive_authority(
         authority_path,
+        authority_receipt_path=authority_receipt_path,
+        expected_authority_file_sha256=expected_authority_file_sha256,
         repository_root=repository_root,
     )
     result = adapt_public_descriptive_draft_records(
         draft_records_path,
         manifest_path,
         source_receipt_path,
+        manifest_receipt_path=manifest_receipt_path,
+        expected_manifest_receipt_sha256=expected_manifest_receipt_sha256,
         output_dir=output_dir,
         source_root=source_root,
     )
@@ -657,6 +843,10 @@ def write_source_bound_atom_ledger(
     ) >= cutoff:
         raise DraftScoreAdapterError("atom ledger fit window is not strictly prior")
     evidence_mode = "fold_ready" if result.chronological_evaluation_suitable and fit_ids else "descriptive_only"
+    if evidence_mode == "fold_ready" and not (dates > cutoff).all():
+        raise DraftScoreAdapterError(
+            "fold-ready atom ledger scored dates are not strictly after fit_window_end"
+        )
     rows: list[dict[str, Any]] = []
     ordered = frame.sort_values("game_id", kind="stable")
     for row in ordered.itertuples(index=False):
@@ -671,6 +861,8 @@ def write_source_bound_atom_ledger(
             }
         )
     row_digest = _sha(rows)
+    scored_game_dates = {row["game_id"]: row["date"] for row in rows}
+    scored_dates_sha256 = _sha(scored_game_dates)
     output = Path(output_path).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     fold_producer = dict(result.producer_receipt)
@@ -704,6 +896,8 @@ def write_source_bound_atom_ledger(
         "fit_window_start": normalized_start,
         "fit_window_end": core._timestamp_text(fit_window_end, "atom ledger fit_window_end"),
         "fit_game_dates": normalized_fit_dates,
+        "scored_game_dates": scored_game_dates,
+        "scored_dates_sha256": scored_dates_sha256,
         "producer_receipt_sha256": str(fold_producer["receipt_sha256"]).lower(),
         "producer_receipt_locator": producer_receipt_path.name,
         "producer_receipt_bytes": len(producer_receipt_raw),
@@ -734,6 +928,8 @@ def write_source_bound_atom_ledger(
         "fit_window_start": artifact_payload["fit_window_start"],
         "fit_window_end": artifact_payload["fit_window_end"],
         "fit_game_dates": normalized_fit_dates,
+        "scored_game_dates": scored_game_dates,
+        "scored_dates_sha256": scored_dates_sha256,
         "producer_receipt_sha256": artifact_payload["producer_receipt_sha256"],
         "producer_receipt_locator": artifact_payload["producer_receipt_locator"],
         "producer_receipt_bytes": artifact_payload["producer_receipt_bytes"],
@@ -875,6 +1071,33 @@ def load_source_bound_atom_ledger(
         raise DraftScoreAdapterError("source-bound atom ledger row schema changed")
     if [str(row.get("game_id")) for row in rows] != list(ids):
         raise DraftScoreAdapterError("source-bound atom ledger row order changed")
+    scored_game_dates = ledger_payload.get("scored_game_dates")
+    if not isinstance(scored_game_dates, Mapping) or set(scored_game_dates) != set(ids):
+        raise DraftScoreAdapterError("source-bound atom scored dates are invalid")
+    canonical_scored_dates: dict[str, str] = {}
+    for row in rows:
+        game_id = str(row["game_id"])
+        row_date = pd.to_datetime(row.get("date"), utc=True, errors="coerce")
+        bound_date = pd.to_datetime(scored_game_dates.get(game_id), utc=True, errors="coerce")
+        if pd.isna(row_date) or pd.isna(bound_date) or row_date != bound_date:
+            raise DraftScoreAdapterError("source-bound atom scored date binding changed")
+        canonical_scored_dates[game_id] = row_date.isoformat().replace("+00:00", "Z")
+    for payload in (ledger_payload, receipt_payload):
+        if payload.get("scored_game_dates") != canonical_scored_dates:
+            raise DraftScoreAdapterError("source-bound atom scored dates changed")
+        if payload.get("scored_dates_sha256") != _sha(canonical_scored_dates):
+            raise DraftScoreAdapterError("source-bound atom scored date digest changed")
+    if ledger_payload["evidence_mode"] == "fold_ready":
+        cutoff = pd.to_datetime(
+            ledger_payload.get("fit_window_end"), utc=True, errors="coerce"
+        )
+        scored_dates = pd.to_datetime(
+            list(canonical_scored_dates.values()), utc=True, errors="coerce"
+        )
+        if pd.isna(cutoff) or scored_dates.isna().any() or not (scored_dates > cutoff).all():
+            raise DraftScoreAdapterError(
+                "source-bound atom fold-ready dates are not strictly prior"
+            )
     row_digest = _sha(rows)
     if row_digest != _require_sha(ledger_payload.get("row_digest_sha256"), "atom ledger row_digest_sha256"):
         raise DraftScoreAdapterError("source-bound atom ledger rows changed")
@@ -896,6 +1119,8 @@ class PublicCrossfitAtomAdapterResult:
     receipt: Mapping[str, Any]
     rows_path: Path
     receipt_path: Path
+    chronological_evaluation_suitable: bool
+    chronological_evaluation_reason: str | None
 
 
 def adapt_public_crossfit_draft_rows(
@@ -939,6 +1164,10 @@ def adapt_public_crossfit_draft_rows(
         "artifact_locator",
         "artifact_bytes",
         "artifact_sha256",
+        "fit_window_end",
+        "fit_game_dates",
+        "chronological_evaluation_suitable",
+        "chronological_evaluation_reason",
         "receipt_sha256",
     }
     if not required_receipt_fields.issubset(receipt):
@@ -1045,11 +1274,50 @@ def adapt_public_crossfit_draft_rows(
         raise DraftScoreAdapterError("crossfit fit IDs are outside the model fold census")
     if fit_set & set(scored_ids):
         raise DraftScoreAdapterError("crossfit fit and scored game IDs overlap")
+    claimed_suitable = receipt.get("chronological_evaluation_suitable")
+    if not isinstance(claimed_suitable, bool):
+        raise DraftScoreAdapterError("crossfit chronology suitability is invalid")
+    chronology_reason = receipt.get("chronological_evaluation_reason")
+    fit_window_end = receipt.get("fit_window_end")
+    fit_dates_raw = receipt.get("fit_game_dates")
+    if fit_window_end is None:
+        if fit_dates_raw != {} or claimed_suitable:
+            raise DraftScoreAdapterError("crossfit chronology evidence is incomplete")
+        if not str(chronology_reason or "").strip():
+            raise DraftScoreAdapterError("crossfit chronology blocker is required")
+    else:
+        cutoff = pd.to_datetime(fit_window_end, utc=True, errors="coerce")
+        if pd.isna(cutoff) or not isinstance(fit_dates_raw, Mapping) or set(
+            str(value) for value in fit_dates_raw
+        ) != fit_set:
+            raise DraftScoreAdapterError("crossfit fit date evidence is invalid")
+        for game_id in fit_ids:
+            stamp = pd.to_datetime(fit_dates_raw.get(game_id), utc=True, errors="coerce")
+            if pd.isna(stamp) or stamp >= cutoff:
+                raise DraftScoreAdapterError("crossfit fit date is not strictly prior")
+        scored_dates = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+        derived_suitable = bool(
+            not scored_dates.isna().any() and (scored_dates > cutoff).all()
+        )
+        if claimed_suitable != derived_suitable:
+            raise DraftScoreAdapterError("crossfit chronology suitability changed")
+        if claimed_suitable and chronology_reason is not None:
+            raise DraftScoreAdapterError("crossfit chronology reason is invalid")
+        if not claimed_suitable and not str(chronology_reason or "").strip():
+            raise DraftScoreAdapterError("crossfit chronology blocker is required")
+    frame["fit_window_end"] = fit_window_end
+    frame["chronological_evaluation_suitable"] = claimed_suitable
+    if not claimed_suitable:
+        frame["producer_timing"] = "chronology_unavailable"
     return PublicCrossfitAtomAdapterResult(
         frame=frame,
         receipt=receipt,
         rows_path=rows_file,
         receipt_path=promotion_receipt_file,
+        chronological_evaluation_suitable=claimed_suitable,
+        chronological_evaluation_reason=None
+        if claimed_suitable
+        else str(chronology_reason),
     )
 
 
