@@ -28,6 +28,7 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+from scipy.optimize import minimize
 
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.global_player_bt import (
@@ -4394,6 +4395,236 @@ def _classification_metrics(target: pd.Series, probability: pd.Series) -> dict[s
     }
 
 
+CALIBRATION_SCHEMA_VERSION = "scryglass:future-value-strict-prior-calibration:v1"
+CALIBRATION_MAX_SLOPE = 100.0
+CALIBRATION_MIN_SLOPE = 1e-9
+
+
+def _stable_sigmoid(logit: np.ndarray) -> np.ndarray:
+    """Return finite probabilities without changing the supplied logit evidence."""
+
+    values = np.asarray(logit, dtype=float)
+    output = np.empty_like(values, dtype=float)
+    positive = values >= 0.0
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        output[positive] = 1.0 / (1.0 + np.exp(-np.clip(values[positive], -40.0, 40.0)))
+        exp_values = np.exp(np.clip(values[~positive], -40.0, 40.0))
+        output[~positive] = exp_values / (1.0 + exp_values)
+    return output
+
+
+def _calibration_input_sha256(
+    fold_numbers: Sequence[int],
+    game_ids: Sequence[str],
+    logits: Sequence[float],
+    targets: Sequence[int],
+) -> str:
+    rows = [
+        {
+            "fold": int(fold),
+            "game_id": str(game_id),
+            "raw_logit": float(logit),
+            "target": int(target),
+        }
+        for fold, game_id, logit, target in zip(
+            fold_numbers, game_ids, logits, targets
+        )
+    ]
+    return hashlib.sha256(_canonical_json_bytes(rows)).hexdigest()
+
+
+def _fit_strict_prior_calibration(
+    raw_logits: Sequence[float],
+    targets: Sequence[int],
+    *,
+    source_receipt_sha256: str,
+    current_fold: int,
+    current_validation_game_ids: Sequence[str],
+    current_validation_start: str,
+    prior_fold_numbers: Sequence[int] = (),
+    prior_game_ids: Sequence[str] = (),
+    prior_validation_ends: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Fit one positive, zero-intercept slope on prior outer-fold rows only.
+
+    The first outer fold uses the identity transform.  It carries a named
+    blocker because no earlier validation outcome exists.  Later folds fit
+    the slope from the supplied rows, which must all come from earlier folds.
+    """
+
+    if not isinstance(source_receipt_sha256, str) or len(source_receipt_sha256) != 64:
+        raise FutureValueSourceError("calibration source receipt hash is invalid")
+    if int(current_fold) < 1:
+        raise FutureValueSourceError("calibration fold number is invalid")
+    logits = np.asarray(raw_logits, dtype=float)
+    y = np.asarray(targets, dtype=int)
+    folds = np.asarray(prior_fold_numbers, dtype=int)
+    game_ids = tuple(str(value) for value in prior_game_ids)
+    if len(logits) != len(y) or len(logits) != len(folds) or len(logits) != len(game_ids):
+        raise FutureValueSourceError("calibration input lengths do not match")
+    if any(int(value) >= int(current_fold) for value in folds):
+        raise FutureValueSourceError("calibration input includes the current or a future fold")
+    if len(set(game_ids)) != len(game_ids):
+        raise FutureValueSourceError("calibration input game IDs are not unique")
+    if len(prior_validation_ends) not in (0, len(set(folds))):
+        raise FutureValueSourceError("calibration prior fold dates are invalid")
+    if not isinstance(current_validation_start, str) or not current_validation_start.strip():
+        raise FutureValueSourceError("calibration current validation start is missing")
+    current_start = _utc_timestamp(current_validation_start, "calibration current validation start")
+    if any(
+        not _utc_timestamp(value, "calibration prior validation end") < current_start
+        for value in prior_validation_ends
+    ):
+        raise FutureValueSourceError("calibration prior validation fold is not strictly earlier")
+    if len(logits) and (
+        not np.isfinite(logits).all()
+        or not np.isin(y, (0, 1)).all()
+    ):
+        raise FutureValueSourceError("calibration input contains non-finite values")
+    if len(logits) and len(np.unique(y)) != 2:
+        raise FutureValueSourceError("calibration input needs both outcome classes")
+
+    current_ids = tuple(str(value) for value in current_validation_game_ids)
+    if len(set(current_ids)) != len(current_ids):
+        raise FutureValueSourceError("calibration current game IDs are not unique")
+    prior_fold_set = tuple(sorted({int(value) for value in folds}))
+    input_hash = _calibration_input_sha256(folds, game_ids, logits, y)
+    base: dict[str, Any] = {
+        "schema_version": CALIBRATION_SCHEMA_VERSION,
+        "method": "strict_prior_outer_validation_zero_intercept_positive_slope",
+        "source_receipt_sha256": source_receipt_sha256,
+        "current_fold": int(current_fold),
+        "current_validation_game_count": len(current_ids),
+        "current_validation_game_identity_sha256": identity_sha256(current_ids),
+        "current_validation_start": str(current_validation_start),
+        "prior_fold_numbers": list(prior_fold_set),
+        "prior_fold_identity_sha256": hashlib.sha256(
+            _canonical_json_bytes(list(prior_fold_set))
+        ).hexdigest(),
+        "fit_game_count": len(game_ids),
+        "fit_game_ids": sorted(game_ids),
+        "fit_game_identity_sha256": identity_sha256(game_ids),
+        "fit_input_sha256": input_hash,
+        "strict_prior": True,
+        "uses_current_validation": False,
+        "positive_slope": True,
+        "zero_intercept": True,
+        "fit_rows": int(len(logits)),
+        "blockers": [],
+    }
+    if not len(logits):
+        base.update(
+            {
+                "status": "available",
+                "mode": "identity",
+                "slope": 1.0,
+                "fit_target_identity_sha256": identity_sha256(()),
+                "optimizer_evidence": {
+                    "method": "identity_no_prior_outer_validation_fold",
+                    "success": True,
+                    "status": "identity",
+                    "slope": 1.0,
+                    "finite_slope": True,
+                    "positive_slope": True,
+                    "zero_intercept": True,
+                    "iterations": 0,
+                    "objective_value": None,
+                    "gradient_inf_norm": None,
+                },
+                "blockers": ["calibration_prior_validation_folds_missing"],
+            }
+        )
+        return base
+
+    def objective(parameter: np.ndarray) -> tuple[float, np.ndarray]:
+        slope = float(parameter[0])
+        scaled = slope * logits
+        # logaddexp is stable for the objective.  The sigmoid is bounded only
+        # for the gradient, which keeps the raw logits in the receipt.
+        value = float(np.mean(np.logaddexp(0.0, scaled) - y * scaled))
+        gradient = float(np.mean((_stable_sigmoid(scaled) - y) * logits))
+        return value, np.asarray([gradient], dtype=float)
+
+    result = minimize(
+        lambda parameter: objective(parameter)[0],
+        np.asarray([1.0], dtype=float),
+        jac=lambda parameter: objective(parameter)[1],
+        method="L-BFGS-B",
+        bounds=((CALIBRATION_MIN_SLOPE, CALIBRATION_MAX_SLOPE),),
+        options={"maxiter": 1000, "ftol": 1e-15, "gtol": 1e-10, "maxls": 50},
+    )
+    slope = float(np.asarray(result.x, dtype=float).ravel()[0])
+    objective_value, gradient = objective(np.asarray([slope], dtype=float))
+    finite = bool(
+        np.isfinite(slope)
+        and np.isfinite(objective_value)
+        and np.isfinite(gradient).all()
+    )
+    success = bool(result.success and finite and slope > 0.0)
+    optimizer_evidence = {
+        "method": "scipy.optimize.minimize:L-BFGS-B",
+        "success": success,
+        "status": int(result.status),
+        "message": str(result.message),
+        "slope": slope,
+        "finite_slope": finite,
+        "positive_slope": bool(slope > 0.0),
+        "zero_intercept": True,
+        "iterations": int(getattr(result, "nit", 0)),
+        "function_evaluations": int(getattr(result, "nfev", 0)),
+        "max_iterations": 1000,
+        "objective_value": objective_value,
+        "gradient_inf_norm": float(np.max(np.abs(gradient))),
+        "bounds": [CALIBRATION_MIN_SLOPE, CALIBRATION_MAX_SLOPE],
+    }
+    if not success:
+        raise FutureValueSourceError("strict-prior calibration optimizer did not converge")
+    base.update(
+        {
+            "status": "available",
+            "mode": "fitted",
+            "slope": slope,
+            "fit_target_identity_sha256": identity_sha256(
+                [str(value) for value in y.tolist()]
+            ),
+            "prior_validation_end": sorted(str(value) for value in prior_validation_ends),
+            "optimizer_evidence": optimizer_evidence,
+        }
+    )
+    return base
+
+
+def _apply_strict_prior_calibration(
+    raw_logit: Sequence[float],
+    raw_probability: Sequence[float],
+    calibration: Mapping[str, Any],
+) -> tuple[pd.Series, pd.Series]:
+    """Apply a verified calibration slope and retain raw probability/logit."""
+
+    logits = np.asarray(raw_logit, dtype=float)
+    raw = np.asarray(raw_probability, dtype=float)
+    if len(logits) != len(raw):
+        raise FutureValueSourceError("calibration prediction lengths do not match")
+    slope = float(calibration.get("slope", float("nan")))
+    if not np.isfinite(slope) or slope <= 0.0:
+        raise FutureValueSourceError("calibration slope is invalid")
+    if np.isinf(logits).any() or np.isinf(raw).any():
+        raise FutureValueSourceError("calibration predictions are non-finite")
+    finite = np.isfinite(logits) & np.isfinite(raw)
+    calibrated_logit = np.full(len(logits), np.nan, dtype=float)
+    calibrated_probability = np.full(len(logits), np.nan, dtype=float)
+    calibrated_logit[finite] = slope * logits[finite]
+    calibrated_probability[finite] = _stable_sigmoid(calibrated_logit[finite])
+    if str(calibration.get("mode")) == "identity":
+        # Preserve the classifier's exact raw probability for the first fold.
+        calibrated_probability = raw.copy()
+        calibrated_logit = logits.copy()
+    return (
+        pd.Series(calibrated_logit, dtype=float),
+        pd.Series(calibrated_probability, dtype=float),
+    )
+
+
 def _calibration_metrics(
     target: pd.Series,
     probability: pd.Series,
@@ -4503,6 +4734,7 @@ def _missingness_metrics(
     validation: pd.DataFrame,
     target: pd.Series,
     probability: pd.Series,
+    raw_probability: pd.Series | None = None,
 ) -> dict[str, Any]:
     """Report fold-local imputation coverage for complete and incomplete rows."""
 
@@ -4527,7 +4759,7 @@ def _missingness_metrics(
                 missing_feature_counts[str(name)] = (
                     missing_feature_counts.get(str(name), 0) + 1
                 )
-    return {
+    report = {
         "status": status,
         "total_rows": int(len(validation)),
         "complete_case_rows": int(complete.sum()),
@@ -4550,6 +4782,16 @@ def _missingness_metrics(
         "missing_feature_counts": dict(sorted(missing_feature_counts.items())),
         "blockers": blockers,
     }
+    if raw_probability is not None:
+        raw_paired = target.notna() & raw_probability.notna()
+        report["raw_complete_case_metrics"] = _classification_metrics(
+            target.loc[raw_paired & complete], raw_probability.loc[raw_paired & complete]
+        )
+        report["raw_incomplete_case_metrics"] = _classification_metrics(
+            target.loc[raw_paired & ~complete], raw_probability.loc[raw_paired & ~complete]
+        )
+        report["raw_predicted_rows"] = int(raw_paired.sum())
+    return report
 
 
 def _side_swap_metrics(
@@ -4557,6 +4799,9 @@ def _side_swap_metrics(
     validation: pd.DataFrame,
     target: pd.Series,
     probability: pd.Series,
+    *,
+    raw_probability: pd.Series | None = None,
+    calibration_slope: float = 1.0,
 ) -> dict[str, Any]:
     """Check the antisymmetry of the same validation rows after a side swap."""
 
@@ -4581,7 +4826,13 @@ def _side_swap_metrics(
             swapped[feature_name] = -pd.to_numeric(
                 swapped[feature_name], errors="coerce"
             )
-    swapped_probability = model.predict_probability(swapped).loc[paired]
+    swapped_logit = model.predict_logit(swapped).loc[paired]
+    swapped_probability = pd.Series(
+        _stable_sigmoid(
+            float(calibration_slope) * swapped_logit.to_numpy(dtype=float)
+        ),
+        index=swapped_logit.index,
+    )
     swapped_target = 1.0 - target.loc[paired]
     original_probability = probability.loc[paired]
     symmetry_error = np.abs(
@@ -4596,7 +4847,7 @@ def _side_swap_metrics(
         and mean_error <= SIDE_SWAP_MEAN_TOLERANCE
         and max_error <= SIDE_SWAP_MAX_TOLERANCE
     )
-    return {
+    report = {
         "status": "available" if within_tolerance else "blocked",
         "rows": int(len(swapped_probability)),
         "metrics": _classification_metrics(swapped_target, swapped_probability),
@@ -4611,6 +4862,19 @@ def _side_swap_metrics(
             else ["side_swap_probability_complement_tolerance_exceeded"]
         ),
     }
+    if raw_probability is not None:
+        raw_swapped_probability = model.predict_probability(swapped).loc[paired]
+        raw_error = np.abs(
+            raw_swapped_probability.to_numpy(dtype=float)
+            - (1.0 - raw_probability.loc[paired].to_numpy(dtype=float))
+        )
+        report["raw_metrics"] = _classification_metrics(
+            swapped_target,
+            raw_swapped_probability,
+        )
+        report["raw_max_probability_complement_error"] = float(np.nanmax(raw_error))
+        report["calibration_slope"] = float(calibration_slope)
+    return report
 
 
 def _roster_change_labels(frame: pd.DataFrame) -> pd.Series | None:
@@ -5164,23 +5428,32 @@ def evaluate_future_value(
     fold_reports: list[dict[str, Any]] = []
     pooled_targets: list[pd.Series] = []
     pooled_predictions: list[pd.Series] = []
+    pooled_raw_predictions: list[pd.Series] = []
     pooled_baselines: list[pd.Series] = []
+    calibration_history_logits: list[float] = []
+    calibration_history_targets: list[int] = []
+    calibration_history_folds: list[int] = []
+    calibration_history_game_ids: list[str] = []
+    calibration_history_ends: list[str] = []
     pooled_slice_blockers: list[str] = []
     pooled_current_targets: list[pd.Series] = []
     pooled_current_predictions: dict[str, list[pd.Series]] = {
         "candidate": [],
+        "raw_candidate": [],
         "intercept_baseline": [],
         "sequential_player_elo": [],
         "hierarchical_bt": [],
     }
     pooled_candidate_paired_targets: dict[str, list[pd.Series]] = {
         "candidate": [],
+        "raw_candidate": [],
         "intercept_baseline": [],
         "sequential_player_elo": [],
         "hierarchical_bt": [],
     }
     pooled_candidate_paired_predictions: dict[str, list[pd.Series]] = {
         "candidate": [],
+        "raw_candidate": [],
         "intercept_baseline": [],
         "sequential_player_elo": [],
         "hierarchical_bt": [],
@@ -5220,11 +5493,34 @@ def evaluate_future_value(
             feature_ledger=fold_ledger,
         )
         validation = design[design["game_id"].isin(fold["validation_game_ids"])].copy()
-        prediction = model.predict_probability(validation)
+        raw_logit = model.predict_logit(validation)
+        raw_prediction = model.predict_probability(validation)
+        calibration_fit = _fit_strict_prior_calibration(
+            np.asarray(calibration_history_logits, dtype=float),
+            np.asarray(calibration_history_targets, dtype=int),
+            source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+            current_fold=int(fold["fold"]),
+            current_validation_game_ids=tuple(
+                str(value) for value in fold["validation_game_ids"]
+            ),
+            current_validation_start=str(fold["validation_start"]),
+            prior_fold_numbers=tuple(calibration_history_folds),
+            prior_game_ids=tuple(calibration_history_game_ids),
+            prior_validation_ends=tuple(calibration_history_ends),
+        )
+        calibrated_logit, prediction = _apply_strict_prior_calibration(
+            raw_logit.to_numpy(dtype=float),
+            raw_prediction.to_numpy(dtype=float),
+            calibration_fit,
+        )
+        calibrated_logit.index = validation.index
+        prediction.index = validation.index
         target = validation["target"].astype(float)
-        paired_mask = target.notna() & prediction.notna()
+        paired_mask = target.notna() & prediction.notna() & raw_logit.notna()
         paired_target = target.loc[paired_mask]
         paired_prediction = prediction.loc[paired_mask]
+        paired_raw_prediction = raw_prediction.loc[paired_mask]
+        paired_raw_logit = raw_logit.loc[paired_mask]
         baseline_probability = pd.Series(
             float(design.loc[design["game_id"].isin(fold["train_game_ids"]), "target"].mean()),
             index=validation.index,
@@ -5272,6 +5568,7 @@ def evaluate_future_value(
         common_target = target.loc[current_mask]
         common_predictions = {
             "candidate": prediction.loc[current_mask],
+            "raw_candidate": raw_prediction.loc[current_mask],
             "intercept_baseline": baseline_probability.loc[current_mask],
             "sequential_player_elo": sequential_probability.loc[current_mask],
             "hierarchical_bt": hierarchical_probability.loc[current_mask],
@@ -5287,6 +5584,7 @@ def evaluate_future_value(
         }
         candidate_paired_methods = {
             "candidate": prediction,
+            "raw_candidate": raw_prediction,
             "intercept_baseline": baseline_probability,
             "sequential_player_elo": sequential_probability,
             "hierarchical_bt": hierarchical_probability,
@@ -5366,6 +5664,14 @@ def evaluate_future_value(
                     "game_id": str(game_id),
                     "target": _ledger_value(target.loc[row_index]),
                     "candidate": _ledger_value(prediction.loc[row_index]),
+                    "candidate_raw_probability": _ledger_value(
+                        raw_prediction.loc[row_index]
+                    ),
+                    "candidate_raw_logit": _ledger_value(raw_logit.loc[row_index]),
+                    "candidate_calibrated_logit": _ledger_value(
+                        calibrated_logit.loc[row_index]
+                    ),
+                    "calibration_slope": float(calibration_fit["slope"]),
                     "intercept": _ledger_value(baseline_probability.loc[row_index]),
                     "sequential_player_elo": _ledger_value(
                         sequential_probability.loc[row_index]
@@ -5403,6 +5709,7 @@ def evaluate_future_value(
                 pooled_current_predictions[method_name].append(values)
         train_design = design[design["game_id"].isin(fold["train_game_ids"])].copy()
         calibration = _calibration_metrics(paired_target, paired_prediction)
+        raw_calibration = _calibration_metrics(paired_target, paired_raw_prediction)
         baseline_calibration = _calibration_metrics(paired_target, paired_baseline)
         region_slice = _group_slice_metrics(
             paired_target,
@@ -5446,8 +5753,20 @@ def evaluate_future_value(
             _support_labels(train_design),
             slice_name="sparse_support",
         )
-        missingness = _missingness_metrics(validation, target, prediction)
-        side_swap = _side_swap_metrics(model, validation, target, prediction)
+        missingness = _missingness_metrics(
+            validation,
+            target,
+            prediction,
+            raw_probability=raw_prediction,
+        )
+        side_swap = _side_swap_metrics(
+            model,
+            validation,
+            target,
+            prediction,
+            raw_probability=raw_prediction,
+            calibration_slope=float(calibration_fit["slope"]),
+        )
         slice_reports = {
             "regional_transfer": region_slice,
             "patch_transfer": patch_slice,
@@ -5466,20 +5785,49 @@ def evaluate_future_value(
         )
         pooled_targets.append(paired_target)
         pooled_predictions.append(paired_prediction)
+        pooled_raw_predictions.append(paired_raw_prediction)
         pooled_baselines.append(paired_baseline)
         model_parameters = model.parameter_receipt()
         component_frame = model.player_value_logit(fold_form, validation)
         component_rows = [
             {
                 "game_id": str(row.game_id),
+                "raw_player_value_logit": float(row.player_value_logit),
+                "raw_team_context_logit": float(row.team_context_logit),
+                "raw_current_rating_logit": float(row.current_rating_logit),
+                "raw_scaling_curve_logit": float(row.scaling_curve_logit),
+                "raw_data_quality_logit": float(row.data_quality_logit),
+                "raw_full_model_logit": float(row.full_model_logit),
                 "player_value_logit": float(row.player_value_logit),
                 "team_context_logit": float(row.team_context_logit),
                 "current_rating_logit": float(row.current_rating_logit),
                 "scaling_curve_logit": float(row.scaling_curve_logit),
                 "data_quality_logit": float(row.data_quality_logit),
                 "full_model_logit": float(row.full_model_logit),
+                "calibration_slope": float(calibration_fit["slope"]),
+                "calibrated_player_value_logit": float(
+                    row.player_value_logit * calibration_fit["slope"]
+                ),
+                "calibrated_team_context_logit": float(
+                    row.team_context_logit * calibration_fit["slope"]
+                ),
+                "calibrated_current_rating_logit": float(
+                    row.current_rating_logit * calibration_fit["slope"]
+                ),
+                "calibrated_scaling_curve_logit": float(
+                    row.scaling_curve_logit * calibration_fit["slope"]
+                ),
+                "calibrated_data_quality_logit": float(
+                    row.data_quality_logit * calibration_fit["slope"]
+                ),
+                "calibrated_full_model_logit": float(
+                    row.full_model_logit * calibration_fit["slope"]
+                ),
                 "component_reconstruction_error": float(
                     row.component_reconstruction_error
+                ),
+                "calibrated_component_reconstruction_error": float(
+                    row.component_reconstruction_error * calibration_fit["slope"]
                 ),
                 "support_status": str(row.support_status),
                 "player_support_records": row.player_support_records,
@@ -5501,6 +5849,9 @@ def evaluate_future_value(
                 "train_series_count": len(fold["train_series_ids"]),
                 "validation_series_count": len(fold["validation_series_ids"]),
                 "candidate": _classification_metrics(paired_target, paired_prediction),
+                "raw_candidate": _classification_metrics(
+                    paired_target, paired_raw_prediction
+                ),
                 "intercept_baseline": _classification_metrics(paired_target, paired_baseline),
                 "paired_rows": int(len(paired_target)),
                 "paired_game_id_count": len(paired_game_ids),
@@ -5537,6 +5888,8 @@ def evaluate_future_value(
                 "withheld_rows": int(prediction.isna().sum()),
                 "metric_weights": model.metric_weights,
                 "calibration": calibration,
+                "raw_calibration": raw_calibration,
+                "calibration_fit": calibration_fit,
                 "baseline_calibration": baseline_calibration,
                 "regional_transfer": region_slice,
                 "patch_transfer": patch_slice,
@@ -5555,10 +5908,24 @@ def evaluate_future_value(
                         .abs()
                         .max()
                     ),
+                    "maximum_absolute_calibrated_reconstruction_error": float(
+                        component_frame["component_reconstruction_error"]
+                        .abs()
+                        .max()
+                        * float(calibration_fit["slope"])
+                    ),
+                    "calibration_fit": calibration_fit,
                     "rows": component_rows,
                 },
             }
         )
+        calibration_history_logits.extend(float(value) for value in paired_raw_logit)
+        calibration_history_targets.extend(int(value) for value in paired_target)
+        calibration_history_folds.extend([int(fold["fold"])] * len(paired_raw_logit))
+        calibration_history_game_ids.extend(
+            str(value) for value in validation.loc[paired_mask, "game_id"]
+        )
+        calibration_history_ends.append(str(fold["validation_end"]))
     cluster_source = map_frame.attrs.get("series_cluster_source")
     cluster_audit = map_frame.attrs.get("series_cluster_audit")
     blockers = [
@@ -5572,10 +5939,19 @@ def evaluate_future_value(
         blockers.append("bounded_fold_count_below_protocol")
     pooled_target = pd.concat(pooled_targets, ignore_index=True)
     pooled_prediction = pd.concat(pooled_predictions, ignore_index=True)
+    pooled_raw_prediction = pd.concat(pooled_raw_predictions, ignore_index=True)
     pooled_baseline = pd.concat(pooled_baselines, ignore_index=True)
     pooled_calibration_report = _calibration_metrics(pooled_target, pooled_prediction)
+    pooled_raw_calibration_report = _calibration_metrics(
+        pooled_target, pooled_raw_prediction
+    )
     pooled_baseline_calibration_report = _calibration_metrics(pooled_target, pooled_baseline)
     blockers.extend(pooled_slice_blockers)
+    blockers.extend(
+        str(value)
+        for report in fold_reports
+        for value in report["calibration_fit"].get("blockers", [])
+    )
     for slice_name in (
         "regional_transfer",
         "patch_transfer",
@@ -5662,12 +6038,16 @@ def evaluate_future_value(
         key=lambda row: (int(row["fold"]), str(row["game_id"])),
     )
     prediction_ledger = {
-        "schema_version": "scryglass:future-value-prediction-ledger:v1",
+        "schema_version": "scryglass:future-value-prediction-ledger:v2",
         "columns": [
             "fold",
             "game_id",
             "target",
             "candidate",
+            "candidate_raw_probability",
+            "candidate_raw_logit",
+            "candidate_calibrated_logit",
+            "calibration_slope",
             "intercept",
             "sequential_player_elo",
             "hierarchical_bt",
@@ -5720,10 +6100,14 @@ def evaluate_future_value(
             "minimum_folds": 3,
             "pooled_rows": int(len(pooled_target)),
             "pooled_candidate": _classification_metrics(pooled_target, pooled_prediction),
+            "pooled_raw_candidate": _classification_metrics(
+                pooled_target, pooled_raw_prediction
+            ),
             "pooled_intercept_baseline": _classification_metrics(
                 pooled_target, pooled_baseline
             ),
             "pooled_calibration": pooled_calibration_report,
+            "pooled_raw_calibration": pooled_raw_calibration_report,
             "pooled_baseline_calibration": pooled_baseline_calibration_report,
             "pooled_current_rating_comparison": pooled_current_comparison,
             "validation_overlap_audit": {
@@ -5768,6 +6152,27 @@ def evaluate_future_value(
                     report["component_evidence"]["sha256"]
                     for report in fold_reports
                 ],
+                "maximum_absolute_calibrated_error": max(
+                    report["component_evidence"][
+                        "maximum_absolute_calibrated_reconstruction_error"
+                    ]
+                    for report in fold_reports
+                ),
+            },
+            "strict_prior_calibration": {
+                "schema_version": CALIBRATION_SCHEMA_VERSION,
+                "status": "available",
+                "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
+                "method": "strict_prior_outer_validation_zero_intercept_positive_slope",
+                "uses_current_validation": False,
+                "folds": [report["calibration_fit"] for report in fold_reports],
+                "blockers": sorted(
+                    {
+                        blocker
+                        for report in fold_reports
+                        for blocker in report["calibration_fit"].get("blockers", [])
+                    }
+                ),
             },
         },
         "folds": fold_reports,
