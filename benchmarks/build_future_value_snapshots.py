@@ -1,8 +1,8 @@
 """Build a research-only future player/team snapshot bundle.
 
-The command validates the frozen source and emits a blocked receipt when no
-authorized final model is supplied.  It does not publish ratings, Draft Score,
-Tier Lists, matches, or probability outputs.
+The command can score a source-bound development model when promotion gates
+remain open.  It never grants public authority and never publishes ratings,
+Draft Score, Tier Lists, matches, or probability outputs.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import pandas as pd
 from lol_kills.research.future_value_snapshots import (
     FutureValueSnapshotError,
     build_future_value_snapshots,
+    load_final_fit_model,
     write_snapshot_bundle,
 )
 
@@ -39,6 +40,7 @@ def main() -> int:
     parser.add_argument("--source-receipt", required=True, type=Path)
     parser.add_argument("--current-root", required=True, type=Path)
     parser.add_argument("--model-receipt", type=Path)
+    parser.add_argument("--model-artifact", type=Path)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
@@ -50,6 +52,20 @@ def main() -> int:
         if args.model_receipt is not None
         else None
     )
+    model = None
+    if model_receipt is not None:
+        artifact_path = (
+            args.model_artifact.resolve()
+            if args.model_artifact is not None
+            else args.model_receipt.resolve().with_name("final-v2-model.json")
+        )
+        model, loaded_receipt = load_final_fit_model(
+            artifact_path,
+            args.model_receipt.resolve(),
+            source_receipt=source_receipt,
+        )
+        if loaded_receipt.get("receipt_sha256") != model_receipt.get("receipt_sha256"):
+            raise FutureValueSnapshotError("model receipt changed while loading artifact")
     maps = pd.read_parquet(source_root / "maps.parquet")
     players = pd.read_parquet(source_root / "oe_player_games.parquet")
     teams = pd.read_parquet(source_root / "oe_team_games.parquet")
@@ -64,6 +80,7 @@ def main() -> int:
         players,
         teams,
         source_receipt=source_receipt,
+        model=model,
         model_receipt=model_receipt,
         current_player_ratings=current_player,
         current_team_ratings=current_team,
@@ -76,6 +93,8 @@ def main() -> int:
                 "blockers": list(result.blockers),
                 "player_rows": len(result.player_rows),
                 "team_rows": len(result.team_rows),
+                "rank_coverage": result.receipt.get("rank_coverage", {}),
+                "rank_diff_extremes": result.receipt.get("rank_diff_extremes", {}),
                 "manifest_sha256": manifest["manifest_sha256"],
                 "output_root": str(args.output_root.resolve()),
             },

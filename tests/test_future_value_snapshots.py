@@ -239,7 +239,12 @@ def test_team_value_requires_exact_five_players_and_preserves_champion_split() -
     assert len(result.player_rows) == 10
     assert len(result.team_rows) == 2
     assert all(row["roster_player_count"] == 5 for row in result.team_rows)
-    assert all(row["champion_role_atom_logit"] is not None for row in result.player_rows)
+    assert all(
+        row["champion_role_atom_logit"] is not None
+        for row in result.player_rows
+        if not row["model_feature_missing"]
+    )
+    assert any(row["status"] == "research_only_missing_features" for row in result.player_rows)
     assert all(row["team_context_logit"] is None for row in result.team_rows)
     assert "team_context_not_in_final_model" in result.blockers
 
@@ -260,3 +265,28 @@ def test_ambiguous_latest_roster_fails_closed() -> None:
     source = _source_receipt([f"g{i}" for i in range(1, 7)])
     with pytest.raises(FutureValueSnapshotError, match="ten rows|duplicate"):
         build_future_value_snapshots(maps, players, teams, source_receipt=source)
+
+
+def test_player_date_mutation_fails_against_map_date() -> None:
+    maps, players, teams = _rows(6)
+    players.loc[players.index[0], "date"] = pd.Timestamp("2025-01-07", tz="UTC")
+    source = _source_receipt([f"g{i}" for i in range(1, 7)])
+    with pytest.raises(FutureValueSnapshotError, match="dates"):
+        build_future_value_snapshots(maps, players, teams, source_receipt=source)
+
+
+def test_explicit_model_receipt_must_bind_model_parameters() -> None:
+    source = _source_receipt(["g1", "g2"])
+    model = SimpleNamespace(
+        parameter_receipt=lambda: {"parameter_sha256": "a" * 64},
+        receipt=lambda: {"receipt_sha256": "b" * 64},
+    )
+    receipt = {
+        "receipt_sha256": "c" * 64,
+        "parameter_sha256": "b" * 64,
+    }
+    with pytest.raises(FutureValueSnapshotError, match="parameters"):
+        # This checks the object binding before any source rows are scored.
+        from lol_kills.research.future_value_snapshots import _validate_model_object_binding
+
+        _validate_model_object_binding(model, receipt)

@@ -24,15 +24,20 @@ import numpy as np
 import pandas as pd
 
 from lol_kills.research.future_value_rating import (
+    CURRENT_RATING_SIGNED_MAP_FEATURES,
     FORM_METRICS,
     MODEL_FIT_SCHEMA_VERSION,
     RANK_3,
+    SCALING_CURVE_SIGNED_MAP_FEATURES,
+    TEAM_CONTEXT_FEATURES,
     RatingVariant,
     FutureValueFoldModel,
     FutureValueSourceError,
+    Rank3AtomModel,
     _canonical_json_bytes,
     _frame_game_ids,
     _role,
+    rating_feature_values_sha256,
     _stable_identity,
     _team_history_features,
     _utc_text,
@@ -73,6 +78,41 @@ QUALITY_FEATURES = frozenset(
     }
 )
 TEAM_FEATURES = frozenset({"team_prior_win_diff", "roster_continuity_diff"})
+IGNORED_SNAPSHOT_FEATURES = frozenset(
+    {
+        *CURRENT_RATING_SIGNED_MAP_FEATURES,
+        *SCALING_CURVE_SIGNED_MAP_FEATURES,
+        *TEAM_CONTEXT_FEATURES,
+        *TEAM_FEATURES,
+    }
+)
+
+# These blockers describe promotion evidence.  They do not prevent a valid,
+# source-bound research calculation.  Unknown blockers remain computation
+# blockers and stop the snapshot.
+PROMOTION_ONLY_BLOCKERS = frozenset(
+    {
+        "authoritative_series_id_missing_proxy_cluster_used",
+        "current_player_team_rating_comparison_missing",
+        "current_rating_player_team_identity_missing_for_rank_diffs",
+        "final_calibration_receipt_missing",
+        "final_fit_status_not_authorized",
+        "nested_inner_feature_ledger_missing_fixed_c_used",
+        "patch_transfer_sparse_validation_support",
+        "patch_transfer_unseen_training_group",
+        "phase_model_series_partition_non_comparable",
+        "regional_transfer_sparse_validation_support",
+        "regional_transfer_unseen_training_group",
+        "roster_change_labels_missing",
+        "support_uncertainty_proxy_not_calibrated",
+        "team_context_not_in_final_model",
+        "tournament_boundary_field_missing",
+        "tournament_boundary_slice_missing",
+    }
+)
+RESEARCH_FIT_STATUSES = frozenset(
+    {"research_only", "research_only_blocked", "research_only_partial"}
+)
 
 
 class FutureValueSnapshotError(FutureValueSourceError):
@@ -192,6 +232,220 @@ def _model_receipt_from(model: Any, model_receipt: Mapping[str, Any] | None) -> 
     return value if isinstance(value, Mapping) else None
 
 
+def _validate_model_object_binding(
+    model: Any,
+    model_receipt: Mapping[str, Any] | None,
+) -> None:
+    """Bind an explicitly supplied receipt to the supplied model object."""
+
+    if model is None or model_receipt is None:
+        return
+    claimed_hash = str(model_receipt.get("receipt_sha256") or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", claimed_hash):
+        raise FutureValueSnapshotError("explicit model receipt hash is invalid")
+    parameter_receipt = getattr(model, "parameter_receipt", None)
+    if callable(parameter_receipt):
+        parameters = parameter_receipt()
+        if not isinstance(parameters, Mapping):
+            raise FutureValueSnapshotError("explicit model parameters are invalid")
+        if str(parameters.get("parameter_sha256") or "").lower() != str(
+            model_receipt.get("parameter_sha256") or ""
+        ).lower():
+            raise FutureValueSnapshotError("explicit model receipt does not bind model parameters")
+        return
+    object_receipt = _model_receipt_from(model, None)
+    if object_receipt is None:
+        raise FutureValueSnapshotError("explicit model receipt does not bind model object")
+    object_hash = str(object_receipt.get("receipt_sha256") or "").lower()
+    if object_hash and object_hash != claimed_hash:
+        raise FutureValueSnapshotError("explicit model receipt does not bind model object")
+
+
+def load_final_fit_model(
+    model_artifact_path: Path,
+    model_receipt_path: Path,
+    *,
+    source_receipt: Mapping[str, Any],
+) -> tuple[FutureValueFoldModel, Mapping[str, Any]]:
+    """Load a JSON final-fit model after checking its receipt bindings.
+
+    The loader accepts only the model artifact emitted by the final-fit
+    benchmark.  It uses no pickle or executable model state.  A sibling
+    ``final-fit-run.json`` receives an additional byte and receipt check when
+    present.
+    """
+
+    artifact_path = Path(model_artifact_path)
+    receipt_path = Path(model_receipt_path)
+    for path, label in ((artifact_path, "model artifact"), (receipt_path, "model receipt")):
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueSnapshotError(f"{label} is missing or unsafe: {path}")
+    try:
+        receipt_value = json.loads(receipt_path.read_text(encoding="utf-8"))
+        artifact_value = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueSnapshotError("final-fit model JSON cannot be read") from error
+    if not isinstance(receipt_value, Mapping) or not isinstance(artifact_value, Mapping):
+        raise FutureValueSnapshotError("final-fit model JSON must contain objects")
+    receipt = dict(receipt_value)
+    try:
+        receipt_hash = _receipt_hash(receipt)
+    except FutureValueSnapshotError as error:
+        raise FutureValueSnapshotError("final-fit model receipt is invalid") from error
+    if artifact_value.get("receipt_sha256") != receipt_hash:
+        raise FutureValueSnapshotError("final-fit model artifact receipt binding changed")
+    if artifact_value.get("status") != receipt.get("status"):
+        raise FutureValueSnapshotError("final-fit model status binding changed")
+    code_binding = receipt.get("code_binding")
+    if not isinstance(code_binding, Mapping):
+        raise FutureValueSnapshotError("final-fit code binding is missing")
+    if str(code_binding.get("snapshot_producer_sha256") or "").lower() != _sha256_file(
+        Path(__file__)
+    ):
+        raise FutureValueSnapshotError("final-fit snapshot producer binding changed")
+    run_path = receipt_path.parent / "final-fit-run.json"
+    if run_path.is_file() and not run_path.is_symlink():
+        try:
+            run_value = json.loads(run_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise FutureValueSnapshotError("final-fit run receipt cannot be read") from error
+        if not isinstance(run_value, Mapping):
+            raise FutureValueSnapshotError("final-fit run receipt is invalid")
+        if run_value.get("model_receipt_sha256") != receipt_hash:
+            raise FutureValueSnapshotError("final-fit run receipt hash changed")
+        if run_value.get("model_artifact_sha256") != _sha256_file(artifact_path):
+            raise FutureValueSnapshotError("final-fit model artifact hash changed")
+    parameters = artifact_value.get("parameters")
+    if not isinstance(parameters, Mapping):
+        raise FutureValueSnapshotError("final-fit model parameters are missing")
+    parameter_payload = dict(parameters)
+    claimed_parameter_hash = parameter_payload.pop("parameter_sha256", None)
+    if not isinstance(claimed_parameter_hash, str) or _sha256_bytes(
+        _canonical_json_bytes(parameter_payload)
+    ) != claimed_parameter_hash:
+        raise FutureValueSnapshotError("final-fit model parameter hash changed")
+    if claimed_parameter_hash != receipt.get("parameter_sha256"):
+        raise FutureValueSnapshotError("final-fit parameter receipt binding changed")
+    feature_binding = receipt.get("feature_ledger_binding")
+    if not isinstance(feature_binding, Mapping):
+        raise FutureValueSnapshotError("final-fit current-rating feature binding is missing")
+    artifact_record = feature_binding.get("artifact")
+    feature_names_binding = tuple(str(value) for value in feature_binding.get("feature_names") or ())
+    if not isinstance(artifact_record, Mapping) or not feature_names_binding:
+        raise FutureValueSnapshotError("final-fit current-rating artifact binding is invalid")
+    feature_artifact_path = Path(str(artifact_record.get("path") or ""))
+    if (
+        not feature_artifact_path.is_absolute()
+        or ".." in feature_artifact_path.parts
+        or feature_artifact_path.is_symlink()
+        or not feature_artifact_path.is_file()
+        or int(artifact_record.get("bytes") or -1) != feature_artifact_path.stat().st_size
+        or str(artifact_record.get("sha256") or "").lower() != _sha256_file(feature_artifact_path)
+    ):
+        raise FutureValueSnapshotError("final-fit current-rating artifact binding changed")
+    try:
+        feature_frame = pd.read_parquet(feature_artifact_path)
+    except Exception as error:
+        raise FutureValueSnapshotError("final-fit current-rating artifact cannot be loaded") from error
+    required_feature_columns = {"game_id", "date", "series_id", *feature_names_binding}
+    if not required_feature_columns.issubset(feature_frame.columns):
+        raise FutureValueSnapshotError("final-fit current-rating artifact schema changed")
+    if rating_feature_values_sha256(feature_frame, feature_names_binding) != str(
+        feature_binding.get("feature_value_digest") or ""
+    ).lower():
+        raise FutureValueSnapshotError("final-fit current-rating feature values changed")
+    feature_names = tuple(str(value) for value in parameters.get("feature_names") or ())
+    if not feature_names or len(set(feature_names)) != len(feature_names):
+        raise FutureValueSnapshotError("final-fit model feature names are invalid")
+
+    def _parameter_vector(name: str) -> np.ndarray:
+        values = parameters.get(name)
+        if not isinstance(values, Mapping):
+            raise FutureValueSnapshotError(f"final-fit parameter vector is missing: {name}")
+        try:
+            vector = np.asarray([float(values[feature]) for feature in feature_names], dtype=float)
+        except (KeyError, TypeError, ValueError) as error:
+            raise FutureValueSnapshotError(f"final-fit parameter vector is invalid: {name}") from error
+        if not np.isfinite(vector).all():
+            raise FutureValueSnapshotError(f"final-fit parameter vector is non-finite: {name}")
+        return vector
+
+    rank_payload = parameters.get("rank_3")
+    if not isinstance(rank_payload, Mapping):
+        raise FutureValueSnapshotError("final-fit rank-3 parameters are missing")
+    try:
+        rank = int(rank_payload["rank"])
+        metric_names = tuple(str(value) for value in rank_payload["metric_names"])
+        center = np.asarray(rank_payload["center"], dtype=float)
+        scale = np.asarray(rank_payload["scale"], dtype=float)
+        components = np.asarray(rank_payload["components"], dtype=float)
+        coordinates = {
+            str(key): tuple(float(value) for value in values)
+            for key, values in dict(rank_payload["champion_role_coordinates"]).items()
+        }
+        support = {
+            str(key): int(value)
+            for key, value in dict(rank_payload["champion_role_support"]).items()
+        }
+        atom_fit_ids = tuple(str(value) for value in rank_payload["fit_game_ids"])
+        atom_fit_window_end = str(rank_payload["fit_window_end"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise FutureValueSnapshotError("final-fit rank-3 parameters are invalid") from error
+    if rank != RANK_3 or len(metric_names) != len(center) or len(center) != len(scale):
+        raise FutureValueSnapshotError("final-fit rank-3 dimensions are invalid")
+    if components.shape != (rank, len(metric_names)):
+        raise FutureValueSnapshotError("final-fit rank-3 component shape is invalid")
+    if not np.isfinite(center).all() or not np.isfinite(scale).all() or not np.isfinite(components).all():
+        raise FutureValueSnapshotError("final-fit rank-3 parameters are non-finite")
+    atom_parameter_payload = dict(rank_payload)
+    claimed_atom_hash = atom_parameter_payload.pop("parameter_sha256", None)
+    if not isinstance(claimed_atom_hash, str) or _sha256_bytes(
+        _canonical_json_bytes(atom_parameter_payload)
+    ) != claimed_atom_hash:
+        raise FutureValueSnapshotError("final-fit rank-3 parameter hash changed")
+    atom_model = Rank3AtomModel(
+        metric_names=metric_names,
+        rank=rank,
+        center=center,
+        scale=scale,
+        components=components,
+        champion_role_coordinates=coordinates,
+        champion_role_support=support,
+        fit_game_ids=atom_fit_ids,
+        fit_window_end=atom_fit_window_end,
+    )
+    try:
+        variant = RatingVariant(str(parameters["variant"]))
+        coefficients = np.asarray(
+            [float(dict(parameters["coefficients"])[feature]) for feature in feature_names],
+            dtype=float,
+        )
+        intercept = float(parameters.get("intercept", 0.0))
+    except (KeyError, TypeError, ValueError) as error:
+        raise FutureValueSnapshotError("final-fit model coefficients are invalid") from error
+    if not np.isfinite(coefficients).all() or not math.isfinite(intercept):
+        raise FutureValueSnapshotError("final-fit model coefficients are non-finite")
+    model = FutureValueFoldModel(
+        feature_names=feature_names,
+        means=_parameter_vector("feature_means"),
+        scales=_parameter_vector("feature_scales"),
+        imputation_values=_parameter_vector("fold_local_side_imputation"),
+        coefficients=coefficients,
+        intercept=intercept,
+        regularization_selection=dict(parameters.get("regularization_selection") or {}),
+        optimizer_evidence=dict(parameters.get("optimizer_evidence") or {}),
+        atom_model=atom_model,
+        fit_game_ids=tuple(str(value) for value in receipt.get("fit_game_ids") or ()),
+        fit_window_end=str(receipt.get("fit_window_end") or ""),
+        train_rows=int(receipt.get("train_rows") or 0),
+        withheld_rows=int(receipt.get("withheld_rows") or 0),
+        source_receipt=dict(source_receipt),
+        variant=variant,
+        feature_ledger_binding=dict(receipt.get("feature_ledger_binding") or {}),
+    )
+    return model, receipt
+
+
 def authorize_final_fit(
     model_receipt: Mapping[str, Any] | None,
     source_receipt: Mapping[str, Any],
@@ -220,8 +474,11 @@ def authorize_final_fit(
 
     if model_receipt.get("schema_version") != MODEL_FIT_SCHEMA_VERSION:
         blockers.add("final_fit_receipt_schema_invalid")
-    if model_receipt.get("status") != "final_fit_authorized":
+    model_status = str(model_receipt.get("status") or "")
+    if model_status != "final_fit_authorized":
         blockers.add("final_fit_status_not_authorized")
+        if model_status not in RESEARCH_FIT_STATUSES:
+            blockers.add("final_fit_status_invalid")
     declared_blockers = model_receipt.get("blockers")
     if declared_blockers is not None:
         if not isinstance(declared_blockers, (list, tuple)):
@@ -309,6 +566,20 @@ def authorize_final_fit(
     )
 
 
+def _computation_blockers(
+    authorization: FinalFitAuthorization,
+) -> tuple[str, ...]:
+    """Return blockers that prevent a source-bound research calculation."""
+
+    return tuple(
+        sorted(
+            blocker
+            for blocker in authorization.blockers
+            if blocker not in PROMOTION_ONLY_BLOCKERS
+        )
+    )
+
+
 def _normalise_source_frames(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -341,11 +612,17 @@ def _normalise_source_frames(
     team_frame = teams.copy()
     team_frame["game_id"] = _frame_game_ids(team_frame, "teams").astype(str)
     for frame, label in ((player_frame, "players"), (team_frame, "teams")):
+        frame.drop(frame.index[~frame["game_id"].isin(eligible)], inplace=True)
         if "date" in frame:
             frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
             if frame["date"].isna().any() or frame["date"].gt(cutoff).any():
                 raise FutureValueSnapshotError(f"snapshot {label} has invalid or future dates")
-        frame.drop(frame.index[~frame["game_id"].isin(eligible)], inplace=True)
+            map_dates = map_frame.set_index("game_id")["date"]
+            expected_dates = frame["game_id"].map(map_dates)
+            if expected_dates.isna().any() or ~frame["date"].eq(expected_dates).all():
+                raise FutureValueSnapshotError(
+                    f"snapshot {label} duplicate or dates do not match source map dates"
+                )
 
     player_required = {"playerid", "teamid", "playername", "side", "position", "champion"}
     if not player_required.issubset(player_frame.columns):
@@ -456,12 +733,36 @@ def _latest_rows(form: pd.DataFrame, *, key: str, label: str) -> pd.DataFrame:
     return latest
 
 
+def _latest_team_roster(form: pd.DataFrame) -> pd.DataFrame:
+    """Select one exact five-player roster for each current team."""
+
+    ordered = form.sort_values(["team_id", "date", "game_id", "role", "player_id"], kind="stable")
+    last_dates = ordered.groupby("team_id", sort=False)["date"].transform("max")
+    latest = ordered[ordered["date"].eq(last_dates)].copy()
+    if latest.empty:
+        raise FutureValueSnapshotError("current team roster is empty")
+    for team_id, group in latest.groupby("team_id", sort=False):
+        if group[["game_id", "side"]].drop_duplicates().shape[0] != 1:
+            raise FutureValueSnapshotError(
+                f"team has ambiguous latest roster context: {team_id}"
+            )
+        if len(group) != 5 or group["player_id"].nunique() != 5:
+            raise FutureValueSnapshotError(
+                f"team requires exactly five current-roster players: {team_id}"
+            )
+        if group["role"].nunique() != 5:
+            raise FutureValueSnapshotError(
+                f"team requires five current-roster roles: {team_id}"
+            )
+    return latest
+
+
 def _feature_column(feature: str) -> str | None:
+    if feature in QUALITY_FEATURES:
+        return feature
     if feature.startswith("player_form_"):
         return "prior_form_" + feature.removeprefix("player_form_")
     if feature.startswith("rank_3_"):
-        return feature
-    if feature in QUALITY_FEATURES:
         return feature
     return None
 
@@ -474,6 +775,22 @@ def _player_contributions(
         raise FutureValueSnapshotError("final model has no rank-3 atom model")
     atoms = model.atom_model.transform(form)
     work = pd.concat([form.reset_index(drop=True), atoms.reset_index(drop=True)], axis=1)
+    atom_player_available = atoms["rank_3_player_atom_available"].astype(bool)
+    atom_champion_available = atoms["rank_3_champion_role_atom_available"].astype(bool)
+    work["rank_3_atom_missing_rate"] = (~atom_player_available).astype(float)
+    work["rank_3_champion_role_atom_missing_rate"] = (~atom_champion_available).astype(float)
+    support_columns = [f"prior_form_{metric}_support" for metric in FORM_METRICS]
+    effective_columns = [f"prior_form_{metric}_effective_support" for metric in FORM_METRICS]
+    if not set(support_columns).issubset(work.columns):
+        raise FutureValueSnapshotError("final model form support columns are missing")
+    support = work[support_columns].apply(pd.to_numeric, errors="coerce")
+    effective_source = effective_columns if set(effective_columns).issubset(work.columns) else support_columns
+    effective = work[effective_source].apply(pd.to_numeric, errors="coerce")
+    work["player_form_missing_rate"] = work[
+        [f"prior_form_{metric}" for metric in FORM_METRICS]
+    ].apply(pd.to_numeric, errors="coerce").isna().mean(axis=1)
+    work["player_form_support_mean"] = support.mean(axis=1, skipna=True)
+    work["player_form_effective_support_mean"] = effective.mean(axis=1, skipna=True)
     feature_names = tuple(str(value) for value in model.feature_names)
     scales = np.asarray(model.scales, dtype=float)
     coefficients = np.asarray(model.coefficients, dtype=float)
@@ -482,7 +799,7 @@ def _player_contributions(
         raise FutureValueSnapshotError("final model parameter dimensions are invalid")
     if not np.isfinite(scales).all() or not np.isfinite(coefficients).all() or not np.isfinite(imputation).all():
         raise FutureValueSnapshotError("final model parameters are non-finite")
-    output = work[["player_id", "team_id", "playername", "champion", "role", "side", "date"]].copy()
+    output = work[["game_id", "player_id", "team_id", "playername", "champion", "role", "side", "date"]].copy()
     output["role_normalized_form_logit"] = 0.0
     output["rank_3_player_atom_logit"] = 0.0
     output["champion_role_atom_logit"] = 0.0
@@ -494,6 +811,8 @@ def _player_contributions(
     for index, feature in enumerate(feature_names):
         column = _feature_column(feature)
         if column is None:
+            if feature not in IGNORED_SNAPSHOT_FEATURES:
+                raise FutureValueSnapshotError(f"final model feature is unsupported: {feature}")
             continue
         if column not in work.columns:
             raise FutureValueSnapshotError(f"final model feature is missing from form: {column}")
@@ -527,20 +846,22 @@ def _player_contributions(
         output["role_normalized_player_value_logit"]
         + output["champion_role_atom_logit"]
     )
-    support_columns = [f"prior_form_{metric}_support" for metric in FORM_METRICS]
-    effective_columns = [f"prior_form_{metric}_effective_support" for metric in FORM_METRICS]
-    support = work[support_columns].apply(pd.to_numeric, errors="coerce")
-    effective_source = effective_columns if set(effective_columns).issubset(work.columns) else support_columns
-    effective = work[effective_source].apply(pd.to_numeric, errors="coerce")
     output["minimum_metric_support"] = support.min(axis=1, skipna=True).fillna(0.0)
     output["minimum_effective_support"] = effective.min(axis=1, skipna=True).fillna(0.0)
-    output["form_missing_rate"] = work[
-        [f"prior_form_{metric}" for metric in FORM_METRICS]
-    ].apply(pd.to_numeric, errors="coerce").isna().mean(axis=1)
+    output["form_missing_rate"] = work["player_form_missing_rate"]
     output["rank_3_champion_role_atom_support"] = pd.to_numeric(
         work.get("rank_3_champion_role_support", 0), errors="coerce"
     ).fillna(0).astype(int)
     output["uncertainty_proxy"] = 1.0 / np.sqrt(1.0 + output["minimum_effective_support"])
+    output["support_status"] = np.select(
+        [
+            output["model_feature_missing"],
+            output["minimum_effective_support"].lt(5.0)
+            | output["rank_3_champion_role_atom_support"].lt(1),
+        ],
+        ["missing_features", "sparse"],
+        default="adequate",
+    )
     output["champion_dependent_status"] = np.where(
         work["champion"].notna() & work["role"].notna(), "available", "missing"
     )
@@ -567,37 +888,69 @@ def _rank_diffs(
     identity: str,
     future_value: str,
     current_value_candidates: Sequence[str],
-) -> tuple[list[dict[str, Any]], list[str]]:
+) -> tuple[list[dict[str, Any]], list[str], dict[str, Any], dict[str, dict[str, Any]]]:
     blockers: list[str] = []
+    futures = pd.DataFrame(list(future_rows))
+    total_future = int(len(futures))
+    assignments: dict[str, dict[str, Any]] = {}
+    if not futures.empty and identity in futures.columns and future_value in futures.columns:
+        futures[identity] = futures[identity].astype(str)
+        futures[future_value] = pd.to_numeric(futures[future_value], errors="coerce")
+        finite = futures[future_value].notna() & ~futures[identity].eq("")
+        if bool(finite.any()) and not futures.loc[finite, identity].duplicated().any():
+            futures.loc[finite, "__future_rank"] = futures.loc[finite, future_value].rank(
+                method="min", ascending=False
+            )
+            for row in futures.loc[finite].to_dict("records"):
+                assignments[str(row[identity])] = {
+                    "future_rank": int(row["__future_rank"]),
+                    "current_rank": None,
+                    "rank_delta": None,
+                }
+    coverage: dict[str, Any] = {
+        "future_rows": total_future,
+        "current_rows": 0,
+        "matched_rows": 0,
+        "unmatched_rows": total_future,
+        "join_rate": 0.0 if total_future else None,
+        "status": "unavailable",
+    }
     if current is None:
-        return [], [f"current_{identity}_rating_snapshot_missing"]
+        return [], [f"current_{identity}_rating_snapshot_missing"], coverage, assignments
     if identity not in current.columns:
-        return [], [f"current_{identity}_rating_identity_missing"]
+        return [], [f"current_{identity}_rating_identity_missing"], coverage, assignments
     value_column = next((name for name in current_value_candidates if name in current.columns), None)
     if value_column is None:
-        return [], [f"current_{identity}_rating_value_missing"]
+        return [], [f"current_{identity}_rating_value_missing"], coverage, assignments
     frame = current[[identity, value_column]].copy()
     frame[identity] = frame[identity].astype(str)
     frame[value_column] = pd.to_numeric(frame[value_column], errors="coerce")
     if frame[identity].duplicated().any() or frame[value_column].isna().any():
-        return [], [f"current_{identity}_rating_identity_or_value_ambiguous"]
-    futures = pd.DataFrame(list(future_rows))
-    if futures.empty or identity not in futures.columns:
-        return [], [f"future_{identity}_snapshot_missing"]
-    futures[identity] = futures[identity].astype(str)
-    futures[future_value] = pd.to_numeric(futures[future_value], errors="coerce")
-    if futures[identity].duplicated().any() or futures[future_value].isna().any():
-        return [], [f"future_{identity}_snapshot_identity_or_value_ambiguous"]
-    current["__rank"] = pd.to_numeric(current[value_column], errors="coerce").rank(
+        return [], [f"current_{identity}_rating_identity_or_value_ambiguous"], coverage, assignments
+    if futures.empty or identity not in futures.columns or future_value not in futures.columns:
+        return [], [f"future_{identity}_snapshot_missing"], coverage, assignments
+    if futures[identity].duplicated().any():
+        return [], [f"future_{identity}_snapshot_identity_or_value_ambiguous"], coverage, assignments
+    finite_future = futures[future_value].notna()
+    futures = futures[finite_future].copy()
+    if futures.empty:
+        coverage["status"] = "no_finite_future_values"
+        return [], [], coverage, assignments
+    frame["__rank"] = pd.to_numeric(frame[value_column], errors="coerce").rank(
         method="min", ascending=False
     )
-    current_rank = dict(zip(current[identity].astype(str), current["__rank"]))
+    current_rank = dict(zip(frame[identity].astype(str), frame["__rank"]))
     futures["__rank"] = futures[future_value].rank(method="min", ascending=False)
     output: list[dict[str, Any]] = []
     for row in futures.to_dict("records"):
         key = str(row[identity])
         if key not in current_rank:
             continue
+        assignments[key] = {
+            "future_rank": int(row["__rank"]),
+            "current_rank": int(current_rank[key]),
+            "rank_delta": int(current_rank[key] - row["__rank"]),
+        }
         output.append(
             {
                 identity: key,
@@ -610,7 +963,39 @@ def _rank_diffs(
                 "future_value": float(row[future_value]),
             }
         )
-    return output, blockers
+    matched = len(output)
+    coverage = {
+        "future_rows": total_future,
+        "current_rows": int(len(frame)),
+        "matched_rows": matched,
+        "unmatched_rows": max(0, total_future - matched),
+        "join_rate": float(matched / total_future) if total_future else None,
+        "status": "complete" if matched == total_future else "partial",
+    }
+    return output, blockers, coverage, assignments
+
+
+def _rank_extremes(rows: Sequence[Mapping[str, Any]], *, limit: int = 10) -> dict[str, list[dict[str, Any]]]:
+    """Return only matched rank changes for research inspection."""
+
+    frame = pd.DataFrame(list(rows))
+    if frame.empty or "rank_delta" not in frame.columns:
+        return {"largest_positive": [], "largest_negative": []}
+    frame["rank_delta"] = pd.to_numeric(frame["rank_delta"], errors="coerce")
+    frame = frame[frame["rank_delta"].notna()].copy()
+    if frame.empty:
+        return {"largest_positive": [], "largest_negative": []}
+    columns = [
+        column
+        for column in ("player_id", "team_id", "current_rank", "future_rank", "rank_delta")
+        if column in frame.columns
+    ]
+    positive = frame.sort_values(["rank_delta"], ascending=False, kind="stable").head(limit)
+    negative = frame.sort_values(["rank_delta"], ascending=True, kind="stable").head(limit)
+    return {
+        "largest_positive": positive[columns].to_dict("records"),
+        "largest_negative": negative[columns].to_dict("records"),
+    }
 
 
 def _blocked_result(
@@ -661,16 +1046,21 @@ def build_future_value_snapshots(
     """
 
     source = _source_binding(source_receipt)
-    auth = authorize_final_fit(
-        _model_receipt_from(model, model_receipt), source_receipt
-    )
+    bound_model_receipt = _model_receipt_from(model, model_receipt)
+    _validate_model_object_binding(model, model_receipt)
+    auth = authorize_final_fit(bound_model_receipt, source_receipt)
     # Validate the source before the fit gate result is returned.  A blocked
     # model must not hide a malformed or future-dated accepted source.
     map_frame, player_frame, team_frame, cutoff = _normalise_source_frames(
         maps, players, teams, source_receipt, as_of
     )
-    if not auth.authorized:
-        return _blocked_result(source_receipt, auth)
+    computation_blockers = _computation_blockers(auth)
+    if computation_blockers:
+        return _blocked_result(
+            source_receipt,
+            auth,
+            extra_blockers=computation_blockers,
+        )
     if model is None:
         return _blocked_result(source_receipt, auth, extra_blockers=("final_fit_model_object_missing",))
 
@@ -679,9 +1069,20 @@ def build_future_value_snapshots(
     latest = _latest_rows(form, key="player_id", label="player")
     if len(latest) != form["player_id"].nunique():
         raise FutureValueSnapshotError("latest player snapshot is incomplete")
+    latest_roster = _latest_team_roster(form)
     contributions = _player_contributions(model, latest)
+    roster_contributions = _player_contributions(model, latest_roster)
     player_rows: list[dict[str, Any]] = []
     for row in contributions.to_dict("records"):
+        row_status = str(row["support_status"])
+        row_has_missing = bool(row["model_feature_missing"])
+        row_blockers: list[str] = []
+        if row_status == "missing_features":
+            row_blockers.append("missing_model_feature_value")
+        elif row_status == "sparse":
+            row_blockers.append("sparse_player_support")
+        if "support_uncertainty_proxy_not_calibrated" in auth.blockers:
+            row_blockers.append("support_uncertainty_proxy_not_calibrated")
         player_rows.append(
             _json_row(
                 {
@@ -692,25 +1093,33 @@ def build_future_value_snapshots(
                     "champion": row["champion"],
                     "last_game_id": row.get("game_id"),
                     "last_game_date": row["date"],
-                    "role_normalized_form_logit": row["role_normalized_form_logit"],
-                    "rank_3_player_atom_logit": row["rank_3_player_atom_logit"],
-                    "champion_role_atom_logit": row["champion_role_atom_logit"],
+                    "role_normalized_form_logit": None
+                    if row_has_missing
+                    else row["role_normalized_form_logit"],
+                    "rank_3_player_atom_logit": None
+                    if row_has_missing
+                    else row["rank_3_player_atom_logit"],
+                    "champion_role_atom_logit": None
+                    if row_has_missing
+                    else row["champion_role_atom_logit"],
                     **{
-                        f"rank_3_player_atom_{index}_logit": row[
-                            f"rank_3_player_atom_{index}_logit"
-                        ]
+                        f"rank_3_player_atom_{index}_logit": None
+                        if row_has_missing
+                        else row[f"rank_3_player_atom_{index}_logit"]
                         for index in range(1, RANK_3 + 1)
                     },
                     **{
-                        f"rank_3_champion_role_atom_{index}_logit": row[
-                            f"rank_3_champion_role_atom_{index}_logit"
-                        ]
+                        f"rank_3_champion_role_atom_{index}_logit": None
+                        if row_has_missing
+                        else row[f"rank_3_champion_role_atom_{index}_logit"]
                         for index in range(1, RANK_3 + 1)
                     },
-                    "future_player_value_logit": row["role_normalized_player_value_logit"],
-                    "future_player_value_with_champion_logit": row[
-                        "future_player_value_with_champion_logit"
-                    ],
+                    "future_player_value_logit": None
+                    if row_has_missing
+                    else row["role_normalized_player_value_logit"],
+                    "future_player_value_with_champion_logit": None
+                    if row_has_missing
+                    else row["future_player_value_with_champion_logit"],
                     "minimum_metric_support": row["minimum_metric_support"],
                     "minimum_effective_support": row["minimum_effective_support"],
                     "rank_3_champion_role_atom_support": row[
@@ -719,15 +1128,22 @@ def build_future_value_snapshots(
                     "uncertainty_proxy": row["uncertainty_proxy"],
                     "model_feature_missing": bool(row["model_feature_missing"]),
                     "champion_dependent_status": row["champion_dependent_status"],
+                    "support_status": row_status,
+                    "status": "research_only" if row_status == "adequate" else f"research_only_{row_status}",
+                    "blockers": sorted(set(row_blockers)),
+                    "current_rank": None,
+                    "future_rank": None,
+                    "rank_delta": None,
+                    "rank_join_status": "pending",
                 }
             )
         )
 
-    contribution_frame = contributions.copy()
-    contribution_frame["game_id"] = latest["game_id"].to_numpy()
-    contribution_frame["team_id"] = latest["team_id"].to_numpy()
-    contribution_frame["side"] = latest["side"].to_numpy()
-    contribution_frame["role"] = latest["role"].to_numpy()
+    contribution_frame = roster_contributions.copy()
+    contribution_frame["game_id"] = latest_roster["game_id"].to_numpy()
+    contribution_frame["team_id"] = latest_roster["team_id"].to_numpy()
+    contribution_frame["side"] = latest_roster["side"].to_numpy()
+    contribution_frame["role"] = latest_roster["role"].to_numpy()
     team_counts = contribution_frame.groupby("team_id", sort=False)["player_id"].nunique()
     if not team_counts.eq(5).all():
         raise FutureValueSnapshotError("future team value requires exact five current-roster players")
@@ -739,7 +1155,7 @@ def build_future_value_snapshots(
     # Use the latest context row by team.  The historical helper is strict
     # about roster shape and keeps the side-specific continuity state separate.
     context_rows: list[dict[str, Any]] = []
-    for team_id, group in form.groupby("team_id", sort=False):
+    for team_id, group in latest_roster.groupby("team_id", sort=False):
         dates = pd.to_datetime(group["date"], utc=True)
         latest_date = dates.max()
         latest_group = group[dates.eq(latest_date)]
@@ -793,6 +1209,13 @@ def build_future_value_snapshots(
                 if raw_value is None or imputation is None or scale is None or coefficient is None or scale == 0:
                     raise FutureValueSnapshotError("team context model parameter is invalid")
                 team_context_value += raw_value / scale * coefficient
+        team_has_missing = bool(group["model_feature_missing"].any())
+        team_status = "missing_features" if team_has_missing else "adequate"
+        team_blockers: list[str] = []
+        if team_has_missing:
+            team_blockers.append("missing_model_feature_value")
+        if "support_uncertainty_proxy_not_calibrated" in auth.blockers:
+            team_blockers.append("support_uncertainty_proxy_not_calibrated")
         team_rows.append(
             _json_row(
                 {
@@ -802,10 +1225,18 @@ def build_future_value_snapshots(
                     "last_game_date": context["last_game_date"].iloc[0],
                     "roster_player_count": int(len(group)),
                     "roster_player_ids": sorted(str(value) for value in group["player_id"]),
-                    "role_normalized_player_value_logit": player_value,
-                    "champion_role_atom_logit": champion_value,
-                    "team_context_logit": team_context_value,
-                    "future_team_value_logit": (
+                    "role_normalized_player_value_logit": None
+                    if team_has_missing
+                    else player_value,
+                    "champion_role_atom_logit": None
+                    if team_has_missing
+                    else champion_value,
+                    "team_context_logit": None
+                    if team_has_missing
+                    else team_context_value,
+                    "future_team_value_logit": None
+                    if team_has_missing
+                    else (
                         player_value + team_context_value
                         if team_context_value is not None
                         else player_value
@@ -816,25 +1247,73 @@ def build_future_value_snapshots(
                     "prior_team_win": context["prior_team_win"].iloc[0],
                     "prior_team_support": context["prior_team_support"].iloc[0],
                     "roster_continuity": context["roster_continuity"].iloc[0],
+                    "support_status": team_status,
+                    "status": "research_only" if team_status == "adequate" else "research_only_missing_features",
+                    "blockers": sorted(set(team_blockers)),
+                    "current_rank": None,
+                    "future_rank": None,
+                    "rank_delta": None,
+                    "rank_join_status": "pending",
                 }
             )
         )
 
-    player_rank_diffs, player_rank_blockers = _rank_diffs(
+    player_rank_diffs, player_rank_blockers, player_rank_coverage, player_rank_assignments = _rank_diffs(
         player_rows,
         current_player_ratings,
         identity="player_id",
         future_value="future_player_value_logit",
         current_value_candidates=("mu_effective", "mu_total", "rating"),
     )
-    team_rank_diffs, team_rank_blockers = _rank_diffs(
+    team_rank_diffs, team_rank_blockers, team_rank_coverage, team_rank_assignments = _rank_diffs(
         team_rows,
         current_team_ratings,
         identity="team_id",
         future_value="future_team_value_logit",
         current_value_candidates=("mu_effective", "mu_total", "rating"),
     )
-    blockers = tuple(sorted(set((*team_blocker, *player_rank_blockers, *team_rank_blockers))))
+    for row in player_rows:
+        assignment = player_rank_assignments.get(str(row["player_id"]))
+        if assignment is not None:
+            row.update(assignment)
+            row["rank_join_status"] = (
+                "current_rating_unavailable"
+                if player_rank_coverage["status"] == "unavailable"
+                else "matched"
+                if assignment["current_rank"] is not None
+                else "current_rating_unmatched"
+            )
+        else:
+            row["rank_join_status"] = "current_rating_unavailable"
+    for row in team_rows:
+        assignment = team_rank_assignments.get(str(row["team_id"]))
+        if assignment is not None:
+            row.update(assignment)
+            row["rank_join_status"] = (
+                "current_rating_unavailable"
+                if team_rank_coverage["status"] == "unavailable"
+                else "matched"
+                if assignment["current_rank"] is not None
+                else "current_rating_unmatched"
+            )
+        else:
+            row["rank_join_status"] = "current_rating_unavailable"
+    blockers = tuple(
+        sorted(
+            set(
+                (
+                    *auth.blockers,
+                    *team_blocker,
+                    *player_rank_blockers,
+                    *team_rank_blockers,
+                )
+            )
+        )
+    )
+    rank_extremes = {
+        "player": _rank_extremes(player_rank_diffs),
+        "team": _rank_extremes(team_rank_diffs),
+    }
     payload: dict[str, Any] = {
         "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
         "status": "research_only" if not blockers else "research_only_partial",
@@ -843,7 +1322,9 @@ def build_future_value_snapshots(
         "as_of": _utc_text(cutoff),
         "model": {
             "schema_version": MODEL_FIT_SCHEMA_VERSION,
-            "variant": str(model_receipt.get("variant")),
+            "variant": str(bound_model_receipt.get("variant"))
+            if bound_model_receipt is not None
+            else None,
             "receipt_sha256": auth.model_receipt_sha256,
         },
         "fit": auth.as_dict(),
@@ -851,6 +1332,11 @@ def build_future_value_snapshots(
         "team_row_count": len(team_rows),
         "player_rank_diff_count": len(player_rank_diffs),
         "team_rank_diff_count": len(team_rank_diffs),
+        "rank_coverage": {
+            "player": player_rank_coverage,
+            "team": team_rank_coverage,
+        },
+        "rank_diff_extremes": rank_extremes,
         "blockers": list(blockers),
         "tierlists": {"recalculated": False, "status": "unchanged"},
     }
@@ -935,5 +1421,6 @@ __all__ = [
     "SCHEMA_VERSION",
     "authorize_final_fit",
     "build_future_value_snapshots",
+    "load_final_fit_model",
     "write_snapshot_bundle",
 ]
