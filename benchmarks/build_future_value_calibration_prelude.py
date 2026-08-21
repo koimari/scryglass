@@ -32,9 +32,7 @@ from benchmarks.future_value_four_variant_bundle import (
     _derive_inner_fold_spec,
 )
 from lol_kills.research.future_value_rating import (
-    CURRENT_RATING_SIGNED_MAP_FEATURES,
     RATING_VARIANT_ORDER,
-    SCALING_CURVE_SIGNED_MAP_FEATURES,
     _map_model_frame,
     bind_verified_leaguepedia_series_crosswalk,
     build_time_decayed_prior_player_form,

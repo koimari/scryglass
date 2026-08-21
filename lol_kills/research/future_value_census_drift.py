@@ -9,14 +9,11 @@ assignments without extending the current census or opening a promotion gate.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 import re
 
 from lol_kills.research.future_value_series_authority import (
-    canonical_json_bytes,
     canonical_sha256,
-    file_record,
 )
 from lol_kills.research.oe_leaguepedia_series_crosswalk import verify_crosswalk
 from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
