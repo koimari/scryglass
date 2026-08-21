@@ -135,10 +135,13 @@ def _write_crosswalk(
     raw_source_bytes: dict[str, bytes] = {}
     for label, rows in raw_sources.items():
         payload_bytes = _canonical_json_bytes(rows)
-        raw_bytes = b"captured:" + label.encode() + b":" + payload_bytes
+        source_path = tmp_path / f"{label}.json"
+        source_path.write_bytes(payload_bytes)
+        raw_bytes = source_path.read_bytes()
         raw_source_bytes[label] = raw_bytes
         source_records[label] = {
             "url": f"https://example.test/{label}",
+            "path": str(source_path.resolve()),
             "retrieved_at": "2026-01-03T00:00:00Z",
             "sha256": hashlib.sha256(raw_bytes).hexdigest(),
             "bytes": len(raw_bytes),
