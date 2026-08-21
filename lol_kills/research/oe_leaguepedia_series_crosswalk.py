@@ -1502,11 +1502,29 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                             f"crosswalk capture manifest differs from source record: {capture_label}"
                         )
 
+            has_direct_assignments = any(
+                str(assignment.get("assignment_method") or "").startswith(
+                    "exact_riot_platform_game_id"
+                )
+                for assignment in assignments
+                if isinstance(assignment, Mapping)
+            )
             scoreboard_by_id: dict[str, list[dict[str, Any]]] = {}
+            scoreboard_by_riot_platform_game_id: dict[
+                str, list[dict[str, Any]]
+            ] = {}
             for raw in raw_sources["scoreboardgames"]:
                 row = dict(raw)
                 try:
                     scoreboard_by_id.setdefault(_scoreboard_game_id(row), []).append(row)
+                    if has_direct_assignments:
+                        riot_platform_game_id = _scoreboard_riot_platform_game_id(
+                            row
+                        )
+                        if riot_platform_game_id:
+                            scoreboard_by_riot_platform_game_id.setdefault(
+                                riot_platform_game_id, []
+                            ).append(row)
                 except CrosswalkError as error:
                     raise CrosswalkError(
                         "crosswalk raw ScoreboardGames identity is invalid"
@@ -1624,18 +1642,9 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                         raise CrosswalkError(
                             "crosswalk direct Riot game identity changed"
                         )
-                    direct_candidates = []
-                    for raw_scoreboard in raw_sources["scoreboardgames"]:
-                        try:
-                            candidate_riot_id = _scoreboard_riot_platform_game_id(
-                                raw_scoreboard
-                            )
-                        except CrosswalkError as error:
-                            raise CrosswalkError(
-                                "crosswalk raw ScoreboardGames identity is invalid"
-                            ) from error
-                        if candidate_riot_id == oe_game_id:
-                            direct_candidates.append(raw_scoreboard)
+                    direct_candidates = scoreboard_by_riot_platform_game_id.get(
+                        oe_game_id, []
+                    )
                     if len(direct_candidates) == 0:
                         raise CrosswalkError(
                             "crosswalk direct Riot game identity is missing"

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import lol_kills.research.oe_leaguepedia_series_crosswalk as crosswalk_module
 from lol_kills.research.oe_leaguepedia_series_crosswalk import (
     CrosswalkError,
     build_oe_leaguepedia_series_crosswalk,
@@ -283,6 +284,7 @@ def test_direct_riot_platform_identity_keeps_patch_mismatch_as_diagnostic(
 
 def test_duplicate_direct_riot_id_selects_only_unique_schedule_prefix(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     scoreboard[0]["RiotPlatformGameId"] = "oe-1"
@@ -318,7 +320,23 @@ def test_duplicate_direct_riot_id_selects_only_unique_schedule_prefix(
         "matchschedule_prefix_then_exact_game_id_prefix"
     )
     assert first["evidence"]["identity_disambiguation"]["eligible_game_id_prefix"] == "match-1"
+    original_identity = crosswalk_module._scoreboard_riot_platform_game_id
+    call_count = 0
+
+    def counted_identity(row):
+        nonlocal call_count
+        call_count += 1
+        return original_identity(row)
+
+    monkeypatch.setattr(
+        crosswalk_module,
+        "_scoreboard_riot_platform_game_id",
+        counted_identity,
+    )
     verify_crosswalk(result)
+    assert len(scoreboard) <= call_count <= (
+        len(scoreboard) + len(result["assignments"])
+    )
 
 
 def test_duplicate_direct_riot_id_stays_ambiguous_when_each_prefix_has_schedule(
