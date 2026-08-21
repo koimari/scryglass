@@ -419,6 +419,216 @@ def _load_json_mapping(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
+def _phase_hash(value: Any, field: str) -> str:
+    result = str(value or "").lower()
+    if re.fullmatch(r"[0-9a-f]{64}", result) is None:
+        raise FutureValueTrainingError(f"{field} hash is invalid")
+    return result
+
+
+def _phase_partition_payload(
+    payload: Mapping[str, Any],
+    *,
+    label: str,
+) -> Mapping[str, Any]:
+    candidates = [
+        payload.get("cross_model_series_partition"),
+        payload.get("series_partition"),
+        payload.get("partition"),
+    ]
+    fit = payload.get("fit")
+    if isinstance(fit, Mapping):
+        candidates.append(fit.get("series_partition"))
+    for candidate in candidates:
+        if isinstance(candidate, Mapping):
+            return candidate
+    raise FutureValueTrainingError(f"{label} series partition is missing")
+
+
+def _phase_partition_fields(
+    payload: Mapping[str, Any],
+    *,
+    label: str,
+) -> dict[str, Any]:
+    partition = _phase_partition_payload(payload, label=label)
+    source = payload.get("source")
+    source_hash = payload.get("source_receipt_sha256")
+    if source_hash is None and isinstance(source, Mapping):
+        source_hash = source.get("source_receipt_sha256")
+    if source_hash is None:
+        source_hash = partition.get("source_receipt_sha256")
+    fields = {
+        "source_receipt_sha256": _phase_hash(
+            source_hash, f"{label} source receipt"
+        ),
+        "eligible_game_count": partition.get(
+            "eligible_game_count",
+            partition.get(
+                "model_eligible_game_count",
+                payload.get(
+                    "series_partition_eligible_game_count",
+                    payload.get("model_eligible_game_count"),
+                ),
+            ),
+        ),
+        "eligible_identity_sha256": partition.get(
+            "eligible_identity_sha256",
+            partition.get(
+                "model_eligible_identity_sha256",
+                payload.get("series_partition_eligible_identity_sha256"),
+            ),
+        ),
+        "eligible_assignment_sha256": partition.get(
+            "eligible_assignment_sha256",
+            payload.get("series_partition_eligible_assignment_sha256"),
+        ),
+        "reference_assignment_sha256": partition.get(
+            "reference_assignment_sha256",
+            payload.get("series_partition_reference_assignment_sha256"),
+        ),
+        "reference_assignment_match": partition.get(
+            "reference_assignment_match",
+            payload.get("series_partition_reference_assignment_match"),
+        ),
+        "status": str(
+            partition.get("status", partition.get("cross_model_partition_status"))
+            or ""
+        ).lower(),
+    }
+    for field in (
+        "eligible_identity_sha256",
+        "eligible_assignment_sha256",
+        "reference_assignment_sha256",
+    ):
+        fields[field] = _phase_hash(fields[field], f"{label} {field}")
+    if isinstance(fields["eligible_game_count"], bool):
+        raise FutureValueTrainingError(f"{label} eligible count is invalid")
+    try:
+        fields["eligible_game_count"] = int(fields["eligible_game_count"])
+    except (TypeError, ValueError) as error:
+        raise FutureValueTrainingError(f"{label} eligible count is invalid") from error
+    if fields["status"] != "comparable":
+        raise FutureValueTrainingError(f"{label} partition is not comparable")
+    if fields["reference_assignment_match"] is not True:
+        raise FutureValueTrainingError(f"{label} reference assignment is not verified")
+    if fields["reference_assignment_sha256"] != fields["eligible_assignment_sha256"]:
+        raise FutureValueTrainingError(f"{label} reference assignment differs")
+    return fields
+
+
+def _phase_file_record(
+    path: Path,
+    *,
+    expected_sha256: str,
+    label: str,
+) -> dict[str, Any]:
+    if (
+        not path.is_absolute()
+        or ".." in path.parts
+        or path.is_symlink()
+        or not path.is_file()
+    ):
+        raise FutureValueTrainingError(f"{label} is missing or unsafe")
+    expected = _phase_hash(expected_sha256, f"expected {label}")
+    actual = _sha256(path)
+    if actual != expected:
+        raise FutureValueTrainingError(f"{label} hash changed")
+    return {"path": str(path), "bytes": path.stat().st_size, "sha256": actual}
+
+
+def _build_phase_partition_binding(
+    artifact_path: Path,
+    receipt_path: Path,
+    *,
+    artifact_sha256: str,
+    receipt_file_sha256: str,
+    source_receipt: Mapping[str, Any],
+    artifact_kind: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Verify phase files before constructing the rating evaluator binding."""
+
+    artifact_file = _phase_file_record(
+        artifact_path,
+        expected_sha256=artifact_sha256,
+        label="phase artifact",
+    )
+    receipt_file = _phase_file_record(
+        receipt_path,
+        expected_sha256=receipt_file_sha256,
+        label="phase run receipt",
+    )
+    artifact = _load_json_mapping(artifact_path, "phase artifact")
+    receipt = _load_json_mapping(receipt_path, "phase run receipt")
+    artifact_fields = _phase_partition_fields(artifact, label="phase artifact")
+    receipt_fields = _phase_partition_fields(receipt, label="phase run receipt")
+    for field in (
+        "source_receipt_sha256",
+        "eligible_game_count",
+        "eligible_identity_sha256",
+        "eligible_assignment_sha256",
+        "reference_assignment_sha256",
+        "reference_assignment_match",
+        "status",
+    ):
+        if artifact_fields[field] != receipt_fields[field]:
+            raise FutureValueTrainingError(
+                f"phase artifact and run receipt differ: {field}"
+            )
+    source_hash = _phase_hash(source_receipt.get("receipt_sha256"), "source receipt")
+    if artifact_fields["source_receipt_sha256"] != source_hash:
+        raise FutureValueTrainingError("phase source receipt differs")
+    expected_count = int(source_receipt.get("model_eligible_game_count") or -1)
+    expected_identity = _phase_hash(
+        source_receipt.get("model_eligible_identity_sha256"),
+        "source model-eligible identity",
+    )
+    if artifact_fields["eligible_game_count"] != expected_count:
+        raise FutureValueTrainingError("phase eligible count differs from source")
+    if artifact_fields["eligible_identity_sha256"] != expected_identity:
+        raise FutureValueTrainingError("phase eligible identity differs from source")
+    outputs = receipt.get("outputs")
+    if not isinstance(outputs, Mapping) or not isinstance(outputs.get(artifact_kind), Mapping):
+        raise FutureValueTrainingError("phase run receipt selected output is missing")
+    output = outputs[artifact_kind]
+    output_path = output.get("path", output.get("locator"))
+    output_path_obj = Path(output_path) if isinstance(output_path, str) else None
+    if (
+        not isinstance(output_path, str)
+        or output_path_obj is None
+        or not output_path_obj.is_absolute()
+        or output_path_obj.is_symlink()
+        or output_path_obj.resolve() != artifact_path.resolve()
+    ):
+        raise FutureValueTrainingError("phase run receipt output path changed")
+    if output.get("bytes") != artifact_file["bytes"] or str(
+        output.get("sha256") or ""
+    ).lower() != artifact_file["sha256"]:
+        raise FutureValueTrainingError("phase run receipt output bytes changed")
+    binding = {
+        "phase_artifact": artifact_file,
+        "phase_receipt": receipt_file,
+        "phase_artifact_sha256": artifact_file["sha256"],
+        "phase_receipt_file_sha256": receipt_file["sha256"],
+        "phase_artifact_kind": artifact_kind,
+        "eligible_game_count": artifact_fields["eligible_game_count"],
+        "eligible_identity_sha256": artifact_fields["eligible_identity_sha256"],
+        "eligible_assignment_sha256": artifact_fields["eligible_assignment_sha256"],
+        "source_receipt_sha256": source_hash,
+    }
+    runtime_binding = {
+        "artifact": artifact_file,
+        "receipt": receipt_file,
+        "artifact_kind": artifact_kind,
+        "expected_artifact_sha256": artifact_file["sha256"],
+        "expected_receipt_file_sha256": receipt_file["sha256"],
+        "eligible_game_count": artifact_fields["eligible_game_count"],
+        "eligible_identity_sha256": artifact_fields["eligible_identity_sha256"],
+        "eligible_assignment_sha256": artifact_fields["eligible_assignment_sha256"],
+        "source_receipt_sha256": source_hash,
+    }
+    return binding, runtime_binding
+
+
 def _validate_source_receipt_mapping(receipt: Mapping[str, Any]) -> None:
     """Verify the source receipt payload before any training binding."""
 
@@ -720,6 +930,11 @@ def run_model_evaluation(
     crosswalk_path: Path | None = None,
     crosswalk_receipt_path: Path | None = None,
     crosswalk_receipt_file_sha256: str | None = None,
+    phase_artifact_path: Path | None = None,
+    phase_receipt_path: Path | None = None,
+    phase_artifact_sha256: str | None = None,
+    phase_receipt_file_sha256: str | None = None,
+    phase_artifact_kind: str = "candidate",
 ) -> dict[str, Any]:
     """Run the frozen research model and emit a gate-grade runtime receipt."""
 
@@ -739,6 +954,29 @@ def run_model_evaluation(
         r"[0-9a-f]{64}", str(crosswalk_receipt_file_sha256), re.I
     ) is None:
         raise FutureValueTrainingError("crosswalk receipt file hash is invalid")
+    phase_values = (
+        phase_artifact_path,
+        phase_receipt_path,
+        phase_artifact_sha256,
+        phase_receipt_file_sha256,
+    )
+    if any(value is not None for value in phase_values) and not all(
+        value is not None for value in phase_values
+    ):
+        raise FutureValueTrainingError("phase partition inputs must be supplied together")
+    phase_partition_binding = None
+    phase_runtime_binding = None
+    if phase_artifact_path is not None and phase_receipt_path is not None:
+        if phase_artifact_kind not in {"candidate", "evaluation"}:
+            raise FutureValueTrainingError("phase artifact kind is invalid")
+        phase_partition_binding, phase_runtime_binding = _build_phase_partition_binding(
+            phase_artifact_path,
+            phase_receipt_path,
+            artifact_sha256=str(phase_artifact_sha256),
+            receipt_file_sha256=str(phase_receipt_file_sha256),
+            source_receipt=source_receipt,
+            artifact_kind=phase_artifact_kind,
+        )
     expected_receipt_hash = str(freeze["reference_source_receipt_sha256"])
     expected_receipt_file_hash = str(freeze.get("source_receipt_file_sha256") or "")
     expected_receipt_path = str(freeze.get("source_receipt_path") or "")
@@ -885,6 +1123,9 @@ def run_model_evaluation(
                 runtime_receipt_path=str(runtime_receipt_path),
                 crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
                 verified_model_frame=verified_series_model_frame,
+                phase_partition_binding=phase_partition_binding,
+                expected_phase_artifact_sha256=phase_artifact_sha256,
+                expected_phase_receipt_file_sha256=phase_receipt_file_sha256,
             )
         else:
             variant_results: dict[str, Any] = {}
@@ -919,6 +1160,9 @@ def run_model_evaluation(
                     inner_feature_ledger=inner_variant_ledger,
                     crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
                     verified_model_frame=verified_series_model_frame,
+                    phase_partition_binding=phase_partition_binding,
+                    expected_phase_artifact_sha256=phase_artifact_sha256,
+                    expected_phase_receipt_file_sha256=phase_receipt_file_sha256,
                 )
             result = {
                 "schema_version": "scryglass:future-value-four-variant-evaluation:v1",
@@ -963,6 +1207,7 @@ def run_model_evaluation(
         "feature_ledger_path": str(feature_ledger_path) if feature_ledger_path else None,
         "input_binding": input_binding,
         "series_partition": crosswalk_runtime_binding,
+        "phase_partition": phase_runtime_binding,
         "started_at": started_at.isoformat().replace("+00:00", "Z"),
         "completed_at": completed_at.isoformat().replace("+00:00", "Z"),
         "elapsed_seconds": float(elapsed),
@@ -1074,6 +1319,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--crosswalk", type=Path)
     parser.add_argument("--crosswalk-receipt", type=Path)
     parser.add_argument("--crosswalk-receipt-file-sha256")
+    parser.add_argument("--phase-artifact", type=Path)
+    parser.add_argument("--phase-receipt", type=Path)
+    parser.add_argument("--phase-artifact-sha256")
+    parser.add_argument("--phase-receipt-file-sha256")
+    parser.add_argument(
+        "--phase-artifact-kind",
+        default="candidate",
+        choices=("candidate", "evaluation"),
+    )
     args = parser.parse_args(argv)
     try:
         if args.fit_model:
@@ -1105,6 +1359,15 @@ def main(argv: list[str] | None = None) -> int:
                     else args.crosswalk_receipt.resolve()
                 ),
                 crosswalk_receipt_file_sha256=args.crosswalk_receipt_file_sha256,
+                phase_artifact_path=(
+                    None if args.phase_artifact is None else args.phase_artifact.resolve()
+                ),
+                phase_receipt_path=(
+                    None if args.phase_receipt is None else args.phase_receipt.resolve()
+                ),
+                phase_artifact_sha256=args.phase_artifact_sha256,
+                phase_receipt_file_sha256=args.phase_receipt_file_sha256,
+                phase_artifact_kind=args.phase_artifact_kind,
                 command=[
                     sys.executable,
                     "-m",

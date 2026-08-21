@@ -1408,3 +1408,96 @@ def test_model_runtime_receipt_binds_code_source_environment_and_output(
             runtime_receipt_path=tmp_path / "unused-runtime.json",
             crosswalk_path=tmp_path / "crosswalk.json",
         )
+
+
+def _phase_training_fixture(tmp_path, source: dict[str, object]):
+    game_ids = [str(value) for value in source["model_eligible_game_ids"]]
+    assignment = hashlib.sha256(
+        json.dumps(
+            [
+                {"game_id": game_id, "series_id": f"series-{game_id}"}
+                for game_id in sorted(game_ids)
+            ],
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    partition = {
+        "status": "comparable",
+        "eligible_game_count": len(game_ids),
+        "eligible_identity_sha256": identity_sha256(game_ids),
+        "eligible_assignment_sha256": assignment,
+        "reference_assignment_sha256": assignment,
+        "reference_assignment_match": True,
+    }
+    artifact_path = tmp_path / "phase-candidate.json"
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "source_receipt_sha256": source["receipt_sha256"],
+                "cross_model_series_partition": partition,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    artifact_record = {
+        "locator": str(artifact_path),
+        "bytes": artifact_path.stat().st_size,
+        "sha256": hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
+    }
+    receipt_path = tmp_path / "phase-run-receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "source": {"source_receipt_sha256": source["receipt_sha256"]},
+                "partition": partition,
+                "outputs": {"candidate": artifact_record},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return artifact_path, receipt_path
+
+
+def test_training_phase_binding_verifies_files_and_receipt_output(tmp_path) -> None:
+    source = _source_receipt(["g1", "g2"])
+    artifact_path, receipt_path = _phase_training_fixture(tmp_path, source)
+    binding, runtime = training_module._build_phase_partition_binding(
+        artifact_path,
+        receipt_path,
+        artifact_sha256=hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
+        receipt_file_sha256=hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+        source_receipt=source,
+        artifact_kind="candidate",
+    )
+    assert binding["eligible_game_count"] == 2
+    assert binding["phase_artifact_kind"] == "candidate"
+    assert runtime["expected_artifact_sha256"] == binding["phase_artifact_sha256"]
+
+
+def test_training_phase_inputs_fail_closed_when_partial(tmp_path, monkeypatch) -> None:
+    source = _source_receipt(["g1", "g2"], source_as_of="2026-01-02T00:00:00Z")
+    source_path = tmp_path / "source.json"
+    source_path.write_text(json.dumps(source, sort_keys=True), encoding="utf-8")
+    monkeypatch.setattr(
+        training_module,
+        "_load_freeze",
+        lambda _path: {
+            "reference_source_receipt_sha256": source["receipt_sha256"],
+            "source_receipt_file_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            "source_receipt_path": str(source_path),
+        },
+    )
+    with pytest.raises(FutureValueTrainingError, match="phase partition inputs"):
+        run_model_evaluation(
+            oe_root=tmp_path / "oe",
+            freeze_path=tmp_path / "freeze.json",
+            source_receipt_path=source_path,
+            model_output_path=tmp_path / "model.json",
+            runtime_receipt_path=tmp_path / "runtime.json",
+            phase_artifact_path=tmp_path / "phase.json",
+        )
