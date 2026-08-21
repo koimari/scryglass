@@ -10,10 +10,12 @@ import lol_kills.research.future_value_rating as future_value_rating
 
 from lol_kills.research.future_phase_curve import (
     FuturePhaseCurveError,
+    _phase_partition_map_frame,
     bind_phase_source,
     chronological_folds,
     evaluate_phase_curve,
     fit_phase_curve,
+    phase_series_assignment_sha256,
     phase_curve_measures,
     prepare_phase_frame,
     score_phase_curve,
@@ -606,7 +608,7 @@ def test_verified_mixed_partition_binds_hashes_and_keeps_proxy_blocker(
     assert artifact["series_partition_eligible_game_ids"] == receipt[
         "model_eligible_game_ids"
     ]
-    assert artifact["cross_model_series_partition"]["status"] == "comparable"
+    assert artifact["cross_model_series_partition"]["status"] == "non_comparable"
     assert artifact["series_partition_proxy_authority_blocker"] is True
     assert artifact["series_identity"]["authoritative"] is False
     assert artifact["series_identity"]["blockers"]
@@ -629,11 +631,53 @@ def test_verified_mixed_partition_evaluation_uses_shared_series_clusters(
         crosswalk_receipt_file_sha256="e" * 64,
     )
     assert report["cluster_column"] == "series_id"
-    assert report["cross_model_series_partition"]["status"] == "comparable"
+    assert report["cross_model_series_partition"]["status"] == "non_comparable"
     assert report["series_partition_mapping_sha256"] == "a" * 64
     assert report["series_partition_eligible_game_count"] == len(frame)
     assert report["series_identity"]["authoritative"] is False
     assert report["cluster_safe"] is False
+
+
+def test_verified_mixed_partition_requires_full_reference_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = _phase_frame(8)
+    receipt = _crosswalk_receipt(frame["game_uid"].tolist())
+    _fake_crosswalk_loader(monkeypatch)
+    reference = future_value_rating._map_model_frame(_phase_partition_map_frame(frame))
+    expected = phase_series_assignment_sha256(reference, game_column="game_id")
+    artifact = fit_phase_curve(
+        frame,
+        source_receipt=receipt,
+        feature_columns=["prior_form_gold_diff"],
+        crosswalk_path="fixture/crosswalk.json",
+        crosswalk_receipt_path="fixture/crosswalk.receipt.json",
+        crosswalk_receipt_file_sha256="e" * 64,
+        series_partition_reference_frame=frame,
+        series_partition_assignment_sha256=expected,
+    )
+    assert artifact["cross_model_series_partition"]["status"] == "comparable"
+    assert artifact["series_partition_reference_assignment_sha256"] == expected
+    assert artifact["series_partition_eligible_assignment_sha256"] == expected
+
+
+def test_verified_mixed_partition_rejects_reference_assignment_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = _phase_frame(8)
+    receipt = _crosswalk_receipt(frame["game_uid"].tolist())
+    _fake_crosswalk_loader(monkeypatch)
+    with pytest.raises(FuturePhaseCurveError, match="assignments differ"):
+        fit_phase_curve(
+            frame,
+            source_receipt=receipt,
+            feature_columns=["prior_form_gold_diff"],
+            crosswalk_path="fixture/crosswalk.json",
+            crosswalk_receipt_path="fixture/crosswalk.receipt.json",
+            crosswalk_receipt_file_sha256="e" * 64,
+            series_partition_reference_frame=frame,
+            series_partition_assignment_sha256="f" * 64,
+        )
 
 
 def test_static_phase_artifacts_bind_the_accepted_census_reference() -> None:

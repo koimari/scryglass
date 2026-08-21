@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -19,9 +20,11 @@ import pandas as pd
 
 from lol_kills.research.future_phase_curve import (
     FuturePhaseCurveError,
+    _phase_partition_map_frame,
     build_strict_prior_team_features,
     evaluate_phase_curve,
     fit_phase_curve,
+    phase_series_assignment_sha256,
     prepare_phase_frame,
     verify_source_receipt_artifact,
 )
@@ -275,6 +278,10 @@ def _partition_payload(artifact: Mapping[str, Any]) -> dict[str, Any]:
         "eligible_game_count",
         "eligible_identity_sha256",
         "eligible_game_ids",
+        "eligible_assignment_sha256",
+        "reference_game_count",
+        "reference_assignment_sha256",
+        "reference_assignment_match",
         "authoritative",
         "proxy_authority_blocker",
     )
@@ -283,7 +290,65 @@ def _partition_payload(artifact: Mapping[str, Any]) -> dict[str, Any]:
         raise PhaseRebuildError("phase series partition is incomplete: " + ", ".join(missing))
     if artifact.get("cross_model_series_partition", {}).get("status") != "comparable":
         raise PhaseRebuildError("phase artifact did not bind a comparable shared partition")
+    if not partition.get("reference_assignment_match"):
+        raise PhaseRebuildError("phase artifact did not match the reference assignments")
     return dict(partition)
+
+
+def _build_rating_reference_partition_frame(
+    maps: pd.DataFrame,
+    *,
+    source_receipt: Mapping[str, Any],
+    crosswalk_path: Path,
+    crosswalk_receipt_path: Path,
+    crosswalk_receipt_file_sha256: str,
+) -> tuple[pd.DataFrame, str, dict[str, Any]]:
+    """Build the shared partition on the complete source map frame.
+
+    The rating mapper is the reference implementation.  The phase model
+    receives its verified full-frame assignments and only selects eligible
+    rows by game ID.
+    """
+
+    from lol_kills.research.future_value_rating import (
+        _map_model_frame,
+        bind_verified_leaguepedia_series_crosswalk,
+    )
+
+    raw_maps = _phase_partition_map_frame(maps)
+    bound_maps = bind_verified_leaguepedia_series_crosswalk(
+        raw_maps,
+        crosswalk_path=crosswalk_path,
+        receipt_path=crosswalk_receipt_path,
+        source_receipt=source_receipt,
+        expected_receipt_file_sha256=crosswalk_receipt_file_sha256,
+    )
+    reference = _map_model_frame(
+        bound_maps,
+        verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+        verified_source_receipt=source_receipt,
+        verified_crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+    )
+    reference_ids = reference["game_id"].astype(str)
+    if reference_ids.duplicated().any() or set(reference_ids) != set(raw_maps["game_id"].astype(str)):
+        raise PhaseRebuildError("rating reference partition changed source map IDs")
+    eligible_ids = set(str(value) for value in source_receipt["model_eligible_game_ids"])
+    eligible = reference.loc[reference_ids.isin(eligible_ids)].copy()
+    if set(eligible["game_id"].astype(str)) != eligible_ids:
+        raise PhaseRebuildError("rating reference partition is missing eligible maps")
+    digest = phase_series_assignment_sha256(eligible, game_column="game_id")
+    audit = dict(reference.attrs.get("series_cluster_audit") or {})
+    return reference, digest, {
+        "reference_game_count": int(len(reference)),
+        "reference_promoted_game_count": int(
+            reference["series_id"].astype(str).str.startswith("leaguepedia:").sum()
+        ),
+        "reference_eligible_promoted_game_count": int(
+            eligible["series_id"].astype(str).str.startswith("leaguepedia:").sum()
+        ),
+        "reference_assignment_sha256": digest,
+        "reference_audit": audit,
+    }
 
 
 def _write_json(path: Path, value: Mapping[str, Any]) -> dict[str, Any]:
@@ -321,25 +386,36 @@ def rebuild_phase_artifacts(
     extras = receipt.get("source_extra_game_ids")
     if not isinstance(extras, Mapping):
         extras = {}
-    maps = pd.read_parquet(source_files["maps"])
-    teams = pd.read_parquet(source_files["teams"])
+    maps_source = pd.read_parquet(source_files["maps"])
+    teams_source = pd.read_parquet(source_files["teams"])
+    receipt_file_sha256 = _sha256_path(receipt_path)
+    crosswalk_receipt_file_sha256 = str(crosswalk_receipt_file_sha256).lower()
+    if _sha256_path(crosswalk_receipt_path) != crosswalk_receipt_file_sha256:
+        raise PhaseRebuildError("crosswalk receipt file hash changed")
+    reference_started = time.perf_counter()
+    reference_partition_frame, reference_assignment_sha256, reference_stats = (
+        _build_rating_reference_partition_frame(
+            maps_source,
+            source_receipt=receipt,
+            crosswalk_path=crosswalk_path,
+            crosswalk_receipt_path=crosswalk_receipt_path,
+            crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+        )
+    )
+    reference_elapsed = time.perf_counter() - reference_started
     maps = select_accepted_rows(
-        maps,
+        maps_source,
         accepted_ids=accepted_ids,
         declared_extra_ids=extras.get("maps", ()),
         label="maps",
     )
     teams = select_accepted_rows(
-        teams,
+        teams_source,
         accepted_ids=accepted_ids,
         declared_extra_ids=extras.get("teams", ()),
         label="teams",
     )
     frame, frame_stats = build_phase_frame(maps, teams, accepted_ids=accepted_ids)
-    receipt_file_sha256 = _sha256_path(receipt_path)
-    crosswalk_receipt_file_sha256 = str(crosswalk_receipt_file_sha256).lower()
-    if _sha256_path(crosswalk_receipt_path) != crosswalk_receipt_file_sha256:
-        raise PhaseRebuildError("crosswalk receipt file hash changed")
     eligible_ids = set(str(value) for value in receipt["model_eligible_game_ids"])
     eligible_frame = frame.loc[
         frame["game_uid"].astype(str).isin(eligible_ids)
@@ -347,30 +423,46 @@ def rebuild_phase_artifacts(
     if set(eligible_frame["game_uid"].astype(str)) != eligible_ids:
         raise PhaseRebuildError("eligible phase frame does not match source receipt")
     started = time.perf_counter()
-    fit = fit_phase_curve(
-        eligible_frame,
-        source_receipt=receipt,
-        source_receipt_path=receipt_path,
-        source_receipt_file_sha256=receipt_file_sha256,
-        feature_columns=FEATURE_COLUMNS,
-        crosswalk_path=crosswalk_path,
-        crosswalk_receipt_path=crosswalk_receipt_path,
-        crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
-    )
-    evaluation = evaluate_phase_curve(
-        eligible_frame,
-        source_receipt=receipt,
-        source_receipt_path=receipt_path,
-        source_receipt_file_sha256=receipt_file_sha256,
-        feature_columns=FEATURE_COLUMNS,
-        n_splits=3,
-        cluster_column=None,
-        max_transfer_groups=max_transfer_groups,
-        crosswalk_path=crosswalk_path,
-        crosswalk_receipt_path=crosswalk_receipt_path,
-        crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
-    )
+    with warnings.catch_warnings(record=True) as captured_warnings:
+        warnings.simplefilter("always", RuntimeWarning)
+        fit = fit_phase_curve(
+            eligible_frame,
+            source_receipt=receipt,
+            source_receipt_path=receipt_path,
+            source_receipt_file_sha256=receipt_file_sha256,
+            feature_columns=FEATURE_COLUMNS,
+            crosswalk_path=crosswalk_path,
+            crosswalk_receipt_path=crosswalk_receipt_path,
+            crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+            series_partition_bound_reference_frame=reference_partition_frame,
+            series_partition_assignment_sha256=reference_assignment_sha256,
+        )
+        evaluation = evaluate_phase_curve(
+            eligible_frame,
+            source_receipt=receipt,
+            source_receipt_path=receipt_path,
+            source_receipt_file_sha256=receipt_file_sha256,
+            feature_columns=FEATURE_COLUMNS,
+            n_splits=3,
+            cluster_column=None,
+            max_transfer_groups=max_transfer_groups,
+            crosswalk_path=crosswalk_path,
+            crosswalk_receipt_path=crosswalk_receipt_path,
+            crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+            series_partition_bound_reference_frame=reference_partition_frame,
+            series_partition_assignment_sha256=reference_assignment_sha256,
+        )
     elapsed = time.perf_counter() - started
+    numeric_warnings = sorted(
+        {
+            str(item.message)
+            for item in captured_warnings
+            if any(
+                token in str(item.message).casefold()
+                for token in ("overflow", "divide by zero", "invalid value")
+            )
+        }
+    )
     fit_partition = _partition_payload(fit)
     evaluation_partition = _partition_payload(evaluation)
     if {
@@ -384,6 +476,10 @@ def rebuild_phase_artifacts(
             "receipt_file_sha256",
             "eligible_game_count",
             "eligible_identity_sha256",
+            "eligible_assignment_sha256",
+            "reference_game_count",
+            "reference_assignment_sha256",
+            "reference_assignment_match",
         )
     } != {
         key: evaluation_partition[key]
@@ -396,6 +492,10 @@ def rebuild_phase_artifacts(
             "receipt_file_sha256",
             "eligible_game_count",
             "eligible_identity_sha256",
+            "eligible_assignment_sha256",
+            "reference_game_count",
+            "reference_assignment_sha256",
+            "reference_assignment_match",
         )
     }:
         raise PhaseRebuildError("fit and evaluation series partitions differ")
@@ -416,6 +516,11 @@ def rebuild_phase_artifacts(
         "transport": fit["source_transport"],
         "source_lineage": fit["source_lineage"],
         "series_partition": fit_partition,
+        "series_partition_reference": {
+            **reference_stats,
+            "assignment_difference_count": 0,
+            "binding_wall_seconds": reference_elapsed,
+        },
     }
     candidate_blockers = [
         "fold-internal fitted weights have no independent promotion receipt",
@@ -438,6 +543,8 @@ def rebuild_phase_artifacts(
     }
     if any(count > int(max_transfer_groups) for count in transfer_group_counts.values()):
         candidate_blockers.append("regional_and_patch_transfer_evaluation_bounded")
+    if numeric_warnings:
+        candidate_blockers.append("numerical_overflow_warning_during_fit_or_side_swap")
     candidate = {
         "schema_version": fit["schema_version"],
         "model_version": fit["model_version"],
@@ -458,6 +565,15 @@ def rebuild_phase_artifacts(
         "series_partition_receipt_file_sha256": fit_partition["receipt_file_sha256"],
         "series_partition_eligible_game_count": fit_partition["eligible_game_count"],
         "series_partition_eligible_identity_sha256": fit_partition["eligible_identity_sha256"],
+        "series_partition_eligible_assignment_sha256": fit_partition[
+            "eligible_assignment_sha256"
+        ],
+        "series_partition_reference_game_count": fit_partition[
+            "reference_game_count"
+        ],
+        "series_partition_reference_assignment_sha256": fit_partition[
+            "reference_assignment_sha256"
+        ],
         "series_partition_proxy_authority_blocker": fit_partition["proxy_authority_blocker"],
         "feature_columns": list(FEATURE_COLUMNS),
         "feature_family": fit["feature_family"],
@@ -480,6 +596,7 @@ def rebuild_phase_artifacts(
             "accepted_complete_team_maps": frame_stats["complete_team_maps"],
         },
         "blockers": sorted(set(candidate_blockers)),
+        "numerical_warnings": numeric_warnings,
     }
     evaluation_output = {
         **evaluation,
@@ -499,8 +616,18 @@ def rebuild_phase_artifacts(
         "series_partition_receipt_file_sha256": evaluation_partition["receipt_file_sha256"],
         "series_partition_eligible_game_count": evaluation_partition["eligible_game_count"],
         "series_partition_eligible_identity_sha256": evaluation_partition["eligible_identity_sha256"],
+        "series_partition_eligible_assignment_sha256": evaluation_partition[
+            "eligible_assignment_sha256"
+        ],
+        "series_partition_reference_game_count": evaluation_partition[
+            "reference_game_count"
+        ],
+        "series_partition_reference_assignment_sha256": evaluation_partition[
+            "reference_assignment_sha256"
+        ],
         "series_partition_proxy_authority_blocker": evaluation_partition["proxy_authority_blocker"],
         "blockers": sorted(set(candidate_blockers)),
+        "numerical_warnings": numeric_warnings,
     }
     candidate_reference = _write_json(output_root / OUTPUT_FILENAMES[0], candidate)
     evaluation_reference = _write_json(output_root / OUTPUT_FILENAMES[1], evaluation_output)
@@ -524,21 +651,30 @@ def rebuild_phase_artifacts(
             "receipt_locator": str(crosswalk_receipt_path),
         },
         "inputs": {
-            "maps_rows_read": int(len(pd.read_parquet(source_files["maps"]))),
-            "teams_rows_read": int(len(pd.read_parquet(source_files["teams"]))),
+            "maps_rows_read": int(len(maps_source)),
+            "teams_rows_read": int(len(teams_source)),
             "accepted_map_rows": int(len(maps)),
             "accepted_team_rows": int(len(teams)),
             **frame_stats,
+            "series_partition_reference": {
+                **reference_stats,
+                "assignment_difference_count": 0,
+            },
             "evaluation_rows": int(len(eligible_frame)),
             "transfer_group_limit": int(max_transfer_groups),
             "transfer_group_counts": transfer_group_counts,
         },
         "partition": fit_partition,
+        "numerical_warnings": numeric_warnings,
         "outputs": {
             "candidate": candidate_reference,
             "evaluation": evaluation_reference,
         },
-        "timing": {"fit_and_evaluation_wall_seconds": elapsed},
+        "timing": {
+            "reference_partition_wall_seconds": reference_elapsed,
+            "fit_and_evaluation_wall_seconds": elapsed,
+            "total_wall_seconds": reference_elapsed + elapsed,
+        },
     }
     _write_json(output_root / OUTPUT_FILENAMES[2], run_receipt)
     return {
