@@ -2032,6 +2032,7 @@ def build_scaling_feature_ledger(
     train_game_ids: Iterable[Any] | None = None,
     validation_game_ids: Iterable[Any] | None = None,
     fit_window_end: Any | None = None,
+    model_eligible_only: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Build the slim, full-census, strictly prior checkpoint forecast ledger.
 
@@ -2060,6 +2061,18 @@ def build_scaling_feature_ledger(
             "fold-local scaling ledger needs train_game_ids, validation_game_ids, and fit_window_end"
         )
     accepted_set = set(accepted_ids)
+    model_ids = (
+        tuple(str(value) for value in bound_source["model_eligible_game_ids"])
+        if model_eligible_only
+        else accepted_ids
+    )
+    model_set = set(model_ids)
+    if (
+        not model_ids
+        or tuple(canonical_game_ids(model_ids)) != model_ids
+        or not model_set.issubset(accepted_set)
+    ):
+        raise AtomizedResearchError("scaling model census is invalid")
     if fold_mode:
         train_ids = tuple(canonical_game_ids(train_game_ids or ()))
         validation_ids = tuple(canonical_game_ids(validation_game_ids or ()))
@@ -2067,8 +2080,8 @@ def build_scaling_feature_ledger(
             raise AtomizedResearchError("fold-local scaling ledger needs non-empty train and validation IDs")
         if set(train_ids) & set(validation_ids):
             raise AtomizedResearchError("fold-local train and validation IDs overlap")
-        if not set(train_ids).issubset(accepted_set) or not set(validation_ids).issubset(accepted_set):
-            raise AtomizedResearchError("fold-local IDs are outside the accepted census")
+        if not set(train_ids).issubset(model_set) or not set(validation_ids).issubset(model_set):
+            raise AtomizedResearchError("fold-local IDs are outside the model census")
         try:
             fit_cutoff = pd.Timestamp(fit_window_end)
         except (TypeError, ValueError) as exc:
@@ -2077,7 +2090,7 @@ def build_scaling_feature_ledger(
             raise AtomizedResearchError("fold-local fit_window_end must include a timezone")
         fit_cutoff = fit_cutoff.tz_convert("UTC")
     else:
-        train_ids = tuple(accepted_ids)
+        train_ids = tuple(model_ids)
         validation_ids = tuple()
         fit_cutoff = None
     maps_frame = _scaling_frame(maps, "maps")
@@ -2164,6 +2177,15 @@ def build_scaling_feature_ledger(
         raise AtomizedResearchError("accepted teams do not contain exactly two rows per map")
     if maps_frame["_game_id"].duplicated().any():
         raise AtomizedResearchError("maps must contain exactly one row per accepted game")
+    maps_frame = maps_frame[maps_frame["_game_id"].isin(model_set)].copy()
+    players_frame = players_frame[players_frame["_game_id"].isin(model_set)].copy()
+    teams_frame = teams_frame[teams_frame["_game_id"].isin(model_set)].copy()
+    if (
+        len(maps_frame) != len(model_ids)
+        or len(players_frame) != len(model_ids) * 10
+        or len(teams_frame) != len(model_ids) * 2
+    ):
+        raise AtomizedResearchError("scaling model rows do not match the model census")
     # Player and team dates are bound to the accepted map dates.  Their source
     # dates are not used for ordering and cannot create a second chronology.
     map_dates = maps_frame.set_index("_game_id")["date"]
@@ -2289,7 +2311,7 @@ def build_scaling_feature_ledger(
                         champion_states[(champion, checkpoint, metric)].add(value)
 
     ledger = pd.DataFrame(output).sort_values(["date", "game_id"], kind="stable").reset_index(drop=True)
-    if len(ledger) != len(accepted_ids) or set(ledger["game_id"].astype(str)) != accepted_set:
+    if len(ledger) != len(model_ids) or set(ledger["game_id"].astype(str)) != model_set:
         raise AtomizedResearchError("scaling ledger output census mismatch")
     forbidden = {
         column
@@ -2318,6 +2340,12 @@ def build_scaling_feature_ledger(
         "source_as_of": pd.Timestamp(cutoff).isoformat().replace("+00:00", "Z"),
         "accepted_game_count": len(accepted_ids),
         "accepted_game_ids": list(accepted_ids),
+        "model_eligible_only": bool(model_eligible_only),
+        "output_game_count": len(model_ids),
+        "output_game_ids": list(model_ids),
+        "output_identity_sha256": identity_sha256(model_ids),
+        "model_excluded_game_count": len(accepted_set - model_set),
+        "model_excluded_identity_sha256": identity_sha256(accepted_set - model_set),
         "implementation_sha256": implementation_sha,
         "source_frame_sha256": source_frame_digests,
         "source_row_value_sha256": source_row_digest,
