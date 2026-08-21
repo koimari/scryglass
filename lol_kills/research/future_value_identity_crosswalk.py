@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 import hashlib
 import json
-import math
 import re
 import unicodedata
 
@@ -113,6 +112,7 @@ def _string(value: Any) -> str | None:
         if bool(pd.isna(value)):
             return None
     except (TypeError, ValueError):
+        # Array-like values are handled by the canonical string conversion below.
         pass
     text = str(value).strip()
     return text or None
@@ -164,6 +164,7 @@ def _team_norm(value: Any) -> str | None:
     try:
         text = str(normalize_team(text))
     except (TypeError, ValueError):
+        # Keep the source spelling when the alias normalizer cannot parse it.
         pass
     return _norm(text)
 
@@ -995,7 +996,6 @@ def _build_identity_crosswalk(
     for game_id in accepted_ids:
         if game_id not in candidate_game_ids:
             continue
-        map_group = map_groups[game_id]
         player_group = player_groups.get(game_id, pd.DataFrame())
         team_group = team_groups.get(game_id, pd.DataFrame())
         target_date = map_dates.get(game_id)
