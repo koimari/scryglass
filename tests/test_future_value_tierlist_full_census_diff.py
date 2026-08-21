@@ -8,6 +8,7 @@ import pytest
 
 from benchmarks.future_value_tierlist_full_census_diff import (
     FullCensusTierDiffError,
+    audit_final_v2_full_census_scoreability,
     build_full_census_tier_diff,
     canonical_json_bytes,
     sha256_path,
@@ -170,6 +171,78 @@ def _fixture(tmp_path: Path) -> dict[str, object]:
         "v2_candidate_path": v2_path,
         "expected_v2_candidate_sha256": v2_hash,
     }
+
+
+def _final_v2_receipt(source_receipt_sha256: str) -> dict[str, object]:
+    receipt: dict[str, object] = {
+        "authority": {"research_only": True, "promotion": False},
+        "blockers": [
+            "authoritative_series_id_missing_proxy_cluster_used",
+            "tournament_boundary_field_missing",
+            "tournament_boundary_slice_missing",
+        ],
+        "feature_ledger_binding": {
+            "artifact": {
+                "bytes": 1,
+                "path": "current-rating-ledger.parquet",
+                "sha256": "3" * 64,
+            },
+            "game_identity_sha256": identity_sha256(ELIGIBLE),
+            "rows": len(ELIGIBLE),
+            "strict_prior_timing": "source_bound_current_rating_before_snapshot_as_of",
+        },
+        "fit_game_count": len(ELIGIBLE),
+        "fit_game_identity_sha256": identity_sha256(ELIGIBLE),
+        "schema_version": "scryglass:future-value-model-fit:v1",
+        "source_binding": {
+            "model_eligible_game_count": len(ELIGIBLE),
+            "model_eligible_identity_sha256": identity_sha256(ELIGIBLE),
+            "source_game_count": len(ACCEPTED),
+            "source_identity_sha256": identity_sha256(ACCEPTED),
+            "source_receipt_sha256": source_receipt_sha256,
+        },
+        "status": "research_only_blocked",
+        "receipt_sha256": "0" * 64,
+    }
+    return _seal(receipt, "receipt_sha256")
+
+
+def test_final_v2_full_census_scoreability_fails_closed_on_fit_subset(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "source-receipt.json"
+    source = _source_receipt()
+    source_hash = _write_json(source_path, source)
+    model_path = tmp_path / "final-v2-model-receipt.json"
+    model = _final_v2_receipt(str(source["receipt_sha256"]))
+    model_hash = _write_json(model_path, model)
+
+    audit = audit_final_v2_full_census_scoreability(
+        source_receipt_path=source_path,
+        expected_source_receipt_file_sha256=source_hash,
+        expected_source_receipt_sha256=str(source["receipt_sha256"]),
+        model_receipt_path=model_path,
+        expected_model_receipt_file_sha256=model_hash,
+        expected_model_receipt_sha256=str(model["receipt_sha256"]),
+    )
+
+    assert audit["status"] == "research_only_blocked"
+    assert audit["coverage"] == {
+        "accepted_game_count": 2,
+        "scored_game_count": 1,
+        "missing_game_count": 1,
+        "scored_identity_sha256": identity_sha256(ELIGIBLE),
+        "matches_accepted_census": False,
+        "matches_model_eligible_census": True,
+    }
+    assert audit["decision"]["can_score_accepted_census"] is False
+    assert audit["decision"]["can_build_source_bound_tier_offset_ledger"] is False
+    assert "final_v2_feature_ledger_does_not_cover_accepted_census" in audit[
+        "blockers"
+    ]
+    assert "retrospective_full_census_model_fit_not_chronological_evaluation" in audit[
+        "blockers"
+    ]
 
 
 def test_builds_common_row_diff_with_closed_authority(tmp_path: Path) -> None:

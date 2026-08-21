@@ -29,6 +29,9 @@ from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 SCHEMA_VERSION = "scryglass:future-value-tierlist-full-census-diff:v1"
 RECEIPT_SCHEMA_VERSION = "scryglass:future-value-tierlist-full-census-diff-receipt:v1"
+FINAL_V2_SCOREABILITY_SCHEMA_VERSION = (
+    "scryglass:future-value-final-v2-full-census-scoreability:v1"
+)
 AUTHORITY = {
     "research_only": True,
     "public_tierlist": False,
@@ -266,6 +269,144 @@ def _load_source(
     return source, {"source_receipt": file_binding}
 
 
+def audit_final_v2_full_census_scoreability(
+    *,
+    source_receipt_path: Path | str,
+    expected_source_receipt_file_sha256: str,
+    expected_source_receipt_sha256: str,
+    model_receipt_path: Path | str,
+    expected_model_receipt_file_sha256: str,
+    expected_model_receipt_sha256: str,
+) -> dict[str, Any]:
+    """Audit whether the final V2 fit can score the accepted census.
+
+    The final fit receipt is the only input used for this audit.  It binds the
+    current-rating feature ledger and its game identity.  A receipt for an
+    eligible subset cannot be extended to the accepted census, so this helper
+    returns a blocked research audit and never creates imputed score rows.
+    """
+
+    source, source_file = _load_source(
+        source_receipt_path,
+        expected_source_receipt_file_sha256=expected_source_receipt_file_sha256,
+        expected_source_receipt_sha256=expected_source_receipt_sha256,
+    )
+    model_path = _safe_file(model_receipt_path, "final V2 model receipt")
+    model_file = _verify_file(
+        model_path,
+        expected_model_receipt_file_sha256,
+        "final V2 model receipt",
+    )
+    model = _load_json(model_path, "final V2 model receipt")
+    if model.get("schema_version") != "scryglass:future-value-model-fit:v1":
+        raise FullCensusTierDiffError("final V2 model receipt schema changed")
+    claimed_model_hash = _require_hash(
+        model.get("receipt_sha256"), "final V2 model receipt hash"
+    )
+    unsigned_model = dict(model)
+    unsigned_model.pop("receipt_sha256", None)
+    if _hash_bytes(canonical_json_bytes(unsigned_model)) != claimed_model_hash:
+        raise FullCensusTierDiffError("final V2 model receipt self hash changed")
+    if claimed_model_hash != _require_hash(
+        expected_model_receipt_sha256, "expected final V2 model receipt hash"
+    ):
+        raise FullCensusTierDiffError("final V2 model receipt hash changed")
+
+    binding = model.get("source_binding")
+    if not isinstance(binding, Mapping):
+        raise FullCensusTierDiffError("final V2 model source binding is missing")
+    if binding.get("source_game_count") != source["accepted_game_count"]:
+        raise FullCensusTierDiffError("final V2 model accepted count changed")
+    if binding.get("source_identity_sha256") != source["accepted_identity_sha256"]:
+        raise FullCensusTierDiffError("final V2 model accepted identity changed")
+    if binding.get("source_receipt_sha256") != source["source_receipt_sha256"]:
+        raise FullCensusTierDiffError("final V2 model source receipt changed")
+    if binding.get("model_eligible_game_count") != source["model_eligible_game_count"]:
+        raise FullCensusTierDiffError("final V2 model eligible count changed")
+    if binding.get("model_eligible_identity_sha256") != source[
+        "model_eligible_identity_sha256"
+    ]:
+        raise FullCensusTierDiffError("final V2 model eligible identity changed")
+
+    ledger = model.get("feature_ledger_binding")
+    if not isinstance(ledger, Mapping):
+        raise FullCensusTierDiffError("final V2 feature ledger binding is missing")
+    artifact = ledger.get("artifact")
+    if not isinstance(artifact, Mapping):
+        raise FullCensusTierDiffError("final V2 feature ledger artifact binding is missing")
+    ledger_rows = ledger.get("rows")
+    try:
+        ledger_rows = int(ledger_rows)
+    except (TypeError, ValueError) as error:
+        raise FullCensusTierDiffError("final V2 feature ledger row count is invalid") from error
+    if ledger_rows < 0:
+        raise FullCensusTierDiffError("final V2 feature ledger row count is negative")
+    ledger_identity = _require_hash(
+        ledger.get("game_identity_sha256"), "final V2 feature ledger identity"
+    )
+    if ledger_rows != model.get("fit_game_count"):
+        raise FullCensusTierDiffError("final V2 feature ledger fit count changed")
+    if ledger_identity != model.get("fit_game_identity_sha256"):
+        raise FullCensusTierDiffError("final V2 feature ledger fit identity changed")
+    if ledger_rows != source["model_eligible_game_count"]:
+        raise FullCensusTierDiffError("final V2 feature ledger eligible count changed")
+    if ledger_identity != source["model_eligible_identity_sha256"]:
+        raise FullCensusTierDiffError("final V2 feature ledger eligible identity changed")
+
+    missing_count = source["accepted_game_count"] - ledger_rows
+    blockers = [
+        "retrospective_full_census_model_fit_not_chronological_evaluation",
+    ]
+    if ledger.get("strict_prior_timing") != (
+        "source_bound_current_rating_before_snapshot_as_of"
+    ):
+        blockers.append("final_v2_feature_ledger_strict_prior_timing_missing")
+    if missing_count:
+        blockers.append("final_v2_feature_ledger_does_not_cover_accepted_census")
+    if model.get("status") != "research_only_blocked":
+        blockers.append("final_v2_model_status_not_research_only_blocked")
+    for blocker in model.get("blockers", ()):
+        if isinstance(blocker, str) and blocker not in blockers:
+            blockers.append(blocker)
+    can_score = not missing_count and len(blockers) == 0
+    return {
+        "schema_version": FINAL_V2_SCOREABILITY_SCHEMA_VERSION,
+        "status": "research_only" if can_score else "research_only_blocked",
+        "authority": dict(AUTHORITY),
+        "source": {
+            **source,
+            "accepted_census_binding": source_file["source_receipt"],
+        },
+        "model": {
+            **model_file,
+            "receipt_sha256": claimed_model_hash,
+            "status": model.get("status"),
+            "fit_game_count": model.get("fit_game_count"),
+            "fit_game_identity_sha256": model.get("fit_game_identity_sha256"),
+            "feature_ledger": {
+                "artifact": dict(artifact),
+                "rows": ledger_rows,
+                "game_identity_sha256": ledger_identity,
+                "strict_prior_timing": ledger.get("strict_prior_timing"),
+            },
+        },
+        "coverage": {
+            "accepted_game_count": source["accepted_game_count"],
+            "scored_game_count": ledger_rows,
+            "missing_game_count": missing_count,
+            "scored_identity_sha256": ledger_identity,
+            "matches_accepted_census": missing_count == 0,
+            "matches_model_eligible_census": True,
+        },
+        "decision": {
+            "can_score_accepted_census": can_score,
+            "can_build_source_bound_tier_offset_ledger": can_score,
+            "can_promote": False,
+        },
+        "blockers": blockers,
+    }
+
+
 def build_full_census_tier_diff(
     *,
     source_receipt_path: Path | str,
@@ -485,11 +626,13 @@ def main() -> int:
 
 __all__ = [
     "AUTHORITY",
+    "FINAL_V2_SCOREABILITY_SCHEMA_VERSION",
     "FullCensusTierDiffError",
     "RECEIPT_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "build_full_census_tier_diff",
     "canonical_json_bytes",
+    "audit_final_v2_full_census_scoreability",
     "sha256_path",
     "write_full_census_tier_diff",
 ]
