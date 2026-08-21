@@ -181,6 +181,46 @@ def _series_ids(frame: pd.DataFrame, column: str, label: str) -> tuple[str, ...]
     return tuple(str(value) for value in values)
 
 
+def _frame_dates(frame: pd.DataFrame, label: str) -> tuple[str, tuple[pd.Timestamp, ...]]:
+    """Return canonical UTC dates and require one date for every row."""
+
+    column = "date" if "date" in frame.columns else "timestamp" if "timestamp" in frame.columns else None
+    if column is None:
+        raise FutureValueUncertaintyError(f"{label} is missing date")
+    values = pd.to_datetime(frame[column], utc=True, errors="coerce")
+    if len(values) == 0 or values.isna().any():
+        raise FutureValueUncertaintyError(f"{label} has an invalid date")
+    dates = tuple(pd.Timestamp(value) for value in values)
+    return column, dates
+
+
+def _date_text(value: pd.Timestamp) -> str:
+    return value.tz_convert("UTC").isoformat().replace("+00:00", "Z")
+
+
+def _game_series_assignment_rows(
+    game_ids: Sequence[str],
+    series_ids: Sequence[str],
+) -> list[dict[str, str]]:
+    if len(game_ids) != len(series_ids):
+        raise FutureValueUncertaintyError("game and series assignments have different lengths")
+    return sorted(
+        (
+            {"game_id": str(game_id), "series_id": str(series_id)}
+            for game_id, series_id in zip(game_ids, series_ids)
+        ),
+        key=lambda row: row["game_id"],
+    )
+
+
+def _game_series_assignment_sha256(
+    game_ids: Sequence[str],
+    series_ids: Sequence[str],
+) -> str:
+    rows = _game_series_assignment_rows(game_ids, series_ids)
+    return _sha256_json(rows)
+
+
 def _training_target(frame: pd.DataFrame, column: str) -> np.ndarray:
     if column not in frame.columns:
         raise FutureValueUncertaintyError(f"training design is missing target '{column}'")
@@ -299,6 +339,19 @@ def cluster_bootstrap_weights(
 _cluster_bootstrap_weight_vector = cluster_bootstrap_weights
 
 
+def _positive_weight_rows_have_both_target_classes(
+    target: np.ndarray,
+    sample_weight: np.ndarray,
+) -> bool:
+    target_values = np.asarray(target)
+    weights = np.asarray(sample_weight, dtype=float)
+    if target_values.shape != weights.shape or not np.isfinite(weights).all():
+        return False
+    positive = weights > 0.0
+    classes = np.unique(target_values[positive])
+    return bool(classes.size == 2 and np.array_equal(classes, np.asarray([0, 1])))
+
+
 def _fit_zero_intercept_logistic(
     matrix: np.ndarray,
     target: np.ndarray,
@@ -389,18 +442,13 @@ def _quantiles(values: np.ndarray, alpha: float) -> dict[str, float]:
     return {"lower": float(lower), "median": float(median), "upper": float(upper)}
 
 
-def _required_accepted_draws(requested_draws: int, minimum_accepted_draws: int | None) -> int:
-    if minimum_accepted_draws is not None:
-        minimum = int(minimum_accepted_draws)
-        if minimum < 1:
-            raise FutureValueUncertaintyError("minimum accepted draws must be positive")
-    elif requested_draws >= MIN_ACCEPTED_DRAWS:
-        minimum = MIN_ACCEPTED_DRAWS
-    else:
-        minimum = 1
-    if requested_draws >= MIN_ACCEPTED_DRAWS:
-        minimum = max(minimum, MIN_ACCEPTED_DRAWS)
-    return max(minimum, int(math.ceil(MIN_ACCEPTED_FRACTION * requested_draws)))
+def _required_accepted_draws(requested_draws: int) -> int:
+    requested = int(requested_draws)
+    if requested < MIN_ACCEPTED_DRAWS:
+        raise FutureValueUncertaintyError(
+            f"requested draws must be at least {MIN_ACCEPTED_DRAWS}"
+        )
+    return max(MIN_ACCEPTED_DRAWS, int(math.ceil(MIN_ACCEPTED_FRACTION * requested)))
 
 
 def _status_counts(values: Sequence[str]) -> dict[str, int]:
@@ -421,6 +469,90 @@ def _authority() -> dict[str, bool]:
     }
 
 
+def _fixed_calibration(
+    calibration: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], float, str]:
+    """Validate and normalize the only supported calibration map.
+
+    The uncertainty layer accepts a fixed scalar slope over the zero-intercept
+    logit.  It does not replay isotonic, binning, affine-offset, or arbitrary
+    calibration maps during bootstrap draws.
+    """
+
+    payload = dict(calibration or {"method": "fixed_identity", "version": 1})
+    method_value = payload.get(
+        "method",
+        payload.get(
+            "kind",
+            payload.get(
+                "type",
+                "scalar_zero_intercept"
+                if "slope" in payload or "calibration_slope" in payload
+                else None,
+            ),
+        ),
+    )
+    method = str(method_value or "").strip().casefold()
+    identity_methods = {"identity", "fixed_identity", "scalar_zero_intercept", "scalar_logit_slope"}
+    if method not in identity_methods:
+        raise FutureValueUncertaintyError(
+            "unsupported calibration map; only a fixed zero-intercept scalar slope is supported"
+        )
+    slope_value = payload.get(
+        "slope",
+        payload.get(
+            "calibration_slope",
+            1.0 if method in {"identity", "fixed_identity"} else None,
+        ),
+    )
+    if slope_value is None:
+        raise FutureValueUncertaintyError("calibration slope is required")
+    try:
+        slope = float(slope_value)
+    except (TypeError, ValueError) as error:
+        raise FutureValueUncertaintyError("calibration slope is required") from error
+    if not math.isfinite(slope) or slope <= 0.0:
+        raise FutureValueUncertaintyError("calibration slope must be finite and positive")
+    if method in {"identity", "fixed_identity"} and abs(slope - 1.0) > 1e-15:
+        raise FutureValueUncertaintyError("identity calibration must have slope one")
+    for key in ("intercept", "offset", "calibration_intercept"):
+        if key in payload:
+            try:
+                offset = float(payload[key])
+            except (TypeError, ValueError) as error:
+                raise FutureValueUncertaintyError("calibration offset is invalid") from error
+            if not math.isfinite(offset) or abs(offset) > 1e-15:
+                raise FutureValueUncertaintyError("non-zero calibration offset is unsupported")
+    allowed = {
+        "method",
+        "kind",
+        "type",
+        "slope",
+        "calibration_slope",
+        "intercept",
+        "offset",
+        "calibration_intercept",
+        "version",
+        "source",
+    }
+    unsupported = sorted(set(payload) - allowed)
+    if unsupported:
+        raise FutureValueUncertaintyError(
+            "unsupported calibration map field(s): " + ", ".join(unsupported)
+        )
+    normalized = {
+        "method": "scalar_zero_intercept",
+        "slope": slope,
+        "intercept": 0.0,
+        "payload_sha256": _sha256_json(payload),
+    }
+    if "version" in payload:
+        normalized["version"] = payload["version"]
+    if "source" in payload:
+        normalized["source"] = payload["source"]
+    return normalized, slope, _sha256_json(normalized)
+
+
 def bootstrap_future_value_uncertainty(
     train: pd.DataFrame,
     outer_validation: pd.DataFrame,
@@ -438,7 +570,6 @@ def bootstrap_future_value_uncertainty(
     support_column: str | None = "support_status",
     imputation_column: str | None = "imputation_status",
     requested_draws: int = DEFAULT_REQUESTED_DRAWS,
-    minimum_accepted_draws: int | None = None,
     seed: int = DEFAULT_SEED,
     alpha: float = DEFAULT_ALPHA,
     transform_sha256: str | None = None,
@@ -455,8 +586,10 @@ def bootstrap_future_value_uncertainty(
     if not isinstance(train, pd.DataFrame) or not isinstance(outer_validation, pd.DataFrame):
         raise FutureValueUncertaintyError("train and outer validation must be data frames")
     requested = int(requested_draws)
-    if requested < 1:
-        raise FutureValueUncertaintyError("requested draws must be positive")
+    if requested < MIN_ACCEPTED_DRAWS:
+        raise FutureValueUncertaintyError(
+            f"requested draws must be at least {MIN_ACCEPTED_DRAWS}"
+        )
     if not (0.0 < float(alpha) < 1.0):
         raise FutureValueUncertaintyError("interval alpha must be between zero and one")
     if int(max_iterations) < 2:
@@ -478,6 +611,18 @@ def bootstrap_future_value_uncertainty(
     validation_series_set = set(validation_series)
     if train_series_set & validation_series_set:
         raise FutureValueUncertaintyError("outer validation series enter the training draw population")
+    train_date_column, train_dates = _frame_dates(train, "training design")
+    validation_date_column, validation_dates = _frame_dates(
+        outer_validation, "outer validation design"
+    )
+    if train_date_column != validation_date_column:
+        raise FutureValueUncertaintyError("training and validation date columns differ")
+    train_date_max = max(train_dates)
+    validation_date_min = min(validation_dates)
+    if not train_date_max < validation_date_min:
+        raise FutureValueUncertaintyError(
+            "outer validation must start strictly after the latest training date"
+        )
     target = _training_target(train, target_column)
     transform = FixedFutureValueTransform.build(
         feature_names,
@@ -510,8 +655,7 @@ def bootstrap_future_value_uncertainty(
     selected_c_value = float(selected_c)
     if not math.isfinite(selected_c_value) or selected_c_value <= 0.0:
         raise FutureValueUncertaintyError("selected C must be finite and positive")
-    calibration_payload = json.loads(json.dumps(dict(calibration), allow_nan=False))
-    calibration_hash = _sha256_json(calibration_payload)
+    calibration_payload, calibration_slope, calibration_hash = _fixed_calibration(calibration)
     source_hash = _source_receipt_hash(source_receipt)
 
     if point_coefficients is None:
@@ -533,7 +677,8 @@ def bootstrap_future_value_uncertainty(
             "coefficient_sha256": _sha256_array(point),
             "regularization_c": selected_c_value,
         }
-    point_logit = validation_matrix @ point
+    point_raw_logit = validation_matrix @ point
+    point_logit = calibration_slope * point_raw_logit
     point_probability = _sigmoid(point_logit)
 
     rng = np.random.default_rng(int(seed))
@@ -559,6 +704,10 @@ def bootstrap_future_value_uncertainty(
             "training_series_count": len(all_train_series),
         }
         try:
+            if not _positive_weight_rows_have_both_target_classes(target, weights):
+                raise FutureValueUncertaintyError(
+                    "bootstrap draw positive-weight rows do not contain both target classes"
+                )
             coef, optimizer = _fit_zero_intercept_logistic(
                 train_matrix,
                 target,
@@ -573,7 +722,8 @@ def bootstrap_future_value_uncertainty(
                 or np.asarray(coef, dtype=float).shape != (len(transform.feature_names),)
             ):
                 raise FutureValueUncertaintyError("bootstrap fit evidence is not converged and finite")
-            logits = validation_matrix @ coef
+            raw_logits = validation_matrix @ coef
+            logits = calibration_slope * raw_logits
             probabilities = _sigmoid(logits)
             swapped_logits = -logits
             swapped_direct = _sigmoid(swapped_logits)
@@ -601,7 +751,7 @@ def bootstrap_future_value_uncertainty(
         draw_records.append(record)
 
     accepted_count = len(accepted_logits)
-    required = _required_accepted_draws(requested, minimum_accepted_draws)
+    required = _required_accepted_draws(requested)
     acceptance_fraction = accepted_count / float(requested)
     if accepted_count < required or acceptance_fraction < MIN_ACCEPTED_FRACTION:
         raise FutureValueUncertaintyError(
@@ -656,7 +806,7 @@ def bootstrap_future_value_uncertainty(
                     "fixed_fold_local_imputation",
                     "fixed_fold_local_scales",
                     "fixed_selected_regularization",
-                    "fixed_calibration",
+                    "fixed_zero_intercept_calibration_slope",
                 ],
             }
         )
@@ -677,22 +827,49 @@ def bootstrap_future_value_uncertainty(
         "outer_validation_series_ids": sorted(validation_series_set),
         "train_series_sha256": _identity_sha256(all_train_series),
         "outer_validation_series_sha256": _identity_sha256(validation_series_set),
+        "train_game_series_assignment_sha256": _game_series_assignment_sha256(
+            train_game_ids, train_series
+        ),
+        "outer_validation_game_series_assignment_sha256": _game_series_assignment_sha256(
+            validation_game_ids, validation_series
+        ),
+        "train_game_series_assignments": _game_series_assignment_rows(
+            train_game_ids, train_series
+        ),
+        "outer_validation_game_series_assignments": _game_series_assignment_rows(
+            validation_game_ids, validation_series
+        ),
         "whole_series_resampling": True,
     }
     fold_payload = {
         "fold_id": str(fold_id),
+        "date_column": train_date_column,
         "train_game_count": len(train_game_ids),
         "train_game_identity_sha256": _identity_sha256(train_game_ids),
         "outer_validation_game_count": len(validation_game_ids),
         "outer_validation_game_identity_sha256": _identity_sha256(validation_game_ids),
+        "train_date_min": _date_text(min(train_dates)),
+        "train_date_max": _date_text(train_date_max),
+        "outer_validation_date_min": _date_text(validation_date_min),
+        "outer_validation_date_max": _date_text(max(validation_dates)),
+        "strict_date_boundary": True,
         "train_series_sha256": series_payload["train_series_sha256"],
         "outer_validation_series_sha256": series_payload["outer_validation_series_sha256"],
+        "train_game_series_assignment_sha256": series_payload[
+            "train_game_series_assignment_sha256"
+        ],
+        "outer_validation_game_series_assignment_sha256": series_payload[
+            "outer_validation_game_series_assignment_sha256"
+        ],
         "outer_validation_excluded_from_draws": True,
     }
     transform_payload = transform.payload()
     calibration_binding = {
-        "method": calibration_payload.get("method", "fixed") if isinstance(calibration_payload, Mapping) else "fixed",
-        "payload_sha256": calibration_hash,
+        "method": calibration_payload["method"],
+        "slope": calibration_slope,
+        "intercept": 0.0,
+        "payload_sha256": calibration_payload["payload_sha256"],
+        "normalized_sha256": calibration_hash,
         "conditional": True,
     }
     receipt_payload: dict[str, Any] = {
@@ -702,8 +879,15 @@ def bootstrap_future_value_uncertainty(
         "source_sha256": source_hash,
         "fold_sha256": _sha256_json(fold_payload),
         "series_sha256": _sha256_json(series_payload),
+        "train_date_max": _date_text(train_date_max),
+        "outer_validation_date_min": _date_text(validation_date_min),
         "transform_sha256": transform.sha256,
         "calibration_sha256": calibration_hash,
+        "calibration_payload_sha256": calibration_payload["payload_sha256"],
+        "calibration_method": "scalar_zero_intercept",
+        "calibration_slope": calibration_slope,
+        "calibration_intercept": 0.0,
+        "calibration_slope_sha256": _sha256_json({"slope": calibration_slope}),
         "draws_sha256": draw_hashes["all_draws_sha256"],
         "draw_hashes_sha256": _sha256_json(draw_hashes),
         "ledger_sha256": ledger_hash,
@@ -730,18 +914,17 @@ def bootstrap_future_value_uncertainty(
         },
         "uncertainty": {
             "interval_level": float(1.0 - alpha),
-            "logit_label": "epistemic",
-            "probability_label": "epistemic",
-            "conditional_on": [
-                "fixed_fold_local_transform",
-                "fixed_fold_local_imputation",
-                "fixed_fold_local_scales",
-                "fixed_selected_regularization",
-                "fixed_calibration",
-            ],
+                "logit_label": "epistemic",
+                "probability_label": "epistemic",
+                "conditional_on": [
+                    "fixed_fold_local_transform",
+                    "fixed_fold_local_imputation",
+                    "fixed_fold_local_scales",
+                    "fixed_selected_regularization",
+                    "fixed_zero_intercept_calibration_slope",
+                ],
         },
         "authority": _authority(),
-        "authority_flags": _authority(),
     }
     receipt_payload["receipt_sha256"] = _sha256_json(receipt_payload)
 
@@ -760,6 +943,7 @@ def bootstrap_future_value_uncertainty(
         "point": {
             "coefficients": point.tolist(),
             "coefficient_sha256": _sha256_array(point),
+            "calibration_slope": calibration_slope,
             "optimizer": point_optimizer,
         },
         "draws": {
@@ -785,10 +969,7 @@ def bootstrap_future_value_uncertainty(
             },
         },
         "pre_event_uncertainty_ledger": ledger,
-        "pre_event_ledger": ledger,
-        "ledger": ledger,
         "authority": receipt_payload["authority"],
-        "authority_flags": receipt_payload["authority_flags"],
     }
 
 
@@ -826,11 +1007,111 @@ def verify_uncertainty_receipt(artifact: Mapping[str, Any]) -> bool:
         or receipt.get("draw_hashes_sha256") != _sha256_json(draws["hashes"])
     ):
         raise FutureValueUncertaintyError("uncertainty receipt does not bind draw hashes")
+    expected_authority = _authority()
+    for label, value in (
+        ("receipt authority", receipt.get("authority")),
+        ("artifact authority", artifact.get("authority")),
+    ):
+        if not isinstance(value, Mapping) or set(value) != set(expected_authority):
+            raise FutureValueUncertaintyError(f"{label} flags are invalid")
+        if any(value[key] is not False for key in expected_authority):
+            raise FutureValueUncertaintyError(f"{label} grants authority")
+    if "authority_flags" in artifact or "authority_flags" in receipt:
+        raise FutureValueUncertaintyError("duplicate authority flag surface is unsupported")
+    if "pre_event_ledger" in artifact or "ledger" in artifact:
+        raise FutureValueUncertaintyError("duplicate pre-event ledger surface is unsupported")
+    calibration = receipt.get("calibration")
+    if not isinstance(calibration, Mapping):
+        raise FutureValueUncertaintyError("calibration binding is missing")
+    try:
+        slope = float(calibration["slope"])
+        intercept = float(calibration.get("intercept", 1.0))
+    except (KeyError, TypeError, ValueError) as error:
+        raise FutureValueUncertaintyError("calibration slope binding is invalid") from error
+    if (
+        not math.isfinite(slope)
+        or slope <= 0.0
+        or calibration.get("method") != "scalar_zero_intercept"
+        or intercept != 0.0
+        or receipt.get("calibration_slope") != slope
+        or receipt.get("calibration_intercept") != 0.0
+        or receipt.get("calibration_method") != "scalar_zero_intercept"
+        or receipt.get("calibration_slope_sha256") != _sha256_json({"slope": slope})
+        or receipt.get("calibration_sha256") != calibration.get("normalized_sha256")
+        or receipt.get("calibration_payload_sha256") != calibration.get("payload_sha256")
+    ):
+        raise FutureValueUncertaintyError("calibration slope binding is invalid")
+    if not isinstance(fold, Mapping) or fold.get("strict_date_boundary") is not True:
+        raise FutureValueUncertaintyError("strict date boundary binding is missing")
+    try:
+        train_max = pd.Timestamp(fold["train_date_max"])
+        validation_min = pd.Timestamp(fold["outer_validation_date_min"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise FutureValueUncertaintyError("interval timestamp binding is invalid") from error
+    if pd.isna(train_max) or pd.isna(validation_min) or not train_max < validation_min:
+        raise FutureValueUncertaintyError("interval timestamp binding is invalid")
+    if (
+        receipt.get("train_date_max") != fold.get("train_date_max")
+        or receipt.get("outer_validation_date_min") != fold.get("outer_validation_date_min")
+    ):
+        raise FutureValueUncertaintyError("interval timestamp binding is invalid")
+    if not isinstance(series, Mapping):
+        raise FutureValueUncertaintyError("series assignment binding is invalid")
+    for rows_field, hash_field in (
+        ("train_game_series_assignments", "train_game_series_assignment_sha256"),
+        ("outer_validation_game_series_assignments", "outer_validation_game_series_assignment_sha256"),
+    ):
+        assignments = series.get(rows_field)
+        if not isinstance(assignments, list) or series.get(hash_field) != _sha256_json(assignments):
+            raise FutureValueUncertaintyError("series assignment binding is invalid")
+        if any(
+            not isinstance(row, Mapping)
+            or set(row) != {"game_id", "series_id"}
+            or not str(row["game_id"]).strip()
+            or not str(row["series_id"]).strip()
+            for row in assignments
+        ):
+            raise FutureValueUncertaintyError("series assignment binding is invalid")
+        if assignments != sorted(assignments, key=lambda row: row["game_id"]):
+            raise FutureValueUncertaintyError("series assignment binding is not canonical")
+        game_ids = [str(row["game_id"]) for row in assignments]
+        if len(set(game_ids)) != len(game_ids):
+            raise FutureValueUncertaintyError("series assignment binding has duplicate games")
+    train_assignments = series["train_game_series_assignments"]
+    validation_assignments = series["outer_validation_game_series_assignments"]
+    train_series_ids = series.get("train_series_ids")
+    validation_series_ids = series.get("outer_validation_series_ids")
+    if not isinstance(train_series_ids, list) or not isinstance(validation_series_ids, list):
+        raise FutureValueUncertaintyError("series ID binding is invalid")
+    if (
+        len(train_assignments) != fold.get("train_game_count")
+        or len(validation_assignments) != fold.get("outer_validation_game_count")
+        or _identity_sha256(row["game_id"] for row in train_assignments)
+        != fold.get("train_game_identity_sha256")
+        or _identity_sha256(row["game_id"] for row in validation_assignments)
+        != fold.get("outer_validation_game_identity_sha256")
+    ):
+        raise FutureValueUncertaintyError("series assignment does not bind fold games")
+    if (
+        sorted({str(row["series_id"]) for row in train_assignments})
+        != sorted(str(value) for value in train_series_ids)
+        or sorted({str(row["series_id"]) for row in validation_assignments})
+        != sorted(str(value) for value in validation_series_ids)
+    ):
+        raise FutureValueUncertaintyError("series assignment does not bind series IDs")
     ledger = artifact.get("pre_event_uncertainty_ledger")
     if not isinstance(ledger, Mapping) or "target" in ledger.get("columns", []):
         raise FutureValueUncertaintyError("pre-event uncertainty ledger exposes observed target")
     rows = ledger.get("rows")
-    if not isinstance(rows, list) or _sha256_json(rows) != ledger.get("sha256"):
+    columns = ledger.get("columns")
+    if not isinstance(rows, list) or not isinstance(columns, list):
+        raise FutureValueUncertaintyError("pre-event uncertainty ledger is invalid")
+    if any(
+        not isinstance(row, Mapping) or "target" in row or set(row) != set(columns)
+        for row in rows
+    ):
+        raise FutureValueUncertaintyError("pre-event uncertainty ledger exposes observed target")
+    if _sha256_json(rows) != ledger.get("sha256"):
         raise FutureValueUncertaintyError("pre-event uncertainty ledger hash does not match rows")
     if receipt.get("ledger_sha256") != ledger.get("sha256"):
         raise FutureValueUncertaintyError("uncertainty receipt does not bind the ledger")
