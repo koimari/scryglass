@@ -119,11 +119,45 @@ def _canonical_bytes(value: object) -> bytes:
         raise FutureValueTrainingError("research receipt is not canonical JSON") from error
 
 
+def _duplicate_json_safe(value: object) -> object:
+    """Convert parquet scalars to strict JSON for the mapping digest.
+
+    Source-row snapshots can contain pandas timestamps, nullable values, and
+    NumPy scalar objects.  The freeze digest must cover those values without
+    allowing JSON NaN tokens or process-specific scalar representations.
+    """
+
+    if isinstance(value, Mapping):
+        return {str(key): _duplicate_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_duplicate_json_safe(item) for item in value]
+    if isinstance(value, (pd.Timestamp, datetime)):
+        parsed = pd.to_datetime(value, errors="coerce", utc=True)
+        return None if pd.isna(parsed) else pd.Timestamp(parsed).isoformat()
+    try:
+        missing = pd.isna(value)
+        if isinstance(missing, bool) and missing:
+            return None
+    except (TypeError, ValueError):
+        pass
+    item = getattr(value, "item", None)
+    if callable(item) and not isinstance(value, (str, bytes, bytearray)):
+        try:
+            scalar = item()
+        except (TypeError, ValueError):
+            scalar = value
+        if scalar is not value:
+            return _duplicate_json_safe(scalar)
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).hex()
+    return value
+
+
 def _canonical_mapping_sha256(mappings: Sequence[Mapping[str, Any]]) -> str:
     """Hash duplicate mappings in a stable bridge-ID order."""
 
     try:
-        rows = [dict(row) for row in mappings]
+        rows = [_duplicate_json_safe(dict(row)) for row in mappings]
         rows.sort(key=lambda row: str(row.get("bridge_game_id") or ""))
     except (TypeError, ValueError) as error:
         raise FutureValueTrainingError("duplicate resolution mappings are not canonical") from error
@@ -502,6 +536,15 @@ def _validate_duplicate_identity_source(
         or hashlib.sha256(_canonical_bytes(receipt_body)).hexdigest() != receipt_hash.lower()
     ):
         raise FutureValueTrainingError("duplicate identity receipt self-hash is invalid")
+    receipt_authority = receipt.get("authority")
+    if not isinstance(receipt_authority, Mapping) or receipt_authority.get("research_only") is not True:
+        raise FutureValueTrainingError("duplicate identity receipt authority is invalid")
+    if any(
+        bool(flag)
+        for name, flag in receipt_authority.items()
+        if name != "research_only"
+    ):
+        raise FutureValueTrainingError("duplicate identity receipt grants authority")
     artifact_hash = artifact.get("crosswalk_sha256", artifact.get("artifact_sha256"))
     if artifact_hash is not None:
         if not isinstance(artifact_hash, str) or _SHA256_RE.fullmatch(artifact_hash) is None:
@@ -519,6 +562,13 @@ def _validate_duplicate_identity_source(
             != artifact_file["sha256"]
         ):
             raise FutureValueTrainingError("duplicate identity receipt artifact binding changed")
+    receipt_crosswalk_hash = receipt.get("crosswalk_sha256")
+    if receipt_crosswalk_hash is not None and (
+        not isinstance(receipt_crosswalk_hash, str)
+        or not isinstance(artifact_hash, str)
+        or receipt_crosswalk_hash.lower() != artifact_hash.lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity crosswalk digest changed")
     expected_source_receipt = binding.get("source_receipt_sha256")
     expected_source_identity = binding.get("source_identity_sha256")
     if expected_source_receipt is None and expected_source_identity is None:

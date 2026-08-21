@@ -264,6 +264,24 @@ def test_duplicate_resolution_rejects_changed_identity_artifact(tmp_path: Path) 
         validate_duplicate_resolution_block(_maps(), freeze)
 
 
+def test_duplicate_mapping_digest_normalizes_parquet_scalars(tmp_path: Path) -> None:
+    freeze = _freeze(tmp_path)
+    mapping = freeze["duplicate_resolution"]["mappings"][0]
+    mapping["bridge_source_row"]["nullable_source_value"] = pd.NA
+    mapping["annual_survivor_source_row"]["nullable_source_value"] = pd.NA
+    mapping["bridge_source_row"]["source_timestamp"] = pd.Timestamp(
+        "2026-08-20T10:00:00Z"
+    )
+    mapping["annual_survivor_source_row"]["source_timestamp"] = pd.Timestamp(
+        "2026-08-20T10:00:00Z"
+    )
+    freeze["duplicate_resolution"]["mapping_sha256"] = duplicate_resolution_mapping_sha256(
+        freeze["duplicate_resolution"]["mappings"]
+    )
+    result = validate_duplicate_resolution_block(_maps(), freeze)
+    assert result is not None
+
+
 def test_old_freeze_without_block_stays_valid_until_it_excludes_known_bridge() -> None:
     maps = _maps().rename(index={0: 0, 1: 1})
     old_freeze = {
