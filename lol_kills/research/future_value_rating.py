@@ -4772,6 +4772,19 @@ def evaluate_future_value(
     current_fold_reports: list[dict[str, Any]] = []
     prediction_ledger_rows: list[dict[str, Any]] = []
     for fold in folds:
+        fold_model_ids = set(
+            str(value)
+            for value in (*fold["train_game_ids"], *fold["validation_game_ids"])
+        )
+        fold_map_frame = map_frame[
+            map_frame["game_id"].astype(str).isin(fold_model_ids)
+        ].copy()
+        fold_form = form[form["game_id"].astype(str).isin(fold_model_ids)].copy()
+        if (
+            set(fold_map_frame["game_id"].astype(str)) != fold_model_ids
+            or set(fold_form["game_id"].astype(str)) != fold_model_ids
+        ):
+            raise FutureValueSourceError("future-value fold source rows are incomplete")
         fold_ledger: pd.DataFrame | None
         if isinstance(feature_ledger, Mapping):
             fold_ledger = feature_ledger.get(fold["fold"])
@@ -4780,13 +4793,13 @@ def evaluate_future_value(
         else:
             fold_ledger = feature_ledger
         model, design = fit_future_value_model(
-            map_frame,
-            form,
+            fold_map_frame,
+            fold_form,
             train_game_ids=fold["train_game_ids"],
             fit_window_end=fold["validation_start"],
             min_cell_support=min_cell_support,
             source_receipt=source_receipt,
-            verified_model_frame=map_frame,
+            verified_model_frame=fold_map_frame,
             variant=None if variant_config is None else variant_config.variant,
             feature_ledger=fold_ledger,
         )
@@ -5039,7 +5052,7 @@ def evaluate_future_value(
         pooled_predictions.append(paired_prediction)
         pooled_baselines.append(paired_baseline)
         model_parameters = model.parameter_receipt()
-        component_frame = model.player_value_logit(form, validation)
+        component_frame = model.player_value_logit(fold_form, validation)
         component_rows = [
             {
                 "game_id": str(row.game_id),

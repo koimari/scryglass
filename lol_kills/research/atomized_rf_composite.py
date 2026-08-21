@@ -2033,6 +2033,7 @@ def build_scaling_feature_ledger(
     validation_game_ids: Iterable[Any] | None = None,
     fit_window_end: Any | None = None,
     model_eligible_only: bool = True,
+    output_game_ids: Iterable[Any] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Build the slim, full-census, strictly prior checkpoint forecast ledger.
 
@@ -2061,16 +2062,21 @@ def build_scaling_feature_ledger(
             "fold-local scaling ledger needs train_game_ids, validation_game_ids, and fit_window_end"
         )
     accepted_set = set(accepted_ids)
-    model_ids = (
+    eligible_model_ids = (
         tuple(str(value) for value in bound_source["model_eligible_game_ids"])
         if model_eligible_only
         else accepted_ids
+    )
+    model_ids = (
+        tuple(canonical_game_ids(output_game_ids))
+        if output_game_ids is not None
+        else eligible_model_ids
     )
     model_set = set(model_ids)
     if (
         not model_ids
         or tuple(canonical_game_ids(model_ids)) != model_ids
-        or not model_set.issubset(accepted_set)
+        or not model_set.issubset(set(eligible_model_ids))
     ):
         raise AtomizedResearchError("scaling model census is invalid")
     if fold_mode:
@@ -2080,6 +2086,8 @@ def build_scaling_feature_ledger(
             raise AtomizedResearchError("fold-local scaling ledger needs non-empty train and validation IDs")
         if set(train_ids) & set(validation_ids):
             raise AtomizedResearchError("fold-local train and validation IDs overlap")
+        if set(train_ids) | set(validation_ids) != model_set:
+            raise AtomizedResearchError("fold-local IDs do not match the output census")
         if not set(train_ids).issubset(model_set) or not set(validation_ids).issubset(model_set):
             raise AtomizedResearchError("fold-local IDs are outside the model census")
         try:
@@ -2344,8 +2352,10 @@ def build_scaling_feature_ledger(
         "output_game_count": len(model_ids),
         "output_game_ids": list(model_ids),
         "output_identity_sha256": identity_sha256(model_ids),
-        "model_excluded_game_count": len(accepted_set - model_set),
-        "model_excluded_identity_sha256": identity_sha256(accepted_set - model_set),
+        "model_excluded_game_count": len(accepted_set - set(eligible_model_ids)),
+        "model_excluded_identity_sha256": identity_sha256(
+            accepted_set - set(eligible_model_ids)
+        ),
         "implementation_sha256": implementation_sha,
         "source_frame_sha256": source_frame_digests,
         "source_row_value_sha256": source_row_digest,
