@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import time
 from typing import Any, Mapping
 
@@ -173,10 +174,31 @@ def _bind_current_rating_features(
     source_receipt: Mapping[str, Any],
     source_receipt_path: Path,
     current_artifact_path: Path,
+    current_receipt_path: Path,
     implementation_path: Path,
     fit_game_ids: tuple[str, ...],
     fit_window_end: str,
+    expected_current_receipt_sha256: str | None,
+    expected_current_artifact_sha256: str | None,
 ) -> dict[str, Any]:
+    expected_receipt_file_hash = str(expected_current_receipt_sha256 or "").lower()
+    expected_artifact_hash = str(expected_current_artifact_sha256 or "").lower()
+    if re.fullmatch(r"[0-9a-f]{64}", expected_receipt_file_hash) is None:
+        raise FinalFitError("independent current rating receipt hash is required")
+    if re.fullmatch(r"[0-9a-f]{64}", expected_artifact_hash) is None:
+        raise FinalFitError("independent current rating artifact hash is required")
+    if (
+        current_receipt_path.is_symlink()
+        or not current_receipt_path.is_file()
+        or _sha256_path(current_receipt_path) != expected_receipt_file_hash
+    ):
+        raise FinalFitError("current rating receipt file changed")
+    if (
+        current_artifact_path.is_symlink()
+        or not current_artifact_path.is_file()
+        or _sha256_path(current_artifact_path) != expected_artifact_hash
+    ):
+        raise FinalFitError("current rating artifact file changed")
     claimed_receipt_hash = str(current_receipt.get("receipt_sha256") or "").lower()
     receipt_payload = dict(current_receipt)
     receipt_payload.pop("receipt_sha256", None)
@@ -207,8 +229,10 @@ def _bind_current_rating_features(
     value_digest = rating_feature_values_sha256(
         current_frame, CURRENT_RATING_SIGNED_MAP_FEATURES
     )
-    declared_value_digest = current_receipt.get("feature_value_digest")
-    if declared_value_digest is not None and str(declared_value_digest).lower() != value_digest:
+    declared_value_digest = str(current_receipt.get("feature_value_digest") or "").lower()
+    if re.fullmatch(r"[0-9a-f]{64}", declared_value_digest) is None:
+        raise FinalFitError("current rating receipt feature-value digest is required")
+    if declared_value_digest != value_digest:
         raise FinalFitError("current rating receipt feature-value digest changed")
     return {
         "schema_version": "scryglass:future-value-final-current-rating-binding:v1",
@@ -216,6 +240,11 @@ def _bind_current_rating_features(
         "producer_receipt_sha256": str(current_receipt.get("receipt_sha256") or ""),
         "producer_receipt_schema_version": str(current_receipt.get("schema_version") or ""),
         "producer_receipt_self_hash_verified": True,
+        "producer_receipt_file": {
+            "path": str(current_receipt_path),
+            "bytes": current_receipt_path.stat().st_size,
+            "sha256": expected_receipt_file_hash,
+        },
         "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
         "source_identity_sha256": str(source_receipt["source_identity_sha256"]),
         "source_receipt_file": {
@@ -226,7 +255,7 @@ def _bind_current_rating_features(
         "artifact": {
             "path": str(current_artifact_path),
             "bytes": current_artifact_path.stat().st_size,
-            "sha256": str(expected_artifact),
+            "sha256": expected_artifact_hash,
         },
         "feature_names": list(CURRENT_RATING_SIGNED_MAP_FEATURES),
         "feature_value_digest": value_digest,
@@ -254,6 +283,8 @@ def fit_final_v2(
     output_dir: Path,
     baseline_cache_path: Path | None = None,
     expected_source_receipt_sha256: str | None = None,
+    expected_current_receipt_sha256: str | None = None,
+    expected_current_artifact_sha256: str | None = None,
 ) -> dict[str, Any]:
     source_receipt = _load_json(source_receipt_path, "source receipt")
     _verify_source_receipt(
@@ -287,10 +318,13 @@ def fit_final_v2(
         source_receipt=source_receipt,
         source_receipt_path=source_receipt_path,
         current_artifact_path=current_artifact_path,
+        current_receipt_path=current_receipt_path,
         implementation_path=Path(__file__).resolve().parents[1]
         / "lol_kills/research/future_value_rating_ledger.py",
         fit_game_ids=eligible_ids,
         fit_window_end=fit_window_end,
+        expected_current_receipt_sha256=expected_current_receipt_sha256,
+        expected_current_artifact_sha256=expected_current_artifact_sha256,
     )
 
     started = time.perf_counter()
@@ -544,6 +578,8 @@ def main() -> int:
     parser.add_argument("--evaluation", type=Path, default=DEFAULT_EVALUATION)
     parser.add_argument("--baseline-cache", type=Path, default=DEFAULT_CACHE)
     parser.add_argument("--source-receipt-sha256", required=True)
+    parser.add_argument("--current-receipt-sha256", required=True)
+    parser.add_argument("--current-artifact-sha256", required=True)
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args()
     run = fit_final_v2(
@@ -554,6 +590,8 @@ def main() -> int:
         output_dir=args.output_dir,
         baseline_cache_path=args.baseline_cache,
         expected_source_receipt_sha256=args.source_receipt_sha256,
+        expected_current_receipt_sha256=args.current_receipt_sha256,
+        expected_current_artifact_sha256=args.current_artifact_sha256,
     )
     print(json.dumps(run, sort_keys=True))
     return 0

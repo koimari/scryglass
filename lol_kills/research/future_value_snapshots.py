@@ -240,9 +240,14 @@ def _validate_model_object_binding(
 
     if model is None or model_receipt is None:
         return
-    claimed_hash = str(model_receipt.get("receipt_sha256") or "").lower()
-    if not re.fullmatch(r"[0-9a-f]{64}", claimed_hash):
-        raise FutureValueSnapshotError("explicit model receipt hash is invalid")
+    claimed_hash = _receipt_hash(model_receipt)
+    loaded_receipt_hash = str(
+        getattr(model, "_bound_final_fit_receipt_sha256", "") or ""
+    ).lower()
+    if loaded_receipt_hash and loaded_receipt_hash != claimed_hash:
+        raise FutureValueSnapshotError(
+            "explicit model receipt does not bind loaded model artifact"
+        )
     parameter_receipt = getattr(model, "parameter_receipt", None)
     if callable(parameter_receipt):
         parameters = parameter_receipt()
@@ -252,13 +257,37 @@ def _validate_model_object_binding(
             model_receipt.get("parameter_sha256") or ""
         ).lower():
             raise FutureValueSnapshotError("explicit model receipt does not bind model parameters")
-        return
     object_receipt = _model_receipt_from(model, None)
     if object_receipt is None:
         raise FutureValueSnapshotError("explicit model receipt does not bind model object")
-    object_hash = str(object_receipt.get("receipt_sha256") or "").lower()
-    if object_hash and object_hash != claimed_hash:
-        raise FutureValueSnapshotError("explicit model receipt does not bind model object")
+
+    def _contains_model_fields(
+        explicit: Mapping[str, Any],
+        object_value: Mapping[str, Any],
+        *,
+        root: bool = False,
+    ) -> bool:
+        for key, value in object_value.items():
+            if root and key == "receipt_sha256":
+                if value and str(value).lower() != claimed_hash:
+                    return False
+                continue
+            if key not in explicit:
+                return False
+            explicit_value = explicit[key]
+            if isinstance(value, Mapping):
+                if not isinstance(explicit_value, Mapping) or not _contains_model_fields(
+                    explicit_value, value, root=False
+                ):
+                    return False
+            elif explicit_value != value:
+                return False
+        return True
+
+    if not _contains_model_fields(model_receipt, object_receipt, root=True):
+        raise FutureValueSnapshotError(
+            "explicit model receipt does not bind model metadata"
+        )
 
 
 def load_final_fit_model(
@@ -330,9 +359,55 @@ def load_final_fit_model(
     if not isinstance(feature_binding, Mapping):
         raise FutureValueSnapshotError("final-fit current-rating feature binding is missing")
     artifact_record = feature_binding.get("artifact")
+    producer_receipt_record = feature_binding.get("producer_receipt_file")
     feature_names_binding = tuple(str(value) for value in feature_binding.get("feature_names") or ())
-    if not isinstance(artifact_record, Mapping) or not feature_names_binding:
+    if (
+        not isinstance(artifact_record, Mapping)
+        or not isinstance(producer_receipt_record, Mapping)
+        or not feature_names_binding
+    ):
         raise FutureValueSnapshotError("final-fit current-rating artifact binding is invalid")
+    producer_receipt_path = Path(str(producer_receipt_record.get("path") or ""))
+    if (
+        not producer_receipt_path.is_absolute()
+        or ".." in producer_receipt_path.parts
+        or producer_receipt_path.is_symlink()
+        or not producer_receipt_path.is_file()
+        or int(producer_receipt_record.get("bytes") or -1)
+        != producer_receipt_path.stat().st_size
+        or str(producer_receipt_record.get("sha256") or "").lower()
+        != _sha256_file(producer_receipt_path)
+    ):
+        raise FutureValueSnapshotError(
+            "final-fit current-rating receipt file binding changed"
+        )
+    try:
+        producer_receipt_value = json.loads(
+            producer_receipt_path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueSnapshotError(
+            "final-fit current-rating receipt cannot be loaded"
+        ) from error
+    if not isinstance(producer_receipt_value, Mapping):
+        raise FutureValueSnapshotError("final-fit current-rating receipt is invalid")
+    producer_payload = dict(producer_receipt_value)
+    producer_claimed_hash = str(producer_payload.pop("receipt_sha256", "")).lower()
+    if (
+        producer_claimed_hash
+        != str(feature_binding.get("producer_receipt_sha256") or "").lower()
+        or _sha256_bytes(_canonical_json_bytes(producer_payload))
+        != producer_claimed_hash
+    ):
+        raise FutureValueSnapshotError(
+            "final-fit current-rating receipt payload changed"
+        )
+    if str(producer_receipt_value.get("feature_value_digest") or "").lower() != str(
+        feature_binding.get("feature_value_digest") or ""
+    ).lower():
+        raise FutureValueSnapshotError(
+            "final-fit current-rating receipt feature digest changed"
+        )
     feature_artifact_path = Path(str(artifact_record.get("path") or ""))
     if (
         not feature_artifact_path.is_absolute()
@@ -442,6 +517,12 @@ def load_final_fit_model(
         source_receipt=dict(source_receipt),
         variant=variant,
         feature_ledger_binding=dict(receipt.get("feature_ledger_binding") or {}),
+    )
+    object.__setattr__(model, "_bound_final_fit_receipt_sha256", receipt_hash)
+    object.__setattr__(
+        model,
+        "_bound_final_fit_artifact_sha256",
+        _sha256_file(artifact_path),
     )
     return model, receipt
 

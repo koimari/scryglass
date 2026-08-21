@@ -8,12 +8,17 @@ Draft Score, Tier Lists, matches, or probability outputs.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 import pandas as pd
 
+from lol_kills.research.future_value_rating import (
+    validate_future_value_source_receipt_payload,
+)
 from lol_kills.research.future_value_snapshots import (
     FutureValueSnapshotError,
     build_future_value_snapshots,
@@ -25,6 +30,14 @@ from lol_kills.research.future_value_snapshots import (
 DEFAULT_OUTPUT = Path("/private/tmp/scryglass-four-variant-runs/future-value-snapshots-v1")
 
 
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _load_json(path: Path, label: str) -> dict[str, Any]:
     if not path.is_file() or path.is_symlink():
         raise FutureValueSnapshotError(f"{label} is missing or unsafe: {path}")
@@ -34,10 +47,67 @@ def _load_json(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
+def _verify_source_inputs(
+    source_root: Path,
+    source_receipt_path: Path,
+    source_receipt: dict[str, Any],
+    *,
+    expected_source_receipt_sha256: str | None,
+) -> dict[str, Path]:
+    expected_receipt_hash = str(expected_source_receipt_sha256 or "").lower()
+    if re.fullmatch(r"[0-9a-f]{64}", expected_receipt_hash) is None:
+        raise FutureValueSnapshotError("independent source receipt file hash is required")
+    if (
+        source_receipt_path.is_symlink()
+        or not source_receipt_path.is_file()
+        or _sha256_path(source_receipt_path) != expected_receipt_hash
+    ):
+        raise FutureValueSnapshotError("source receipt file hash changed")
+    try:
+        validate_future_value_source_receipt_payload(source_receipt)
+    except Exception as error:
+        raise FutureValueSnapshotError("source receipt failed validation") from error
+    source_files = source_receipt.get("source_files")
+    if not isinstance(source_files, dict):
+        raise FutureValueSnapshotError("source receipt file bindings are missing")
+    expected_names = {
+        "maps": "maps.parquet",
+        "players": "oe_player_games.parquet",
+        "teams": "oe_team_games.parquet",
+    }
+    root = source_root.resolve()
+    receipt_root = source_receipt_path.parent.resolve()
+    verified: dict[str, Path] = {}
+    for label, name in expected_names.items():
+        record = source_files.get(label)
+        if not isinstance(record, dict):
+            raise FutureValueSnapshotError(f"source {label} file binding is missing")
+        locator = Path(str(record.get("locator") or ""))
+        if locator.is_absolute() or not locator.parts or ".." in locator.parts:
+            raise FutureValueSnapshotError(f"source {label} file locator is unsafe")
+        bound_path = (receipt_root / locator).resolve()
+        path = (root / name).resolve()
+        if bound_path != path:
+            raise FutureValueSnapshotError(f"source {label} file path changed")
+        if path.is_symlink() or not path.is_file():
+            raise FutureValueSnapshotError(f"source {label} file is missing")
+        if int(record.get("bytes") or -1) != path.stat().st_size:
+            raise FutureValueSnapshotError(f"source {label} file bytes changed")
+        expected_hash = str(record.get("sha256") or "").lower()
+        if (
+            re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None
+            or _sha256_path(path) != expected_hash
+        ):
+            raise FutureValueSnapshotError(f"source {label} file hash changed")
+        verified[label] = path
+    return verified
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument("--source-receipt-sha256", required=True)
     parser.add_argument("--current-root", required=True, type=Path)
     parser.add_argument("--model-receipt", type=Path)
     parser.add_argument("--model-artifact", type=Path)
@@ -47,6 +117,12 @@ def main() -> int:
     source_root = args.source_root.resolve()
     receipt_path = args.source_receipt.resolve()
     source_receipt = _load_json(receipt_path, "source receipt")
+    source_paths = _verify_source_inputs(
+        source_root,
+        receipt_path,
+        source_receipt,
+        expected_source_receipt_sha256=args.source_receipt_sha256,
+    )
     model_receipt = (
         _load_json(args.model_receipt.resolve(), "model receipt")
         if args.model_receipt is not None
@@ -66,9 +142,9 @@ def main() -> int:
         )
         if loaded_receipt.get("receipt_sha256") != model_receipt.get("receipt_sha256"):
             raise FutureValueSnapshotError("model receipt changed while loading artifact")
-    maps = pd.read_parquet(source_root / "maps.parquet")
-    players = pd.read_parquet(source_root / "oe_player_games.parquet")
-    teams = pd.read_parquet(source_root / "oe_team_games.parquet")
+    maps = pd.read_parquet(source_paths["maps"])
+    players = pd.read_parquet(source_paths["players"])
+    teams = pd.read_parquet(source_paths["teams"])
 
     player_snapshot_path = args.current_root / "player/player_ratings_snapshot.parquet"
     team_snapshot_path = args.current_root / "team/ratings_snapshot.parquet"

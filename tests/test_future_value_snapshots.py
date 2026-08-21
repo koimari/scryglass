@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from benchmarks.build_future_value_snapshots import _verify_source_inputs
 from lol_kills.research.future_value_rating import (
     FORM_METRICS,
     RATING_VARIANT_SCHEMA_VERSION,
@@ -302,14 +304,80 @@ def test_explicit_model_receipt_must_bind_model_parameters() -> None:
     source = _source_receipt(["g1", "g2"])
     model = SimpleNamespace(
         parameter_receipt=lambda: {"parameter_sha256": "a" * 64},
-        receipt=lambda: {"receipt_sha256": "b" * 64},
+        receipt=lambda: {"parameter_sha256": "a" * 64},
     )
-    receipt = {
-        "receipt_sha256": "c" * 64,
-        "parameter_sha256": "b" * 64,
-    }
+    receipt = {"parameter_sha256": "b" * 64}
+    receipt["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(receipt)
+    ).hexdigest()
     with pytest.raises(FutureValueSnapshotError, match="parameters"):
         # This checks the object binding before any source rows are scored.
         from lol_kills.research.future_value_snapshots import _validate_model_object_binding
 
         _validate_model_object_binding(model, receipt)
+
+
+def test_explicit_model_receipt_must_bind_model_metadata() -> None:
+    object_receipt = {
+        "schema_version": "scryglass:future-value-model-fit:v1",
+        "fit_game_ids": ["g1", "g2"],
+        "fit_window_end": "2025-01-02T00:00:00Z",
+        "variant": "future_player_form",
+        "parameter_sha256": "a" * 64,
+        "source_binding": {"source_receipt_sha256": "b" * 64},
+    }
+    model = SimpleNamespace(
+        parameter_receipt=lambda: {"parameter_sha256": "a" * 64},
+        receipt=lambda: dict(object_receipt),
+    )
+    receipt = dict(object_receipt)
+    receipt["fit_window_end"] = "2025-01-03T00:00:00Z"
+    receipt["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(receipt)
+    ).hexdigest()
+
+    with pytest.raises(FutureValueSnapshotError, match="metadata"):
+        from lol_kills.research.future_value_snapshots import _validate_model_object_binding
+
+        _validate_model_object_binding(model, receipt)
+
+
+def test_snapshot_cli_rejects_mutated_player_bytes(tmp_path: Path) -> None:
+    maps, players, teams = _rows(6)
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    paths = {
+        "maps": source_root / "maps.parquet",
+        "players": source_root / "oe_player_games.parquet",
+        "teams": source_root / "oe_team_games.parquet",
+    }
+    maps.to_parquet(paths["maps"], index=False)
+    players.to_parquet(paths["players"], index=False)
+    teams.to_parquet(paths["teams"], index=False)
+    source = _source_receipt([f"g{i}" for i in range(1, 7)])
+    source_files = dict(source["source_files"])
+    for label, path in paths.items():
+        source_files[label] = {
+            "locator": str(path.relative_to(tmp_path)),
+            "bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    source["source_files"] = source_files
+    source.pop("receipt_sha256", None)
+    source["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(source)
+    ).hexdigest()
+    receipt_path = tmp_path / "source-receipt.json"
+    receipt_path.write_text(json.dumps(source, sort_keys=True), encoding="utf-8")
+    expected_receipt_hash = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+
+    players.loc[0, "playername"] = "Mutated Player Name"
+    players.to_parquet(paths["players"], index=False)
+
+    with pytest.raises(FutureValueSnapshotError, match="players file.*changed"):
+        _verify_source_inputs(
+            source_root,
+            receipt_path,
+            source,
+            expected_source_receipt_sha256=expected_receipt_hash,
+        )
