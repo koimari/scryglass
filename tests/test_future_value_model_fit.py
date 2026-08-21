@@ -34,6 +34,8 @@ from lol_kills.research.future_value_rating import (
     evaluate_future_value,
     verify_phase_series_partition_binding,
 )
+from lol_kills.research import future_value_rating as rating_module
+from lol_kills.research.future_value_uncertainty import FutureValueUncertaintyError
 from lol_kills.research.future_value_training import (
     FutureValueTrainingError,
     run_model_evaluation,
@@ -1021,7 +1023,19 @@ def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None
     ).hexdigest()
 
 
-def test_evaluation_accepts_source_bound_calibration_prelude() -> None:
+@pytest.mark.parametrize("verification_failure", [False, True])
+def test_evaluation_handles_source_bound_calibration_prelude(
+    monkeypatch, verification_failure: bool
+) -> None:
+    if verification_failure:
+        def reject_support_artifact(*_args, **_kwargs):
+            raise FutureValueUncertaintyError("test verifier failure")
+
+        monkeypatch.setattr(
+            rating_module,
+            "verify_support_calibration_artifact",
+            reject_support_artifact,
+        )
     maps, players = _raw_source(60)
     source = _source_receipt(
         list(_frame_game_ids(maps, "maps")),
@@ -1104,9 +1118,19 @@ def test_evaluation_accepts_source_bound_calibration_prelude() -> None:
     assert calibration["prior_fold_numbers"] == [0]
     assert "calibration_prior_validation_folds_missing" not in result["blockers"]
     support = result["evaluation"]["support_uncertainty_calibration"]
-    assert support["status"] == "research_only"
-    assert support["blockers"] == []
-    assert "support_uncertainty_proxy_not_calibrated" not in result["blockers"]
+    if verification_failure:
+        assert support["status"] == "research_only"
+        assert support["blockers"] == ["support_calibration_verification_failed"]
+        assert support["detail"] == "test verifier failure"
+        assert "support_uncertainty_proxy_not_calibrated" in result["blockers"]
+        assert all(
+            report["support_uncertainty"]["status"] == "blocked"
+            for report in result["folds"]
+        )
+    else:
+        assert support["status"] == "research_only"
+        assert support["blockers"] == []
+        assert "support_uncertainty_proxy_not_calibrated" not in result["blockers"]
 
 
 def test_baseline_output_alignment_reports_missing_and_extra_ids() -> None:

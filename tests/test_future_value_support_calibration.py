@@ -277,6 +277,25 @@ def test_standalone_verifier_checks_accepted_source_rows(mutation: str) -> None:
         verify_support_calibration_artifact(artifact, source_frame=source_frame)
 
 
+def test_verifier_allows_multiple_maps_in_one_series_within_a_fold() -> None:
+    prior = _calibration_prior_folds()
+    prior[0]["rows"][1]["series_id"] = prior[0]["rows"][0]["series_id"]  # type: ignore[index]
+    source_frame = _source_frame(_folds(), prior)
+    artifact = build_strict_prior_support_calibration(
+        _folds(),
+        calibration_prior_folds=prior,
+        source_receipt=SOURCE,
+        source_frame=source_frame,
+        variant="future_player_form",
+        minimum_training_rows=10,
+        minimum_bin_rows=2,
+        minimum_bins=2,
+        maximum_bins=5,
+    )
+
+    assert verify_support_calibration_artifact(artifact, source_frame=source_frame)
+
+
 def test_absolute_logit_residual_target_is_explicit() -> None:
     artifact = _artifact(target_kind="absolute_logit_residual")
     assert artifact["target"]["kind"] == "absolute_logit_residual"  # type: ignore[index]

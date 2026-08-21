@@ -1329,7 +1329,12 @@ def _verify_support_source_rows(
     """Check support input rows against the accepted map facts."""
 
     seen_games: set[str] = set()
-    seen_series: set[str] = set()
+    rows_by_series: dict[str, set[str]] = {}
+    source_games_by_series: dict[str, set[str]] = {}
+    for game_id, source in source_rows.items():
+        source_games_by_series.setdefault(str(source["series_id"]), set()).add(
+            str(game_id)
+        )
     for raw in rows:
         if not isinstance(raw, Mapping):
             raise FutureValueUncertaintyError("support calibration source row is invalid")
@@ -1367,19 +1372,9 @@ def _verify_support_source_rows(
                 "support calibration source target does not match accepted source"
             )
         seen_games.add(game_id)
-        seen_series.add(series_id)
-    for series_id in seen_series:
-        source_series_games = {
-            game_id
-            for game_id, row in source_rows.items()
-            if str(row["series_id"]) == series_id
-        }
-        row_series_games = {
-            str(row.get("game_id"))
-            for row in rows
-            if isinstance(row, Mapping) and str(row.get("series_id")) == series_id
-        }
-        if source_series_games != row_series_games:
+        rows_by_series.setdefault(series_id, set()).add(game_id)
+    for series_id, row_series_games in rows_by_series.items():
+        if source_games_by_series.get(series_id, set()) != row_series_games:
             raise FutureValueUncertaintyError(
                 f"support calibration source rows do not cover complete series: {fold_id}"
             )
@@ -2034,7 +2029,7 @@ def verify_support_calibration_artifact(
             raise FutureValueUncertaintyError("support calibration prior rows are not bound")
     previous_end: pd.Timestamp | None = None
     seen_games: set[str] = set()
-    seen_series: set[str] = set()
+    series_fold: dict[str, str] = {}
     expected_calibration_ids: set[str] = set()
     evaluation_first_start = pd.to_datetime(
         folds[0].get("validation_start"), utc=True, errors="coerce"
@@ -2068,7 +2063,10 @@ def verify_support_calibration_artifact(
                 or not game_id
                 or not series_id
                 or game_id in seen_games
-                or series_id in seen_series
+                or (
+                    series_id in series_fold
+                    and series_fold[series_id] != str(prior_fold["fold"])
+                )
             ):
                 raise FutureValueUncertaintyError("support calibration prior identities are invalid")
             try:
@@ -2089,7 +2087,7 @@ def verify_support_calibration_artifact(
             ):
                 raise FutureValueUncertaintyError("support calibration prior values are invalid")
             seen_games.add(game_id)
-            seen_series.add(series_id)
+            series_fold.setdefault(series_id, str(prior_fold["fold"]))
             expected_calibration_ids.add(game_id)
     for index, fold in enumerate(folds):
         if not isinstance(fold, Mapping):
@@ -2116,10 +2114,16 @@ def verify_support_calibration_artifact(
                 raise FutureValueUncertaintyError("support calibration output date is outside its fold")
             game_id = str(row.get("game_id", ""))
             series_id = str(row.get("series_id", ""))
-            if not game_id or not series_id or game_id in seen_games or series_id in seen_series:
+            fold_id = str(fold["fold"])
+            if (
+                not game_id
+                or not series_id
+                or game_id in seen_games
+                or (series_id in series_fold and series_fold[series_id] != fold_id)
+            ):
                 raise FutureValueUncertaintyError("support calibration output identities overlap")
             seen_games.add(game_id)
-            seen_series.add(series_id)
+            series_fold.setdefault(series_id, fold_id)
             support = float(row.get("support", float("nan")))
             if not math.isfinite(support) or support < 0.0:
                 raise FutureValueUncertaintyError("support calibration output support is invalid")

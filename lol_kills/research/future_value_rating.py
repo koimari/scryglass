@@ -8422,6 +8422,7 @@ def evaluate_future_value(
         calibration_history_ends.append(str(fold["validation_end"]))
     support_calibration_artifact: dict[str, Any] | None = None
     support_calibration_error: str | None = None
+    support_calibration_verification_failed = False
     if normalized_calibration_prior_folds:
         try:
             support_calibration_prior_folds = [
@@ -8448,17 +8449,20 @@ def evaluate_future_value(
             )
         except FutureValueUncertaintyError as error:
             support_calibration_error = str(error)
+            support_calibration_verification_failed = support_calibration_artifact is not None
     cluster_source = map_frame.attrs.get("series_cluster_source")
     cluster_audit = map_frame.attrs.get("series_cluster_audit")
     full_source_cluster_audit = map_frame.attrs.get(
         "full_source_series_cluster_audit"
     )
     blockers: list[str] = []
-    if support_calibration_artifact is None:
+    if (
+        support_calibration_artifact is None
+        or support_calibration_artifact.get("status") != "research_only"
+        or support_calibration_error is not None
+    ):
         blockers.append("support_uncertainty_proxy_not_calibrated")
-    elif support_calibration_artifact.get("status") != "research_only":
-        blockers.append("support_uncertainty_proxy_not_calibrated")
-    if support_calibration_artifact is not None:
+    if support_calibration_artifact is not None and support_calibration_error is None:
         support_fold_lookup = {
             str(fold.get("fold")): fold
             for fold in support_calibration_artifact.get("folds", [])
@@ -8489,13 +8493,15 @@ def evaluate_future_value(
                 }
     else:
         for report in fold_reports:
+            if support_calibration_verification_failed:
+                fold_blocker = "support_calibration_verification_failed"
+            elif not normalized_calibration_prior_folds:
+                fold_blocker = "calibration_prior_validation_folds_missing"
+            else:
+                fold_blocker = "support_calibration_build_failed"
             report["support_uncertainty"] = {
                 "status": "blocked",
-                "blockers": [
-                    "calibration_prior_validation_folds_missing"
-                    if not normalized_calibration_prior_folds
-                    else "support_calibration_build_failed"
-                ],
+                "blockers": [fold_blocker],
                 **({"detail": support_calibration_error} if support_calibration_error else {}),
             }
     blockers.extend(
@@ -8755,6 +8761,19 @@ def evaluate_future_value(
     prediction_ledger["sha256"] = hashlib.sha256(
         _canonical_json_bytes(prediction_ledger_rows)
     ).hexdigest()
+    support_report_blockers = set(
+        (
+            support_calibration_artifact.get("blockers", [])
+            if support_calibration_artifact is not None
+            else [
+                "calibration_prior_validation_folds_missing"
+                if not normalized_calibration_prior_folds
+                else "support_calibration_build_failed"
+            ]
+        )
+    )
+    if support_calibration_verification_failed:
+        support_report_blockers.add("support_calibration_verification_failed")
     support_calibration_report: dict[str, Any] = {
         "status": (
             str(support_calibration_artifact.get("status"))
@@ -8767,19 +8786,7 @@ def evaluate_future_value(
         "calibration_prior_row_count": sum(
             int(fold["row_count"]) for fold in normalized_calibration_prior_folds
         ),
-        "blockers": sorted(
-            set(
-                (
-                    support_calibration_artifact.get("blockers", [])
-                    if support_calibration_artifact is not None
-                    else [
-                        "calibration_prior_validation_folds_missing"
-                        if not normalized_calibration_prior_folds
-                        else "support_calibration_build_failed"
-                    ]
-                )
-            )
-        ),
+        "blockers": sorted(support_report_blockers),
     }
     if support_calibration_artifact is not None:
         support_calibration_report.update(
