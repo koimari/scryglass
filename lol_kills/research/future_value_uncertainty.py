@@ -336,9 +336,6 @@ def cluster_bootstrap_weights(
     return weights, selected
 
 
-_cluster_bootstrap_weight_vector = cluster_bootstrap_weights
-
-
 def _positive_weight_rows_have_both_target_classes(
     target: np.ndarray,
     sample_weight: np.ndarray,
