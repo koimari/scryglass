@@ -28,7 +28,7 @@ from lol_kills.net import require_https_url
 
 
 SCHEMA_VERSION = "scryglass:leaguepedia-cargo-capture:v1"
-QUERY_CONTRACT_VERSION = "scryglass:leaguepedia-cargo-query-contract:v2"
+QUERY_CONTRACT_VERSION = "scryglass:leaguepedia-cargo-query-contract:v3"
 CARGO_ROOT = "https://lol.fandom.com/wiki/Special:CargoExport"
 CARGO_HOSTS = frozenset({"lol.fandom.com"})
 USER_AGENT = "Scryglass-research/leaguepedia-series-crosswalk-v1"
@@ -39,6 +39,7 @@ DEFAULT_TIMEOUT_SECONDS = 90.0
 
 SCOREBOARD_FIELDS = (
     "GameId",
+    "RiotPlatformGameId",
     "DateTime_UTC",
     "Team1",
     "Team2",
@@ -565,6 +566,7 @@ def capture_leaguepedia_sources(
             "duplicate_policy": "reject_by_stable_table_identity",
             "cache_policy": "resume_only_after_raw_bytes_and_metadata_hash_verification",
             "response_format": "JSON array of objects",
+            "scoreboard_direct_identity_field": "RiotPlatformGameId",
             "tournament_partition_field": "DateStart",
             "tournament_partition_policy": "half_open_non_overlapping_windows",
             "tournament_initial_boundary_policy": (
@@ -611,6 +613,8 @@ def verify_capture_manifest(payload: Mapping[str, Any]) -> None:
     query_contract = payload.get("query_contract")
     if not isinstance(query_contract, Mapping) or query_contract.get("schema_version") != QUERY_CONTRACT_VERSION:
         raise CargoCaptureError("capture manifest query contract is obsolete")
+    if query_contract.get("scoreboard_direct_identity_field") != "RiotPlatformGameId":
+        raise CargoCaptureError("capture manifest direct game identity is missing")
 
 
 __all__ = [

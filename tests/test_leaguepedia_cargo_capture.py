@@ -21,8 +21,8 @@ from lol_kills.research.leaguepedia_cargo_capture import (
 def _fake_rows() -> dict[str, list[dict[str, object]]]:
     return {
         "ScoreboardGames": [
-            {"GameId": "match-a_1", "DateTime UTC": "2026-08-01 12:00:00", "Team1": "Alpha", "Team2": "Beta", "Patch": "26.15", "Tournament": "LEC Summer", "OverviewPage": "LEC/2026 Summer"},
-            {"GameId": "match-b_1", "DateTime UTC": "2026-08-02 13:00:00", "Team1": "Gamma", "Team2": "Delta", "Patch": "26.15", "Tournament": "LEC Summer", "OverviewPage": "LEC/2026 Summer"},
+            {"GameId": "match-a_1", "RiotPlatformGameId": "LOLTMNT01_1", "DateTime UTC": "2026-08-01 12:00:00", "Team1": "Alpha", "Team2": "Beta", "Patch": "26.15", "Tournament": "LEC Summer", "OverviewPage": "LEC/2026 Summer"},
+            {"GameId": "match-b_1", "RiotPlatformGameId": "LOLTMNT01_2", "DateTime UTC": "2026-08-02 13:00:00", "Team1": "Gamma", "Team2": "Delta", "Patch": "26.15", "Tournament": "LEC Summer", "OverviewPage": "LEC/2026 Summer"},
         ],
         "MatchSchedule": [
             {"MatchId": "match-a", "DateTime UTC": "2026-08-01 11:55:00", "Team1": "Alpha", "Team2": "Beta", "Patch": "26.15", "OverviewPage": "LEC/2026 Summer", "Winner": None},
@@ -117,6 +117,14 @@ def test_capture_saves_raw_responses_assembles_tables_and_hashes_manifest(tmp_pa
     ]
     assert manifest["query_contract"]["tournament_partition_field"] == "DateStart"
     assert manifest["query_contract"]["schema_version"] == QUERY_CONTRACT_VERSION
+    assert manifest["query_contract"]["scoreboard_direct_identity_field"] == "RiotPlatformGameId"
+    scoreboard_urls = [
+        url
+        for url, _headers in calls
+        if parse_qs(urlsplit(url).query)["tables"] == ["ScoreboardGames"]
+    ]
+    assert scoreboard_urls
+    assert all("ScoreboardGames.RiotPlatformGameId" in parse_qs(urlsplit(url).query)["fields"][0] for url in scoreboard_urls)
     assert manifest["query_contract"]["tournament_partition_policy"] == "half_open_non_overlapping_windows"
     assert manifest["query_contract"]["tournament_end_date_upper_bound"] is None
     verify_capture_manifest(json.loads((tmp_path / "capture-manifest.json").read_text()))
@@ -249,7 +257,11 @@ def test_capture_rejects_changed_cached_bytes(tmp_path: Path) -> None:
         root=tmp_path,
         fetcher=_fetcher(_fake_rows(), calls),
     )
-    raw_path = next((tmp_path / "raw" / "ScoreboardGames").glob("*.json"))
+    raw_path = next(
+        path
+        for path in (tmp_path / "raw" / "ScoreboardGames").glob("*.json")
+        if not path.name.endswith(".meta.json")
+    )
     raw_path.write_bytes(b"[]")
     with pytest.raises(CargoCaptureError, match="hash changed"):
         capture_leaguepedia_sources(
