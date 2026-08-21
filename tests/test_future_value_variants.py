@@ -26,8 +26,10 @@ from lol_kills.research.future_value_rating import (
     rating_variant_config_sha256,
     rating_variant_registry_receipt,
     rating_feature_values_sha256,
+    build_rating_feature_producer_manifest,
     trusted_feature_producer_receipt,
     validate_rating_feature_ledger,
+    write_rating_feature_producer_receipt,
 )
 from lol_kills.research import future_value_training as training_module
 from lol_kills.research.future_value_training import FutureValueTrainingError
@@ -234,7 +236,7 @@ def _variant_design() -> pd.DataFrame:
     return frame
 
 
-def _bound_current_ledger(game_ids: list[str], source: dict[str, object]) -> pd.DataFrame:
+def _bound_current_ledger(game_ids: list[str], source: dict[str, object], tmp_path) -> pd.DataFrame:
     raw = pd.DataFrame(
         {
             "game_id": game_ids,
@@ -255,13 +257,41 @@ def _bound_current_ledger(game_ids: list[str], source: dict[str, object]) -> pd.
         fit_window_end=pd.Timestamp("2026-01-01", tz="UTC")
         + pd.Timedelta(days=train_count),
         feature_names=CURRENT_RATING_SIGNED_MAP_FEATURES,
-        producer=trusted_feature_producer_receipt(
-            "current_sequential_rating",
-            row_values_sha256=rating_feature_values_sha256(
-                raw, CURRENT_RATING_SIGNED_MAP_FEATURES
-            ),
-        ),
+        producer=_durable_manifest(raw, source, tmp_path),
     )
+
+
+def _durable_manifest(
+    raw: pd.DataFrame,
+    source: dict[str, object],
+    tmp_path,
+    *,
+    name: str = "current_sequential_rating",
+    feature_names=None,
+):
+    artifact_path = tmp_path / f"{name}.parquet"
+    receipt_path = tmp_path / f"{name}.receipt.json"
+    names = tuple(
+        feature_names
+        or (
+            CURRENT_RATING_SIGNED_MAP_FEATURES
+            if name == "current_sequential_rating"
+            else SCALING_CURVE_SIGNED_MAP_FEATURES
+        )
+    )
+    raw[["game_id", *names]].to_parquet(artifact_path, index=False)
+    train_ids = sorted(str(value) for value in raw["game_id"].iloc[: len(raw) // 2])
+    validation_ids = sorted(str(value) for value in raw["game_id"].iloc[len(raw) // 2 :])
+    adapter = write_rating_feature_producer_receipt(
+        name,
+        artifact_path,
+        receipt_path,
+        source_receipt=source,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        fit_window_end="2026-01-03T00:00:00Z",
+    )
+    return build_rating_feature_producer_manifest([adapter])
 
 
 def test_four_variant_matrices_select_different_registered_families() -> None:
@@ -285,7 +315,7 @@ def test_four_variant_matrices_select_different_registered_families() -> None:
     assert not np.array_equal(matrices[RatingVariant.FUTURE_PLAYER_FORM], matrices[RatingVariant.BOTH])
 
 
-def test_fold_bound_ledger_receipt_binds_source_cutoff_and_features() -> None:
+def test_fold_bound_ledger_receipt_binds_source_cutoff_and_features(tmp_path) -> None:
     game_ids = ["g1", "g2", "g3", "g4"]
     source = _source_receipt(game_ids)
     features = tuple(CURRENT_RATING_SIGNED_MAP_FEATURES)
@@ -303,10 +333,7 @@ def test_fold_bound_ledger_receipt_binds_source_cutoff_and_features() -> None:
         train_game_ids=["g1", "g2"],
         fit_window_end="2026-01-03T00:00:00Z",
         feature_names=features,
-        producer=trusted_feature_producer_receipt(
-            "current_sequential_rating",
-            row_values_sha256=rating_feature_values_sha256(raw, features),
-        ),
+        producer=_durable_manifest(raw, source, tmp_path),
         validation_game_ids=["g3", "g4"],
     )
     bound = validate_rating_feature_ledger(
@@ -351,7 +378,7 @@ def test_signed_variants_reject_missing_or_arbitrary_external_ledger() -> None:
         )
 
 
-def test_producer_receipt_rejects_self_issued_adapter_and_target_mutation() -> None:
+def test_producer_receipt_rejects_self_issued_adapter_and_target_mutation(tmp_path) -> None:
     game_ids = ["g1", "g2", "g3", "g4"]
     source = _source_receipt(game_ids)
     features = tuple(CURRENT_RATING_SIGNED_MAP_FEATURES)
@@ -363,7 +390,7 @@ def test_producer_receipt_rejects_self_issued_adapter_and_target_mutation() -> N
             **{name: [1.0, 2.0, 3.0, 4.0] for name in features},
         }
     )
-    with pytest.raises(FutureValueSourceError, match="declaration"):
+    with pytest.raises(FutureValueSourceError, match="synthetic|file-backed"):
         bind_rating_feature_ledger(
             raw,
             source_receipt=source,
@@ -386,14 +413,11 @@ def test_producer_receipt_rejects_self_issued_adapter_and_target_mutation() -> N
         validation_game_ids=["g3", "g4"],
         fit_window_end="2026-01-03T00:00:00Z",
         feature_names=features,
-        producer=trusted_feature_producer_receipt(
-            "current_sequential_rating",
-            row_values_sha256=rating_feature_values_sha256(raw, features),
-        ),
+        producer=_durable_manifest(raw, source, tmp_path),
     )
     mutated = ledger.copy()
     mutated.loc[mutated["game_id"] == "g3", features[0]] = 0.0
-    with pytest.raises(FutureValueSourceError, match="row hash|feature values"):
+    with pytest.raises(FutureValueSourceError, match="row hash|feature values|artifact values"):
         validate_rating_feature_ledger(
             mutated,
             feature_names=features,
@@ -401,6 +425,158 @@ def test_producer_receipt_rejects_self_issued_adapter_and_target_mutation() -> N
             train_game_ids=["g1", "g2"],
             fit_window_end="2026-01-03T00:00:00Z",
             source_receipt=source,
+        )
+
+
+def test_file_backed_manifest_supports_combined_current_and_scaling_features(tmp_path) -> None:
+    game_ids = ["g1", "g2", "g3", "g4"]
+    source = _source_receipt(game_ids)
+    features = (*CURRENT_RATING_SIGNED_MAP_FEATURES, *SCALING_CURVE_SIGNED_MAP_FEATURES)
+    raw = pd.DataFrame(
+        {
+            "game_id": game_ids,
+            "date": pd.date_range("2026-01-01", periods=4, tz="UTC"),
+            "series_id": ["s1", "s1", "s2", "s2"],
+            **{name: np.arange(1.0, 5.0) for name in features},
+        }
+    )
+    current = _durable_manifest(
+        raw,
+        source,
+        tmp_path,
+        name="current_sequential_rating",
+        feature_names=CURRENT_RATING_SIGNED_MAP_FEATURES,
+    )
+    scaling = _durable_manifest(
+        raw,
+        source,
+        tmp_path,
+        name="strict_prior_atomized_scaling",
+        feature_names=SCALING_CURVE_SIGNED_MAP_FEATURES,
+    )
+    producer = build_rating_feature_producer_manifest(
+        [*current["adapters"], *scaling["adapters"]]
+        if "adapters" in current
+        else [
+            {
+                "name": current["name"],
+                "artifact": current["artifact"],
+                "receipt": current["receipt"],
+            },
+            {
+                "name": scaling["name"],
+                "artifact": scaling["artifact"],
+                "receipt": scaling["receipt"],
+            },
+        ]
+    )
+    ledger = bind_rating_feature_ledger(
+        raw,
+        source_receipt=source,
+        train_game_ids=["g1", "g2"],
+        validation_game_ids=["g3", "g4"],
+        fit_window_end="2026-01-03T00:00:00Z",
+        feature_names=features,
+        producer=producer,
+    )
+    assert tuple(ledger.attrs["feature_names"]) == features
+    assert tuple(
+        adapter["name"] for adapter in ledger.attrs["producer_receipt"]["producer_adapters"]
+    ) == ("current_sequential_rating", "strict_prior_atomized_scaling")
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("artifact_path", "artifact"),
+        ("artifact_hash", "artifact"),
+        ("receipt_path", "receipt"),
+        ("receipt_hash", "receipt"),
+    ],
+)
+def test_file_backed_manifest_rejects_path_and_hash_mutations(tmp_path, mutation: str, message: str) -> None:
+    game_ids = ["g1", "g2", "g3", "g4"]
+    source = _source_receipt(game_ids)
+    features = tuple(CURRENT_RATING_SIGNED_MAP_FEATURES)
+    raw = pd.DataFrame(
+        {
+            "game_id": game_ids,
+            "date": pd.date_range("2026-01-01", periods=4, tz="UTC"),
+            "series_id": ["s1", "s1", "s2", "s2"],
+            **{name: [1.0, 2.0, 3.0, 4.0] for name in features},
+        }
+    )
+    producer = _durable_manifest(raw, source, tmp_path)
+    adapter = producer["adapters"][0]
+    if mutation == "artifact_path":
+        adapter["artifact"]["path"] = str(tmp_path / "missing.parquet")
+    elif mutation == "artifact_hash":
+        adapter["artifact"]["sha256"] = "f" * 64
+    elif mutation == "receipt_path":
+        adapter["receipt"]["path"] = str(tmp_path / "missing.receipt.json")
+    else:
+        adapter["receipt"]["sha256"] = "f" * 64
+    producer["manifest_sha256"] = hashlib.sha256(
+        _canonical({key: value for key, value in producer.items() if key != "manifest_sha256"})
+    ).hexdigest()
+    with pytest.raises(FutureValueSourceError, match=message):
+        bind_rating_feature_ledger(
+            raw,
+            source_receipt=source,
+            train_game_ids=["g1", "g2"],
+            validation_game_ids=["g3", "g4"],
+            fit_window_end="2026-01-03T00:00:00Z",
+            feature_names=features,
+            producer=producer,
+        )
+
+
+@pytest.mark.parametrize("field", ["producer", "source", "fold", "cutoff", "evaluation"])
+def test_file_backed_receipt_rejects_resealed_source_and_fold_mutations(tmp_path, field: str) -> None:
+    game_ids = ["g1", "g2", "g3", "g4"]
+    source = _source_receipt(game_ids)
+    features = tuple(CURRENT_RATING_SIGNED_MAP_FEATURES)
+    raw = pd.DataFrame(
+        {
+            "game_id": game_ids,
+            "date": pd.date_range("2026-01-01", periods=4, tz="UTC"),
+            "series_id": ["s1", "s1", "s2", "s2"],
+            **{name: [1.0, 2.0, 3.0, 4.0] for name in features},
+        }
+    )
+    producer = _durable_manifest(raw, source, tmp_path)
+    receipt_path = tmp_path / "current_sequential_rating.receipt.json"
+    payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if field == "producer":
+        payload["producer"]["implementation_sha256"] = "f" * 64
+    elif field == "source":
+        payload["source_identity_sha256"] = "f" * 64
+    elif field == "fold":
+        payload["fit_game_ids"] = ["g1", "g3"]
+    elif field == "cutoff":
+        payload["fit_window_end"] = "2026-01-04T00:00:00Z"
+    else:
+        payload["evaluation_mode"] = "online_full_census"
+    payload.pop("receipt_sha256", None)
+    payload["receipt_sha256"] = hashlib.sha256(_canonical(payload)).hexdigest()
+    receipt_path.write_bytes(_canonical(payload))
+    producer["adapters"][0]["receipt"] = {
+        "path": str(receipt_path),
+        "bytes": receipt_path.stat().st_size,
+        "sha256": hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+    }
+    producer["manifest_sha256"] = hashlib.sha256(
+        _canonical({key: value for key, value in producer.items() if key != "manifest_sha256"})
+    ).hexdigest()
+    with pytest.raises(FutureValueSourceError):
+        bind_rating_feature_ledger(
+            raw,
+            source_receipt=source,
+            train_game_ids=["g1", "g2"],
+            validation_game_ids=["g3", "g4"],
+            fit_window_end="2026-01-03T00:00:00Z",
+            feature_names=features,
+            producer=producer,
         )
 
 

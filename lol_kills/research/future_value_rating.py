@@ -1367,6 +1367,23 @@ RATING_FEATURE_LEDGER_SCHEMA_VERSION = "scryglass:future-value-rating-feature-le
 RATING_FEATURE_PRODUCER_SCHEMA_VERSION = (
     "scryglass:future-value-rating-feature-producer:v1"
 )
+RATING_FEATURE_PRODUCER_RECEIPT_SCHEMA_VERSION = (
+    "scryglass:future-value-rating-feature-producer-receipt:v1"
+)
+RATING_FEATURE_PRODUCER_MANIFEST_SCHEMA_VERSION = (
+    "scryglass:future-value-rating-feature-producer-manifest:v1"
+)
+RATING_FEATURE_PRODUCER_AUTHORITY = MappingProxyType(
+    {
+        "research_only": True,
+        "public_player_rating": False,
+        "public_team_rating": False,
+        "public_probability": False,
+        "promotion": False,
+        "merge": False,
+        "deployment": False,
+    }
+)
 CURRENT_RATING_SIGNED_MAP_FEATURES = (
     "base_team_logit",
     "team_rating_diff_scaled",
@@ -1625,6 +1642,461 @@ def _verified_producer_adapters(
         verified["row_values_sha256"] = row_digest.lower()
         adapters.append(verified)
     return tuple(adapters)
+
+
+def _safe_file_path(value: Any, field: str, *, allow_missing: bool = False) -> Path:
+    """Return one absolute, non-symlink file path.
+
+    Producer receipts are research inputs.  A receipt cannot redirect the
+    evaluator through a relative path, a symlink, or a directory.  The check
+    covers each existing path component.  This matters when a parent
+    directory is replaced after a receipt was written.
+    """
+
+    if not isinstance(value, (str, Path)) or not str(value).strip():
+        raise FutureValueSourceError(f"{field} path is invalid")
+    path = Path(value)
+    if not path.is_absolute() or ".." in path.parts:
+        raise FutureValueSourceError(f"{field} path is not safe")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise FutureValueSourceError(f"{field} path contains a symlink")
+    if path.exists():
+        if path.is_symlink() or not path.is_file():
+            raise FutureValueSourceError(f"{field} path is not a regular file")
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as error:
+            raise FutureValueSourceError(f"{field} path cannot be resolved") from error
+        if resolved != path:
+            raise FutureValueSourceError(f"{field} path is not canonical")
+        return path
+    if not allow_missing:
+        raise FutureValueSourceError(f"{field} file is missing")
+    parent = path.parent
+    if not parent.is_dir() or parent.is_symlink():
+        raise FutureValueSourceError(f"{field} parent directory is unsafe")
+    return path
+
+
+def _file_record(
+    value: Any,
+    field: str,
+    *,
+    allow_missing: bool = False,
+) -> dict[str, Any]:
+    """Validate and return a byte-bound file record."""
+
+    if not isinstance(value, Mapping):
+        raise FutureValueSourceError(f"{field} file binding is invalid")
+    if set(value) != {"path", "bytes", "sha256"}:
+        raise FutureValueSourceError(f"{field} file binding schema is invalid")
+    path = _safe_file_path(value.get("path"), field, allow_missing=allow_missing)
+    if allow_missing and not path.exists():
+        return {
+            "path": str(path),
+            "bytes": None,
+            "sha256": None,
+        }
+    size = path.stat().st_size
+    digest = _sha256_path(path)
+    if isinstance(value.get("bytes"), bool):
+        raise FutureValueSourceError(f"{field} byte count is invalid")
+    try:
+        expected_bytes = int(value["bytes"])
+    except (TypeError, ValueError) as error:
+        raise FutureValueSourceError(f"{field} byte count is invalid") from error
+    expected_sha = str(value.get("sha256") or "").lower()
+    if expected_bytes != size:
+        raise FutureValueSourceError(f"{field} byte count changed")
+    if re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None or expected_sha != digest:
+        raise FutureValueSourceError(f"{field} file hash changed")
+    return {"path": str(path), "bytes": int(size), "sha256": digest}
+
+
+def _load_feature_artifact(path: Path, feature_names: Sequence[str]) -> pd.DataFrame:
+    """Load a producer artifact into the canonical game/value frame."""
+
+    suffix = path.suffix.casefold()
+    try:
+        if suffix in {".parquet", ".pq"}:
+            frame = pd.read_parquet(path)
+        elif suffix == ".csv":
+            frame = pd.read_csv(path)
+        elif suffix in {".json", ".jsonl"}:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, Mapping) and isinstance(payload.get("rows"), list):
+                payload = payload["rows"]
+            if not isinstance(payload, list):
+                raise FutureValueSourceError("rating feature artifact JSON rows are invalid")
+            frame = pd.DataFrame(payload)
+        else:
+            raise FutureValueSourceError(
+                "rating feature artifact format is unsupported; use parquet, CSV, or JSON"
+            )
+    except FutureValueSourceError:
+        raise
+    except Exception as error:
+        raise FutureValueSourceError("rating feature artifact cannot be loaded") from error
+    required = {"game_id", *feature_names}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise FutureValueSourceError(
+            "rating feature artifact is missing: " + ", ".join(missing)
+        )
+    result = frame[list(dict.fromkeys(("game_id", *feature_names)))].copy()
+    result["game_id"] = result["game_id"].astype(str)
+    if result["game_id"].eq("").any() or result["game_id"].duplicated().any():
+        raise FutureValueSourceError("rating feature artifact game IDs are not unique")
+    for name in feature_names:
+        values = pd.to_numeric(result[name], errors="coerce").to_numpy(dtype=float)
+        if not np.isfinite(values).all():
+            raise FutureValueSourceError(
+                f"rating feature artifact contains missing values: {name}"
+            )
+        result[name] = values
+    return result
+
+
+def _compare_artifact_values(
+    frame: pd.DataFrame,
+    artifact: pd.DataFrame,
+    feature_names: Sequence[str],
+) -> None:
+    """Require caller rows and independently loaded artifact rows to match."""
+
+    left_ids = tuple(sorted(frame["game_id"].astype(str)))
+    right_ids = tuple(sorted(artifact["game_id"].astype(str)))
+    if left_ids != right_ids:
+        raise FutureValueSourceError("rating feature artifact game identity changed")
+    left = frame.copy()
+    right = artifact.copy()
+    left["game_id"] = left["game_id"].astype(str)
+    right["game_id"] = right["game_id"].astype(str)
+    left = left.sort_values("game_id", kind="stable").reset_index(drop=True)
+    right = right.sort_values("game_id", kind="stable").reset_index(drop=True)
+    for name in feature_names:
+        left_values = pd.to_numeric(left[name], errors="coerce").to_numpy(dtype=float)
+        right_values = pd.to_numeric(right[name], errors="coerce").to_numpy(dtype=float)
+        if not np.array_equal(left_values, right_values, equal_nan=False):
+            raise FutureValueSourceError(
+                f"rating feature artifact values differ from caller frame: {name}"
+            )
+
+
+def _producer_manifest_descriptors(
+    producer: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], ...]:
+    """Validate the durable producer manifest envelope."""
+
+    if not isinstance(producer, Mapping):
+        raise FutureValueSourceError(
+            "file-backed rating feature producer manifest is required"
+        )
+    allowed = {
+        "schema_version",
+        "status",
+        "authority",
+        "adapters",
+        "manifest_sha256",
+    }
+    if set(producer) != allowed:
+        raise FutureValueSourceError(
+            "synthetic or incomplete rating feature producer manifest is not allowed"
+        )
+    if producer.get("schema_version") != RATING_FEATURE_PRODUCER_MANIFEST_SCHEMA_VERSION:
+        raise FutureValueSourceError("rating feature producer manifest schema is invalid")
+    if producer.get("status") != "research_only":
+        raise FutureValueSourceError("rating feature producer manifest status is invalid")
+    if dict(producer.get("authority") or {}) != dict(RATING_FEATURE_PRODUCER_AUTHORITY):
+        raise FutureValueSourceError("rating feature producer manifest authority is invalid")
+    claimed = producer.get("manifest_sha256")
+    payload = dict(producer)
+    payload.pop("manifest_sha256", None)
+    if not isinstance(claimed, str) or re.fullmatch(r"[0-9a-f]{64}", claimed) is None:
+        raise FutureValueSourceError("rating feature producer manifest hash is invalid")
+    if hashlib.sha256(_canonical_json_bytes(payload)).hexdigest() != claimed:
+        raise FutureValueSourceError("rating feature producer manifest changed")
+    raw_adapters = producer.get("adapters")
+    if not isinstance(raw_adapters, (list, tuple)) or not raw_adapters:
+        raise FutureValueSourceError("rating feature producer manifest adapters are missing")
+    output: list[dict[str, Any]] = []
+    names: set[str] = set()
+    for raw in raw_adapters:
+        if not isinstance(raw, Mapping) or set(raw) != {"name", "artifact", "receipt"}:
+            raise FutureValueSourceError("rating feature producer manifest adapter is invalid")
+        name = str(raw.get("name") or "").strip()
+        if name in names:
+            raise FutureValueSourceError("rating feature producer adapters are duplicated")
+        names.add(name)
+        expected = _TRUSTED_FEATURE_PRODUCER_SPECS.get(name)
+        if expected is None:
+            raise FutureValueSourceError(f"unknown rating feature producer: {name}")
+        artifact = _file_record(raw.get("artifact"), f"{name} artifact")
+        receipt = _file_record(raw.get("receipt"), f"{name} receipt")
+        output.append({"name": name, "artifact": artifact, "receipt": receipt, "expected": expected})
+    return tuple(output)
+
+
+def _verify_durable_producer_adapters(
+    producer: Mapping[str, Any] | None,
+    *,
+    frame: pd.DataFrame,
+    source_receipt: Mapping[str, Any],
+    source_identity: str,
+    source_hash: str,
+    train_ids: Sequence[str],
+    validation_ids: Sequence[str],
+    cutoff: str,
+    config_features: Sequence[str],
+    evaluation_mode: str,
+) -> tuple[dict[str, Any], ...]:
+    """Load and verify every durable producer artifact independently."""
+
+    if evaluation_mode != "fold_local":
+        raise FutureValueSourceError("rating feature producer evaluation mode is invalid")
+    descriptors = _producer_manifest_descriptors(producer)
+    verified: list[dict[str, Any]] = []
+    for descriptor in descriptors:
+        name = str(descriptor["name"])
+        expected = dict(descriptor["expected"])
+        receipt_path = _safe_file_path(descriptor["receipt"]["path"], f"{name} receipt")
+        try:
+            receipt_value = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise FutureValueSourceError(f"{name} producer receipt cannot be loaded") from error
+        if not isinstance(receipt_value, Mapping):
+            raise FutureValueSourceError(f"{name} producer receipt is invalid")
+        receipt = dict(receipt_value)
+        allowed_receipt = {
+            "schema_version",
+            "status",
+            "authority",
+            "producer",
+            "artifact",
+            "source_identity_sha256",
+            "source_receipt_sha256",
+            "source_receipt_file",
+            "fit_game_ids",
+            "fit_game_identity_sha256",
+            "validation_game_ids",
+            "validation_game_identity_sha256",
+            "fit_window_end",
+            "evaluation_mode",
+            "feature_names",
+            "row_values_sha256",
+            "receipt_sha256",
+        }
+        if set(receipt) != allowed_receipt:
+            raise FutureValueSourceError(f"{name} producer receipt schema is invalid")
+        claimed_receipt_hash = receipt.pop("receipt_sha256", None)
+        if not isinstance(claimed_receipt_hash, str) or re.fullmatch(
+            r"[0-9a-f]{64}", claimed_receipt_hash
+        ) is None:
+            raise FutureValueSourceError(f"{name} producer receipt self hash is invalid")
+        if hashlib.sha256(_canonical_json_bytes(receipt)).hexdigest() != claimed_receipt_hash:
+            raise FutureValueSourceError(f"{name} producer receipt self hash changed")
+        if receipt.get("schema_version") != RATING_FEATURE_PRODUCER_RECEIPT_SCHEMA_VERSION:
+            raise FutureValueSourceError(f"{name} producer receipt schema is invalid")
+        if receipt.get("status") != "research_only" or dict(
+            receipt.get("authority") or {}
+        ) != dict(RATING_FEATURE_PRODUCER_AUTHORITY):
+            raise FutureValueSourceError(f"{name} producer receipt authority is invalid")
+        if dict(receipt.get("producer") or {}) != expected:
+            raise FutureValueSourceError(f"{name} producer implementation binding changed")
+        if receipt.get("source_identity_sha256") != source_identity:
+            raise FutureValueSourceError(f"{name} producer source identity changed")
+        if receipt.get("source_receipt_sha256") != source_hash:
+            raise FutureValueSourceError(f"{name} producer source receipt changed")
+        if receipt.get("fit_window_end") != cutoff:
+            raise FutureValueSourceError(f"{name} producer cutoff changed")
+        if receipt.get("evaluation_mode") != evaluation_mode:
+            raise FutureValueSourceError(f"{name} producer evaluation mode changed")
+        if tuple(str(value) for value in receipt.get("fit_game_ids", ())) != tuple(train_ids):
+            raise FutureValueSourceError(f"{name} producer training IDs changed")
+        if tuple(str(value) for value in receipt.get("validation_game_ids", ())) != tuple(
+            validation_ids
+        ):
+            raise FutureValueSourceError(f"{name} producer validation IDs changed")
+        if receipt.get("fit_game_identity_sha256") != identity_sha256(train_ids):
+            raise FutureValueSourceError(f"{name} producer training identity changed")
+        if receipt.get("validation_game_identity_sha256") != identity_sha256(validation_ids):
+            raise FutureValueSourceError(f"{name} producer validation identity changed")
+        expected_features = tuple(str(value) for value in expected["feature_names"])
+        if tuple(str(value) for value in receipt.get("feature_names", ())) != expected_features:
+            raise FutureValueSourceError(f"{name} producer feature list changed")
+        artifact_record = _file_record(receipt.get("artifact"), f"{name} artifact")
+        if artifact_record != descriptor["artifact"]:
+            raise FutureValueSourceError(f"{name} producer artifact binding changed")
+        if receipt.get("source_receipt_file") is not None:
+            source_file = _file_record(receipt["source_receipt_file"], f"{name} source receipt")
+            try:
+                source_payload = json.loads(
+                    Path(source_file["path"]).read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError) as error:
+                raise FutureValueSourceError(f"{name} source receipt file cannot be loaded") from error
+            _verified_identity, verified_hash = _verified_source_receipt_for_ledger(source_payload)
+            if verified_hash != source_hash or source_payload != dict(source_receipt):
+                raise FutureValueSourceError(f"{name} source receipt file binding changed")
+        artifact_path = _safe_file_path(artifact_record["path"], f"{name} artifact")
+        artifact_frame = _load_feature_artifact(artifact_path, expected_features)
+        if set(artifact_frame["game_id"].astype(str)) != set(frame["game_id"].astype(str)):
+            raise FutureValueSourceError(f"{name} producer artifact game identity changed")
+        row_digest = _ledger_rows_sha256(artifact_frame, expected_features)
+        claimed_row_digest = str(receipt.get("row_values_sha256") or "").lower()
+        if claimed_row_digest != row_digest:
+            raise FutureValueSourceError(f"{name} producer artifact values changed")
+        _compare_artifact_values(frame, artifact_frame, expected_features)
+        code_receipt = trusted_feature_producer_receipt(
+            name,
+            row_values_sha256=row_digest,
+        )
+        verified.append(
+            {
+                "name": name,
+                "feature_names": list(expected_features),
+                "row_values_sha256": row_digest,
+                "artifact": artifact_record,
+                "receipt": descriptor["receipt"],
+                "receipt_sha256": claimed_receipt_hash,
+                "code_receipt": code_receipt,
+            }
+        )
+    feature_names = tuple(
+        feature for adapter in verified for feature in adapter["feature_names"]
+    )
+    if len(set(feature_names)) != len(feature_names) or set(feature_names) != set(config_features):
+        raise FutureValueSourceError("rating feature producer adapters do not match features")
+    return tuple(verified)
+
+
+def _safe_output_file_path(value: Any, field: str) -> Path:
+    """Validate a new receipt destination before a producer writes it."""
+
+    path = _safe_file_path(value, field, allow_missing=True)
+    if path.exists():
+        raise FutureValueSourceError(f"{field} output already exists")
+    return path
+
+
+def write_rating_feature_producer_receipt(
+    name: str,
+    artifact_path: Path | str,
+    receipt_path: Path | str,
+    *,
+    source_receipt: Mapping[str, Any],
+    train_game_ids: Iterable[str],
+    validation_game_ids: Iterable[str],
+    fit_window_end: Any,
+    evaluation_mode: str = "fold_local",
+    source_receipt_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Write one canonical receipt for a file-backed producer artifact."""
+
+    key = str(name).strip()
+    expected = _TRUSTED_FEATURE_PRODUCER_SPECS.get(key)
+    if expected is None:
+        raise FutureValueSourceError(f"unknown rating feature producer: {name}")
+    if evaluation_mode != "fold_local":
+        raise FutureValueSourceError("rating feature producer evaluation mode is invalid")
+    source_identity, source_hash = _verified_source_receipt_for_ledger(source_receipt)
+    artifact_file = _safe_file_path(artifact_path, f"{key} artifact")
+    artifact = _file_record(
+        {
+            "path": str(artifact_file),
+            "bytes": artifact_file.stat().st_size,
+            "sha256": _sha256_path(artifact_file),
+        },
+        f"{key} artifact",
+    )
+    feature_names = tuple(str(value) for value in expected["feature_names"])
+    artifact_frame = _load_feature_artifact(Path(artifact["path"]), feature_names)
+    model_ids = tuple(sorted(artifact_frame["game_id"].astype(str)))
+    train_ids = tuple(sorted({str(value) for value in train_game_ids}))
+    validation_ids = tuple(sorted({str(value) for value in validation_game_ids}))
+    if not train_ids or not validation_ids or set(train_ids) & set(validation_ids):
+        raise FutureValueSourceError("file-backed producer fold IDs are invalid")
+    if tuple(sorted((*train_ids, *validation_ids))) != model_ids:
+        raise FutureValueSourceError("file-backed producer fold IDs do not match artifact")
+    cutoff = _utc_text(fit_window_end)
+    source_file = None
+    if source_receipt_path is not None:
+        source_receipt_file = _safe_file_path(source_receipt_path, f"{key} source receipt")
+        source_file = _file_record(
+            {
+                "path": str(source_receipt_file),
+                "bytes": source_receipt_file.stat().st_size,
+                "sha256": _sha256_path(source_receipt_file),
+            },
+            f"{key} source receipt",
+        )
+        payload = json.loads(Path(source_file["path"]).read_text(encoding="utf-8"))
+        _verified_identity, verified_hash = _verified_source_receipt_for_ledger(payload)
+        if verified_hash != source_hash or dict(payload) != dict(source_receipt):
+            raise FutureValueSourceError(f"{key} source receipt file does not match source")
+    payload: dict[str, Any] = {
+        "schema_version": RATING_FEATURE_PRODUCER_RECEIPT_SCHEMA_VERSION,
+        "status": "research_only",
+        "authority": dict(RATING_FEATURE_PRODUCER_AUTHORITY),
+        "producer": dict(expected),
+        "artifact": artifact,
+        "source_identity_sha256": source_identity,
+        "source_receipt_sha256": source_hash,
+        "source_receipt_file": source_file,
+        "fit_game_ids": list(train_ids),
+        "fit_game_identity_sha256": identity_sha256(train_ids),
+        "validation_game_ids": list(validation_ids),
+        "validation_game_identity_sha256": identity_sha256(validation_ids),
+        "fit_window_end": cutoff,
+        "evaluation_mode": evaluation_mode,
+        "feature_names": list(feature_names),
+        "row_values_sha256": _ledger_rows_sha256(artifact_frame, feature_names),
+    }
+    payload["receipt_sha256"] = hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+    destination = _safe_output_file_path(receipt_path, f"{key} receipt")
+    destination.write_bytes(_canonical_json_bytes(payload))
+    receipt_record = _file_record(
+        {
+            "path": str(destination),
+            "bytes": destination.stat().st_size,
+            "sha256": _sha256_path(destination),
+        },
+        f"{key} receipt",
+    )
+    return {"name": key, "artifact": artifact, "receipt": receipt_record}
+
+
+def build_rating_feature_producer_manifest(
+    adapters: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Build the immutable manifest consumed by rating ledger binding."""
+
+    normalized = []
+    for adapter in adapters:
+        if not isinstance(adapter, Mapping):
+            raise FutureValueSourceError("rating feature producer adapter is invalid")
+        if set(adapter) != {"name", "artifact", "receipt"}:
+            raise FutureValueSourceError("rating feature producer adapter schema is invalid")
+        normalized.append(
+            {
+                "name": str(adapter["name"]),
+                "artifact": _file_record(adapter["artifact"], f"{adapter['name']} artifact"),
+                "receipt": _file_record(adapter["receipt"], f"{adapter['name']} receipt"),
+            }
+        )
+    payload: dict[str, Any] = {
+        "schema_version": RATING_FEATURE_PRODUCER_MANIFEST_SCHEMA_VERSION,
+        "status": "research_only",
+        "authority": dict(RATING_FEATURE_PRODUCER_AUTHORITY),
+        "adapters": normalized,
+    }
+    if not normalized:
+        raise FutureValueSourceError("rating feature producer manifest is empty")
+    payload["manifest_sha256"] = hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+    return payload
 
 
 def _resolve_rating_variant(value: RatingVariant | str) -> RatingVariant:
@@ -1960,6 +2432,7 @@ def bind_rating_feature_ledger(
     feature_names: Iterable[str],
     producer: Mapping[str, Any] | None = None,
     validation_game_ids: Iterable[str] | None = None,
+    evaluation_mode: str = "fold_local",
 ) -> pd.DataFrame:
     """Bind one fold-bound, out-of-sample signed-feature ledger.
 
@@ -1977,18 +2450,6 @@ def bind_rating_feature_ledger(
     ):
         raise FutureValueSourceError("rating feature ledger accepts signed map features only")
     source_identity, source_hash = _verified_source_receipt_for_ledger(source_receipt)
-    producer_adapters = _verified_producer_adapters(producer)
-    producer_feature_names = tuple(
-        feature
-        for adapter in producer_adapters
-        for feature in adapter["feature_names"]
-    )
-    if len(set(producer_feature_names)) != len(producer_feature_names):
-        raise FutureValueSourceError("rating feature producer feature families overlap")
-    if set(producer_feature_names) != set(config_features):
-        raise FutureValueSourceError(
-            "rating feature producer feature families do not match ledger features"
-        )
     required = {"game_id", "date", "series_id", *config_features}
     missing = sorted(required - set(frame.columns))
     if missing:
@@ -2034,6 +2495,29 @@ def bind_rating_feature_ledger(
     )
     if train_series & validation_series:
         raise FutureValueSourceError("rating ledger train and validation series overlap")
+    producer_adapters = _verify_durable_producer_adapters(
+        producer,
+        frame=work,
+        source_receipt=source_receipt,
+        source_identity=source_identity,
+        source_hash=source_hash,
+        train_ids=train_ids,
+        validation_ids=validation_ids,
+        cutoff=cutoff,
+        config_features=config_features,
+        evaluation_mode=evaluation_mode,
+    )
+    producer_feature_names = tuple(
+        feature
+        for adapter in producer_adapters
+        for feature in adapter["feature_names"]
+    )
+    if len(set(producer_feature_names)) != len(producer_feature_names):
+        raise FutureValueSourceError("rating feature producer feature families overlap")
+    if set(producer_feature_names) != set(config_features):
+        raise FutureValueSourceError(
+            "rating feature producer feature families do not match ledger features"
+        )
     rows_hash = _ledger_rows_sha256(work, config_features)
     producer_payload: dict[str, Any] = {
         "schema_version": RATING_FEATURE_LEDGER_SCHEMA_VERSION,
@@ -2050,6 +2534,7 @@ def bind_rating_feature_ledger(
         "feature_names": list(config_features),
         "ledger_rows_sha256": rows_hash,
         "feature_value_digest": rows_hash,
+        "evaluation_mode": evaluation_mode,
         "strict_prior_timing": "fit_rows_strictly_before_cutoff",
         "same_timestamp_policy": "batch_exclude_same_timestamp",
         "series_safety": {
@@ -2059,15 +2544,8 @@ def bind_rating_feature_ledger(
                 tuple(sorted(validation_series))
             ),
         },
-        "producer_adapters": [
-            trusted_feature_producer_receipt(
-                str(adapter["name"]),
-                row_values_sha256=_ledger_rows_sha256(
-                    work, tuple(str(value) for value in adapter["feature_names"])
-                ),
-            )
-            for adapter in producer_adapters
-        ],
+        "producer_adapters": [dict(adapter["code_receipt"]) for adapter in producer_adapters],
+        "producer_artifacts": dict(producer or {}),
     }
     producer_payload["receipt_sha256"] = hashlib.sha256(
         _canonical_json_bytes(producer_payload)
@@ -2091,6 +2569,7 @@ def bind_rating_feature_ledger(
     work.attrs["feature_value_digest"] = rows_hash
     work.attrs["strict_prior_timing"] = producer_payload["strict_prior_timing"]
     work.attrs["same_timestamp_policy"] = producer_payload["same_timestamp_policy"]
+    work.attrs["evaluation_mode"] = evaluation_mode
     work.attrs["series_safety"] = producer_payload["series_safety"]
     work.attrs["producer_receipt"] = producer_payload
     work.attrs["producer_receipt_sha256"] = producer_payload["receipt_sha256"]
@@ -2105,6 +2584,7 @@ def validate_rating_feature_ledger(
     train_game_ids: Iterable[str],
     fit_window_end: Any,
     source_receipt: Mapping[str, Any] | None,
+    evaluation_mode: str = "fold_local",
 ) -> pd.DataFrame:
     """Verify a fold-bound external ledger before it enters a design matrix."""
 
@@ -2158,6 +2638,8 @@ def validate_rating_feature_ledger(
     expected_cutoff = _utc_text(fit_window_end)
     if str(attrs.get("fit_window_end") or "") != expected_cutoff:
         raise FutureValueSourceError("rating feature ledger cutoff does not match fold")
+    if attrs.get("evaluation_mode") != evaluation_mode:
+        raise FutureValueSourceError("rating feature ledger evaluation mode changed")
     producer = attrs.get("producer_receipt")
     if not isinstance(producer, Mapping):
         raise FutureValueSourceError("rating feature ledger producer receipt is missing")
@@ -2179,6 +2661,8 @@ def validate_rating_feature_ledger(
         raise FutureValueSourceError("rating feature ledger producer training IDs changed")
     if producer.get("fit_window_end") != expected_cutoff:
         raise FutureValueSourceError("rating feature ledger producer cutoff changed")
+    if producer.get("evaluation_mode") != evaluation_mode:
+        raise FutureValueSourceError("rating feature ledger producer evaluation mode changed")
     if tuple(str(value) for value in producer.get("feature_names", ())) != config_features:
         raise FutureValueSourceError("rating feature ledger producer features changed")
     if tuple(str(value) for value in producer.get("validation_game_ids", ())) != validation_ids:
@@ -2213,12 +2697,27 @@ def validate_rating_feature_ledger(
         tuple(sorted(validation_series))
     ):
         raise FutureValueSourceError("rating feature ledger series safety binding changed")
+    durable_adapters = _verify_durable_producer_adapters(
+        producer.get("producer_artifacts"),
+        frame=work,
+        source_receipt=source_receipt,
+        source_identity=source_identity,
+        source_hash=expected_receipt_hash,
+        train_ids=train_ids,
+        validation_ids=validation_ids,
+        cutoff=expected_cutoff,
+        config_features=config_features,
+        evaluation_mode=evaluation_mode,
+    )
+    durable_names = tuple(str(adapter["name"]) for adapter in durable_adapters)
     expected_adapters = _verified_producer_adapters(
         {"adapters": producer.get("producer_adapters", ())}
     )
     expected_adapter_names = tuple(str(adapter["name"]) for adapter in expected_adapters)
     if not expected_adapter_names:
         raise FutureValueSourceError("rating feature ledger producer adapters are missing")
+    if durable_names != expected_adapter_names:
+        raise FutureValueSourceError("rating feature ledger producer adapter binding changed")
     adapter_features = tuple(
         feature for adapter in expected_adapters for feature in adapter["feature_names"]
     )
@@ -5181,6 +5680,8 @@ __all__ = [
     "CURRENT_RATING_FEATURE_SEMANTICS",
     "RATING_FEATURE_LEDGER_SCHEMA_VERSION",
     "RATING_FEATURE_PRODUCER_SCHEMA_VERSION",
+    "RATING_FEATURE_PRODUCER_RECEIPT_SCHEMA_VERSION",
+    "RATING_FEATURE_PRODUCER_MANIFEST_SCHEMA_VERSION",
     "FUTURE_PLAYER_FORM_SIDE_FEATURES",
     "MODEL_FEATURES",
     "MODEL_FIT_SCHEMA_VERSION",
@@ -5225,6 +5726,8 @@ __all__ = [
     "rating_variant_registry_sha256",
     "rating_variant_configs",
     "rating_feature_values_sha256",
+    "build_rating_feature_producer_manifest",
+    "write_rating_feature_producer_receipt",
     "team_value_difference",
     "trusted_feature_producer_receipt",
     "validate_rating_feature_ledger",
