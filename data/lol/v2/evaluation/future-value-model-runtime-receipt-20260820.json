@@ -1,13 +1,17 @@
 {
   "authority": {
+    "betting": false,
     "deployment": false,
+    "expected_value": false,
+    "odds": false,
     "promotion": false,
     "public_player_rating": false,
     "public_probability": false,
     "public_team_rating": false,
+    "recommendation": false,
     "research_only": true
   },
-  "code_commit": "fb6f327de1154d5277227e881d7747896e6efb02",
+  "code_commit": "80f7e5777b018fcbcadfb6acac5da3af9b373cc3",
   "command": [
     "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
     "-m",
@@ -26,13 +30,13 @@
     "--n-folds",
     "3"
   ],
-  "completed_at": "2026-08-21T00:18:32.459477Z",
-  "elapsed_seconds": 141.30230162499998,
+  "completed_at": "2026-08-21T00:38:08.643551Z",
+  "elapsed_seconds": 164.162051416,
   "entrypoint": "lol_kills.research.future_value_training.run_model_evaluation",
   "environment": {
     "logical_cpu_count": 10,
     "machine": "arm64",
-    "pid": 37226,
+    "pid": 46299,
     "platform": "macOS-26.6.1-arm64-arm-64bit",
     "processor": "arm",
     "python_implementation": "CPython",
@@ -71,13 +75,13 @@
     "teams": 33090
   },
   "output": {
-    "bytes": 11127677,
+    "bytes": 61008628,
     "path": "data/lol/v2/evaluation/future-value-model-fit-local-20260820.json",
     "prediction_ledger_rows": 3600,
-    "prediction_ledger_sha256": "2ecf3ac9b4ae181bbc72d3387176cac89c8b22b7b3c5c2ffbdcf56ea114c9e69",
-    "sha256": "fa6fc895d7740436d86c93281d39b0f41c77550b7ebdf3956791a8da9acbe5a1"
+    "prediction_ledger_sha256": "3eaca4df2c91616c8644ddcef99c36e8a7f69eaaa824078654565a84d1621335",
+    "sha256": "919c908ab699130c33076b803f68f72ee766c20ec2e5ed0123c746f2707a0282"
   },
-  "receipt_sha256": "73303b76228dfbf9b18a8fdecd991fc02966e05d3ffdbd44761ccf08b92d096f",
+  "receipt_sha256": "f99fd95f4782007e9e91bcfdccf81f025c637978843095a2917e02a9876f4d39",
   "schema_version": "scryglass:future-value-model-runtime:v1",
   "source": {
     "model_eligible_game_count": 16545,
@@ -89,6 +93,6 @@
     "source_receipt_path": "data/lol/v2/evaluation/future-value-source-receipt-20260820.json",
     "source_receipt_sha256": "71379924eaf4731a88de463d4abf26607bd465a8dd13b2d42789d6d1eb354134"
   },
-  "started_at": "2026-08-21T00:16:11.155556Z",
+  "started_at": "2026-08-21T00:35:24.479885Z",
   "status": "research_evaluation_complete"
 }
