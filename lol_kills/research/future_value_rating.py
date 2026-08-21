@@ -31,6 +31,7 @@ from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 from scipy.optimize import minimize
 
 from lol_kills.etl.source_keys import canonical_source_game_key
+from lol_kills.etl.aliases import normalize_team
 from lol_kills.ratings.global_player_bt import (
     ANCHOR_METRIC_Z_CLIP,
     PrefixBaselineCache,
@@ -117,6 +118,38 @@ SOURCE_RECEIPT_REQUIRED_FILES = frozenset(
 SOURCE_FILE_RECORD_FIELDS = frozenset(
     {"path", "locator", "bytes", "sha256", "year"}
 )
+LEAGUEPEDIA_CROSSWALK_RECEIPT_SCHEMA_VERSION = (
+    "scryglass:verified-oe-leaguepedia-series-crosswalk-receipt:v1"
+)
+LEAGUEPEDIA_CROSSWALK_RECEIPT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "status",
+        "authority",
+        "artifact",
+        "crosswalk_sha256",
+        "source_receipt_sha256",
+        "source_identity_sha256",
+        "accepted_game_count",
+        "accepted_game_identity_sha256",
+        "assignment_count",
+        "assignment_sha256",
+        "mapped_game_count",
+        "mapped_game_identity_sha256",
+        "mapped_game_ids",
+        "receipt_sha256",
+    }
+)
+LEAGUEPEDIA_CROSSWALK_RECEIPT_AUTHORITY = MappingProxyType(
+    {
+        "research_only": True,
+        "public": False,
+        "authoritative_series": False,
+        "promotion": False,
+        "deployment": False,
+    }
+)
+LEAGUEPEDIA_CROSSWALK_SOURCE = "mixed:leaguepedia_crosswalk+conservative_series_superset"
 
 
 class RatingVariant(str, Enum):
@@ -1162,10 +1195,228 @@ def _verified_authoritative_series_column(
     return str(column)
 
 
+def _conservative_series_partition(frame: pd.DataFrame) -> pd.DataFrame:
+    """Assign the source-neutral proxy partition used without a crosswalk."""
+
+    team_columns = next(
+        (
+            (blue_name, red_name)
+            for blue_name, red_name in (
+                ("blue_teamid", "red_teamid"),
+                ("blue_team_key", "red_team_key"),
+                ("blue_team", "red_team"),
+            )
+            if blue_name in frame.columns and red_name in frame.columns
+        ),
+        None,
+    )
+    if team_columns is not None:
+        blue_team, red_team = team_columns
+        blue = frame[blue_team].astype("string").str.strip().str.casefold()
+        red = frame[red_team].astype("string").str.strip().str.casefold()
+        league = frame.get("league", pd.Series("", index=frame.index)).astype("string")
+        tournament = frame.get("tournament", pd.Series("", index=frame.index)).astype("string")
+        valid = blue.notna() & red.notna() & blue.ne("") & red.ne("")
+        if bool(valid.all()):
+            pair = ["|".join(sorted((left, right))) for left, right in zip(blue, red)]
+            league_key = league.fillna("<missing>").astype(str).str.strip().str.casefold()
+            tournament_key = (
+                tournament.fillna("<missing>").astype(str).str.strip().str.casefold()
+            )
+            frame["series_id"] = [
+                "proxy:"
+                + "|".join((str(league_value), str(tournament_value), team_pair))
+                for league_value, tournament_value, team_pair in zip(
+                    league_key, tournament_key, pair
+                )
+            ]
+            cluster_sizes = frame["series_id"].value_counts(sort=False)
+            colliding = cluster_sizes.gt(1)
+            frame.attrs["series_cluster_source"] = "conservative_series_superset"
+            frame.attrs["series_cluster_audit"] = {
+                "source": "conservative_series_superset",
+                "authoritative": False,
+                "cluster_count": int(len(cluster_sizes)),
+                "map_count": int(len(frame)),
+                "colliding_cluster_count": int(colliding.sum()),
+                "collision_extra_map_count": int(
+                    cluster_sizes.loc[colliding].sub(1).sum()
+                ),
+                "max_cluster_size": int(cluster_sizes.max()),
+                "key_fields": ["league", "tournament", "unordered_team_pair"],
+                "team_identity_columns": [blue_team, red_team],
+                "stable_team_ids": team_columns == ("blue_teamid", "red_teamid"),
+            }
+            return frame
+    frame["series_id"] = frame["game_id"]
+    frame.attrs["series_cluster_source"] = "game_id_fallback"
+    frame.attrs["series_cluster_audit"] = {
+        "source": "game_id_fallback",
+        "authoritative": False,
+        "cluster_count": int(len(frame)),
+        "map_count": int(len(frame)),
+        "colliding_cluster_count": 0,
+        "collision_extra_map_count": 0,
+        "max_cluster_size": 1,
+    }
+    return frame
+
+
+def _crosswalk_team_columns(frame: pd.DataFrame) -> tuple[str, str] | None:
+    for pair in (
+        ("blue_team_key", "red_team_key"),
+        ("blue_team", "red_team"),
+        ("blue_teamid", "red_teamid"),
+    ):
+        if pair[0] in frame.columns and pair[1] in frame.columns:
+            return pair
+    return None
+
+
+def _apply_verified_leaguepedia_partition(
+    maps: pd.DataFrame,
+    frame: pd.DataFrame,
+    binding: Mapping[str, Any],
+    *,
+    verified_source_receipt_sha256: str | None,
+) -> pd.DataFrame:
+    """Mix verified Leaguepedia assignments with conservative proxy rows."""
+
+    source_hash = str(binding.get("source_receipt_sha256") or "")
+    if verified_source_receipt_sha256 is not None and source_hash != str(
+        verified_source_receipt_sha256
+    ):
+        raise FutureValueSourceError("Leaguepedia crosswalk source receipt does not match maps")
+    partition = _conservative_series_partition(frame)
+    assignments = binding.get("assignments")
+    if not isinstance(assignments, Sequence) or isinstance(
+        assignments, (str, bytes, bytearray)
+    ):
+        raise FutureValueSourceError("Leaguepedia crosswalk assignments are missing")
+    assignment_by_id = {str(row["oe_game_id"]): row for row in assignments}
+    team_columns = _crosswalk_team_columns(maps)
+    map_ids = set(partition["game_id"].astype(str))
+    mapped_ids = sorted(map_ids & set(assignment_by_id))
+    if mapped_ids and team_columns is None:
+        raise FutureValueSourceError("Leaguepedia crosswalk team columns are missing")
+    if team_columns is not None:
+        blue_column, red_column = team_columns
+        raw_ids = _frame_game_ids(maps, "maps").astype(str)
+        raw_index_by_id = {
+            str(game_id): index for index, game_id in zip(maps.index, raw_ids)
+        }
+        for game_id in mapped_ids:
+            assignment = assignment_by_id[game_id]
+            expected_pair = tuple(
+                sorted(_leaguepedia_team_key(value) for value in assignment["normalized_team_set"])
+            )
+            source_index = raw_index_by_id[game_id]
+            actual_pair = tuple(
+                sorted(
+                    (
+                        _leaguepedia_team_key(maps.loc[source_index, blue_column]),
+                        _leaguepedia_team_key(maps.loc[source_index, red_column]),
+                    )
+                )
+            )
+            if not expected_pair or actual_pair != expected_pair:
+                raise FutureValueSourceError(
+                    "Leaguepedia crosswalk team pair does not match OE maps"
+                )
+    # A conservative proxy can contain more than one real series.  Promote a
+    # mapped series only when the current frame contains every row in that
+    # proxy and the crosswalk series record lists exactly those rows.  This
+    # keeps an incomplete crosswalk from splitting one proxy cluster.
+    series_membership = binding.get("series_membership")
+    if not isinstance(series_membership, Mapping):
+        raise FutureValueSourceError("Leaguepedia crosswalk series membership is missing")
+    proxy_ids = partition["series_id"].astype(str)
+    game_ids = partition["game_id"].astype(str)
+    promoted_ids: set[str] = set()
+    retained_proxy_ids: set[str] = set()
+    for proxy_id, group_index in partition.groupby(proxy_ids, sort=False).groups.items():
+        group_game_ids = {str(value) for value in game_ids.loc[group_index]}
+        group_assignments = [
+            assignment_by_id[game_id]
+            for game_id in sorted(group_game_ids)
+            if game_id in assignment_by_id
+        ]
+        if len(group_assignments) != len(group_game_ids):
+            retained_proxy_ids.add(str(proxy_id))
+            continue
+        assignments_by_series: dict[str, set[str]] = {}
+        for assignment in group_assignments:
+            assignments_by_series.setdefault(str(assignment["series_id"]), set()).add(
+                str(assignment["oe_game_id"])
+            )
+        valid_group = True
+        for series_id, assigned_ids in assignments_by_series.items():
+            membership = series_membership.get(series_id)
+            if not isinstance(membership, Mapping):
+                valid_group = False
+                break
+            evidence_ids = {
+                str(value) for value in membership.get("oe_game_ids", ())
+            }
+            # The complete source frame is the census bound to this binding.
+            # Require exact membership here.  A series row missing from the
+            # frame keeps the whole proxy group conservative.
+            if evidence_ids != assigned_ids:
+                valid_group = False
+                break
+        if not valid_group:
+            retained_proxy_ids.add(str(proxy_id))
+            continue
+        for series_id, assigned_ids in assignments_by_series.items():
+            promoted_ids.update(assigned_ids)
+            partition.loc[
+                partition["game_id"].astype(str).isin(assigned_ids), "series_id"
+            ] = "leaguepedia:" + series_id
+    cluster_sizes = partition["series_id"].astype(str).value_counts(sort=False)
+    colliding = cluster_sizes.gt(1)
+    proxy_audit = dict(partition.attrs.get("series_cluster_audit") or {})
+    partition.attrs["series_cluster_source"] = LEAGUEPEDIA_CROSSWALK_SOURCE
+    partition.attrs["series_cluster_audit"] = {
+        **proxy_audit,
+        "source": LEAGUEPEDIA_CROSSWALK_SOURCE,
+        "authoritative": False,
+        "mapped_series_authoritative": True,
+        "mapped_game_count": len(mapped_ids),
+        "unmatched_game_count": int(len(partition) - len(mapped_ids)),
+        "mapped_series_count": len({str(assignment_by_id[game_id]["series_id"]) for game_id in mapped_ids}),
+        "promoted_game_count": int(len(promoted_ids)),
+        "promoted_series_count": int(
+            partition.loc[partition["game_id"].astype(str).isin(promoted_ids), "series_id"]
+            .astype(str)
+            .str.removeprefix("leaguepedia:")
+            .nunique()
+        ),
+        "retained_proxy_game_count": int(len(partition) - len(promoted_ids)),
+        "retained_proxy_cluster_count": int(len(retained_proxy_ids)),
+        "partial_series_blocker": bool(retained_proxy_ids),
+        "cluster_count": int(len(cluster_sizes)),
+        "map_count": int(len(partition)),
+        "colliding_cluster_count": int(colliding.sum()),
+        "collision_extra_map_count": int(
+            cluster_sizes.loc[colliding].sub(1).sum()
+        ),
+        "max_cluster_size": int(cluster_sizes.max()),
+        "crosswalk_artifact_sha256": binding.get("artifact_sha256"),
+        "crosswalk_sha256": binding.get("crosswalk_sha256"),
+        "crosswalk_receipt_sha256": binding.get("receipt_sha256"),
+        "crosswalk_assignment_sha256": binding.get("assignment_sha256"),
+        "source_receipt_sha256": source_hash,
+        "authoritative_series_blocker": "authoritative_series_id_missing_proxy_cluster_used",
+    }
+    return partition
+
+
 def _map_model_frame(
     maps: pd.DataFrame,
     *,
     verified_source_receipt_sha256: str | None = None,
+    verified_source_receipt: Mapping[str, Any] | None = None,
+    verified_crosswalk_receipt_file_sha256: str | None = None,
 ) -> pd.DataFrame:
     required = {"date", "y_blue_win"}
     missing = sorted(required - set(maps.columns))
@@ -1179,6 +1430,54 @@ def _map_model_frame(
         raise FutureValueSourceError("model maps do not have one dated row per game")
     if not frame["target"].isin({0, 1}).all():
         raise FutureValueSourceError("model maps contain an invalid result target")
+    crosswalk_attrs = maps.attrs.get("verified_leaguepedia_series_crosswalk")
+    if crosswalk_attrs is not None and not isinstance(crosswalk_attrs, Mapping):
+        raise FutureValueSourceError("Leaguepedia crosswalk binding is invalid")
+    if crosswalk_attrs is not None and isinstance(
+        maps.attrs.get("verified_series_receipt"), Mapping
+    ):
+        raise FutureValueSourceError("map frame has multiple series authority bindings")
+    if crosswalk_attrs is not None:
+        if not isinstance(verified_source_receipt, Mapping):
+            raise FutureValueSourceError(
+                "verified source receipt is required for Leaguepedia crosswalk"
+            )
+        if verified_source_receipt_sha256 is None:
+            verified_source_receipt_sha256 = str(
+                verified_source_receipt.get("receipt_sha256") or ""
+            )
+        artifact_path = crosswalk_attrs.get("artifact_path")
+        receipt_path = crosswalk_attrs.get("receipt_path")
+        if not artifact_path or not receipt_path:
+            raise FutureValueSourceError("Leaguepedia crosswalk file binding is missing")
+        if verified_crosswalk_receipt_file_sha256 is None:
+            raise FutureValueSourceError(
+                "independent Leaguepedia crosswalk receipt file hash is required"
+            )
+        binding = load_verified_leaguepedia_series_crosswalk(
+            artifact_path,
+            receipt_path,
+            source_receipt=verified_source_receipt,
+            expected_source_receipt_sha256=verified_source_receipt_sha256,
+            expected_receipt_file_sha256=verified_crosswalk_receipt_file_sha256,
+        )
+        for key in (
+            "artifact_sha256",
+            "receipt_sha256",
+            "crosswalk_sha256",
+            "assignment_sha256",
+            "receipt_file_sha256",
+        ):
+            if crosswalk_attrs.get(key) != binding.get(key):
+                raise FutureValueSourceError(
+                    f"Leaguepedia crosswalk binding changed: {key}"
+                )
+        return _apply_verified_leaguepedia_partition(
+            maps,
+            frame,
+            binding,
+            verified_source_receipt_sha256=verified_source_receipt_sha256,
+        )
     series_column = (
         _verified_authoritative_series_column(
             maps,
@@ -1213,85 +1512,7 @@ def _map_model_frame(
                 ],
             }
     if not valid_authoritative_series:
-        team_columns = next(
-            (
-                (blue_name, red_name)
-                for blue_name, red_name in (
-                    ("blue_teamid", "red_teamid"),
-                    ("blue_team_key", "red_team_key"),
-                    ("blue_team", "red_team"),
-                )
-                if blue_name in frame.columns and red_name in frame.columns
-            ),
-            None,
-        )
-        if team_columns is not None:
-            blue_team, red_team = team_columns
-            blue = frame[blue_team].astype("string").str.strip().str.casefold()
-            red = frame[red_team].astype("string").str.strip().str.casefold()
-            league = frame.get("league", pd.Series("", index=frame.index)).astype("string")
-            tournament = frame.get("tournament", pd.Series("", index=frame.index)).astype("string")
-            valid = blue.notna() & red.notna() & blue.ne("") & red.ne("")
-            if bool(valid.all()):
-                pair = ["|".join(sorted((left, right))) for left, right in zip(blue, red)]
-                league_key = league.fillna("<missing>").astype(str).str.strip().str.casefold()
-                tournament_key = (
-                    tournament.fillna("<missing>").astype(str).str.strip().str.casefold()
-                )
-                frame["series_id"] = [
-                    "proxy:"
-                    + "|".join(
-                        (
-                            str(league_value),
-                            str(tournament_value),
-                            team_pair,
-                        )
-                    )
-                    for league_value, tournament_value, team_pair in zip(
-                        league_key, tournament_key, pair
-                    )
-                ]
-                cluster_sizes = frame["series_id"].value_counts(sort=False)
-                colliding = cluster_sizes.gt(1)
-                frame.attrs["series_cluster_source"] = "conservative_series_superset"
-                frame.attrs["series_cluster_audit"] = {
-                    "source": "conservative_series_superset",
-                    "authoritative": False,
-                    "cluster_count": int(len(cluster_sizes)),
-                    "map_count": int(len(frame)),
-                    "colliding_cluster_count": int(colliding.sum()),
-                    "collision_extra_map_count": int(
-                        cluster_sizes.loc[colliding].sub(1).sum()
-                    ),
-                    "max_cluster_size": int(cluster_sizes.max()),
-                    "key_fields": ["league", "tournament", "unordered_team_pair"],
-                    "team_identity_columns": [blue_team, red_team],
-                    "stable_team_ids": team_columns == ("blue_teamid", "red_teamid"),
-                }
-            else:
-                frame["series_id"] = frame["game_id"]
-                frame.attrs["series_cluster_source"] = "game_id_fallback"
-                frame.attrs["series_cluster_audit"] = {
-                    "source": "game_id_fallback",
-                    "authoritative": False,
-                    "cluster_count": int(len(frame)),
-                    "map_count": int(len(frame)),
-                    "colliding_cluster_count": 0,
-                    "collision_extra_map_count": 0,
-                    "max_cluster_size": 1,
-                }
-        else:
-            frame["series_id"] = frame["game_id"]
-            frame.attrs["series_cluster_source"] = "game_id_fallback"
-            frame.attrs["series_cluster_audit"] = {
-                "source": "game_id_fallback",
-                "authoritative": False,
-                "cluster_count": int(len(frame)),
-                "map_count": int(len(frame)),
-                "colliding_cluster_count": 0,
-                "collision_extra_map_count": 0,
-                "max_cluster_size": 1,
-            }
+        frame = _conservative_series_partition(frame)
     return frame
 
 
@@ -1702,6 +1923,300 @@ def _safe_file_path(value: Any, field: str, *, allow_missing: bool = False) -> P
     if not parent.is_dir() or parent.is_symlink():
         raise FutureValueSourceError(f"{field} parent directory is unsafe")
     return path
+
+
+def _leaguepedia_team_key(value: Any) -> str:
+    """Normalize a team value for an exact crosswalk pair comparison."""
+
+    if value is None or (isinstance(value, float) and math.isnan(value)) or value is pd.NA:
+        value = ""
+    text = str(normalize_team(str(value))).strip().casefold()
+    text = re.sub(r"[-_]+", " ", text)
+    return " ".join(text.split())
+
+
+def _leaguepedia_assignment_rows(
+    assignments: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    rows = [dict(row) for row in assignments]
+    try:
+        rows.sort(key=lambda row: str(row["oe_game_id"]))
+    except (KeyError, TypeError) as error:
+        raise FutureValueSourceError("Leaguepedia crosswalk assignments are invalid") from error
+    return rows
+
+
+def _leaguepedia_assignment_sha256(
+    assignments: Sequence[Mapping[str, Any]],
+) -> str:
+    return hashlib.sha256(
+        _canonical_json_bytes(_leaguepedia_assignment_rows(assignments))
+    ).hexdigest()
+
+
+def _load_json_file(path: Path, field: str) -> Mapping[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueSourceError(f"{field} cannot be read") from error
+    if not isinstance(value, Mapping):
+        raise FutureValueSourceError(f"{field} must be a JSON object")
+    return value
+
+
+def load_verified_leaguepedia_series_crosswalk(
+    crosswalk_path: Path | str,
+    receipt_path: Path | str,
+    *,
+    source_receipt: Mapping[str, Any],
+    expected_source_receipt_sha256: str | None = None,
+    expected_receipt_file_sha256: str,
+) -> dict[str, Any]:
+    """Load a byte-bound partial Leaguepedia series crosswalk.
+
+    The crosswalk self-hash is checked against a separate receipt.  The
+    receipt binds the artifact bytes, the accepted OE census, and every
+    mapped assignment.  A caller cannot make a DataFrame attribute into
+    series evidence without these files.
+    """
+
+    artifact_path = _safe_file_path(crosswalk_path, "Leaguepedia crosswalk artifact")
+    receipt_file = _safe_file_path(receipt_path, "Leaguepedia crosswalk receipt")
+    expected_receipt_file_sha256 = str(expected_receipt_file_sha256 or "").lower()
+    if re.fullmatch(r"[0-9a-f]{64}", expected_receipt_file_sha256) is None:
+        raise FutureValueSourceError("Leaguepedia crosswalk receipt file hash is invalid")
+    actual_receipt_file_sha256 = _sha256_path(receipt_file)
+    if actual_receipt_file_sha256 != expected_receipt_file_sha256:
+        raise FutureValueSourceError("Leaguepedia crosswalk receipt file changed")
+    source_accepted, source_eligible = validate_future_value_source_receipt_payload(
+        source_receipt,
+        expected_receipt_sha256=expected_source_receipt_sha256,
+    )
+    artifact_bytes = artifact_path.stat().st_size
+    artifact_sha256 = _sha256_path(artifact_path)
+    receipt_payload = _load_json_file(receipt_file, "Leaguepedia crosswalk receipt")
+    if set(receipt_payload) != set(LEAGUEPEDIA_CROSSWALK_RECEIPT_FIELDS):
+        raise FutureValueSourceError("Leaguepedia crosswalk receipt schema is invalid")
+    if receipt_payload.get("schema_version") != LEAGUEPEDIA_CROSSWALK_RECEIPT_SCHEMA_VERSION:
+        raise FutureValueSourceError("Leaguepedia crosswalk receipt version is invalid")
+    if receipt_payload.get("status") != "verified_research_only":
+        raise FutureValueSourceError("Leaguepedia crosswalk receipt status is invalid")
+    if dict(receipt_payload.get("authority") or {}) != dict(
+        LEAGUEPEDIA_CROSSWALK_RECEIPT_AUTHORITY
+    ):
+        raise FutureValueSourceError("Leaguepedia crosswalk receipt authority is invalid")
+    receipt_hash = receipt_payload.get("receipt_sha256")
+    receipt_body = dict(receipt_payload)
+    receipt_body.pop("receipt_sha256", None)
+    if not isinstance(receipt_hash, str) or re.fullmatch(r"[0-9a-f]{64}", receipt_hash, re.I) is None:
+        raise FutureValueSourceError("Leaguepedia crosswalk receipt hash is invalid")
+    if hashlib.sha256(_canonical_json_bytes(receipt_body)).hexdigest() != receipt_hash:
+        raise FutureValueSourceError("Leaguepedia crosswalk receipt hash changed")
+    artifact_record = receipt_payload.get("artifact")
+    if not isinstance(artifact_record, Mapping) or set(artifact_record) != {
+        "path", "bytes", "sha256"
+    }:
+        raise FutureValueSourceError("Leaguepedia crosswalk artifact binding is invalid")
+    if Path(str(artifact_record.get("path"))).resolve() != artifact_path.resolve():
+        raise FutureValueSourceError("Leaguepedia crosswalk artifact path changed")
+    if artifact_record.get("bytes") != artifact_bytes or str(
+        artifact_record.get("sha256") or ""
+    ).lower() != artifact_sha256:
+        raise FutureValueSourceError("Leaguepedia crosswalk artifact bytes changed")
+
+    artifact = _load_json_file(artifact_path, "Leaguepedia crosswalk artifact")
+    try:
+        from lol_kills.research.oe_leaguepedia_series_crosswalk import verify_crosswalk
+
+        verify_crosswalk(artifact)
+    except (ImportError, ValueError) as error:
+        raise FutureValueSourceError("Leaguepedia crosswalk artifact verification failed") from error
+    crosswalk_hash = str(artifact.get("crosswalk_sha256") or "").lower()
+    if receipt_payload.get("crosswalk_sha256") != crosswalk_hash:
+        raise FutureValueSourceError("Leaguepedia crosswalk self-hash binding changed")
+    source_hash = str(source_receipt["receipt_sha256"]).lower()
+    if receipt_payload.get("source_receipt_sha256") != source_hash:
+        raise FutureValueSourceError("Leaguepedia crosswalk source receipt changed")
+    if receipt_payload.get("source_identity_sha256") != source_receipt[
+        "source_identity_sha256"
+    ]:
+        raise FutureValueSourceError("Leaguepedia crosswalk source identity changed")
+    if receipt_payload.get("accepted_game_count") != len(source_accepted):
+        raise FutureValueSourceError("Leaguepedia crosswalk accepted count changed")
+    if receipt_payload.get("accepted_game_identity_sha256") != identity_sha256(
+        source_accepted
+    ):
+        raise FutureValueSourceError("Leaguepedia crosswalk accepted identity changed")
+
+    binding = artifact.get("source_binding")
+    if not isinstance(binding, Mapping):
+        raise FutureValueSourceError("Leaguepedia crosswalk source binding is missing")
+    if binding.get("receipt_sha256") != source_hash:
+        raise FutureValueSourceError("Leaguepedia crosswalk source binding changed")
+    if tuple(binding.get("accepted_game_ids") or ()) != source_accepted:
+        raise FutureValueSourceError("Leaguepedia crosswalk accepted game IDs changed")
+    if binding.get("accepted_game_count") != len(source_accepted) or binding.get(
+        "accepted_game_identity_sha256"
+    ) != identity_sha256(source_accepted):
+        raise FutureValueSourceError("Leaguepedia crosswalk accepted census binding changed")
+    if tuple(binding.get("selected_game_ids") or ()) != source_accepted or binding.get(
+        "selected_is_full_accepted_census"
+    ) is not True:
+        raise FutureValueSourceError("Leaguepedia crosswalk selected census is incomplete")
+    if tuple(binding.get("model_eligible_game_ids") or ()) != source_eligible:
+        raise FutureValueSourceError("Leaguepedia crosswalk model census changed")
+    if binding.get("model_eligible_game_count") != len(source_eligible) or binding.get(
+        "model_eligible_game_identity_sha256"
+    ) != identity_sha256(source_eligible):
+        raise FutureValueSourceError("Leaguepedia crosswalk model census identity changed")
+
+    if artifact.get("status") != "partial_authoritative_coverage":
+        raise FutureValueSourceError("Leaguepedia crosswalk is not a partial artifact")
+    assignments_value = artifact.get("assignments")
+    if not isinstance(assignments_value, list):
+        raise FutureValueSourceError("Leaguepedia crosswalk assignments are missing")
+    assignments: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for raw in assignments_value:
+        if not isinstance(raw, Mapping):
+            raise FutureValueSourceError("Leaguepedia crosswalk assignment is invalid")
+        game_id = str(raw.get("oe_game_id") or "")
+        series_id = str(raw.get("series_id") or "").strip()
+        team_set = raw.get("normalized_team_set")
+        if not game_id or not series_id or game_id in seen_ids:
+            raise FutureValueSourceError("Leaguepedia crosswalk assignment identity is invalid")
+        if tuple(canonical_game_ids((game_id,))) != (game_id,):
+            raise FutureValueSourceError("Leaguepedia crosswalk assignment game ID is invalid")
+        if not isinstance(team_set, list) or len(team_set) != 2 or any(
+            not isinstance(value, str) or not value.strip() for value in team_set
+        ) or team_set != sorted(team_set):
+            raise FutureValueSourceError("Leaguepedia crosswalk assignment team set is invalid")
+        if raw.get("outcome_used") is not False:
+            raise FutureValueSourceError("Leaguepedia crosswalk assignment uses an outcome")
+        if game_id not in set(source_accepted):
+            raise FutureValueSourceError("Leaguepedia crosswalk assignment is outside source census")
+        seen_ids.add(game_id)
+        assignments.append(dict(raw))
+    assignments = _leaguepedia_assignment_rows(assignments)
+    assignment_ids = tuple(row["oe_game_id"] for row in assignments)
+    assignment_hash = _leaguepedia_assignment_sha256(assignments)
+    if receipt_payload.get("assignment_count") != len(assignments) or receipt_payload.get(
+        "assignment_sha256"
+    ) != assignment_hash:
+        raise FutureValueSourceError("Leaguepedia crosswalk assignment hash changed")
+    if tuple(receipt_payload.get("mapped_game_ids") or ()) != assignment_ids:
+        raise FutureValueSourceError("Leaguepedia crosswalk mapped game IDs changed")
+    if receipt_payload.get("mapped_game_count") != len(assignment_ids) or receipt_payload.get(
+        "mapped_game_identity_sha256"
+    ) != identity_sha256(assignment_ids):
+        raise FutureValueSourceError("Leaguepedia crosswalk mapped identity changed")
+    coverage = artifact.get("coverage")
+    if not isinstance(coverage, Mapping) or coverage.get("mapped_game_count") != len(assignments):
+        raise FutureValueSourceError("Leaguepedia crosswalk coverage changed")
+    raw_series = artifact.get("series")
+    if not isinstance(raw_series, list):
+        raise FutureValueSourceError("Leaguepedia crosswalk series membership is missing")
+    series_membership: dict[str, dict[str, Any]] = {}
+    for raw_series_row in raw_series:
+        if not isinstance(raw_series_row, Mapping):
+            raise FutureValueSourceError("Leaguepedia crosswalk series membership is invalid")
+        series_id = str(raw_series_row.get("series_id") or "").strip()
+        raw_ids = raw_series_row.get("oe_game_ids")
+        raw_team_set = raw_series_row.get("normalized_team_set")
+        if not series_id or not isinstance(raw_ids, list) or not raw_ids:
+            raise FutureValueSourceError("Leaguepedia crosswalk series membership is incomplete")
+        try:
+            series_ids = tuple(canonical_game_ids(str(value) for value in raw_ids))
+        except (TypeError, ValueError) as error:
+            raise FutureValueSourceError("Leaguepedia crosswalk series game IDs are invalid") from error
+        if len(set(series_ids)) != len(series_ids) or not isinstance(raw_team_set, list):
+            raise FutureValueSourceError("Leaguepedia crosswalk series membership is invalid")
+        team_set = tuple(sorted(_leaguepedia_team_key(value) for value in raw_team_set))
+        if len(team_set) != 2 or any(not value for value in team_set):
+            raise FutureValueSourceError("Leaguepedia crosswalk series team set is invalid")
+        if series_id in series_membership:
+            raise FutureValueSourceError("Leaguepedia crosswalk series IDs are duplicated")
+        series_membership[series_id] = {
+            "oe_game_ids": list(series_ids),
+            "normalized_team_set": list(team_set),
+        }
+    assignments_by_series: dict[str, set[str]] = {}
+    for assignment in assignments:
+        series_id = str(assignment["series_id"])
+        assignments_by_series.setdefault(series_id, set()).add(str(assignment["oe_game_id"]))
+        membership = series_membership.get(series_id)
+        if membership is None:
+            raise FutureValueSourceError("Leaguepedia crosswalk series membership is missing")
+    for series_id, assigned_ids in assignments_by_series.items():
+        membership = series_membership[series_id]
+        if set(membership["oe_game_ids"]) != assigned_ids:
+            raise FutureValueSourceError("Leaguepedia crosswalk series membership changed")
+        assignment_team_sets = {
+            tuple(sorted(_leaguepedia_team_key(value) for value in row["normalized_team_set"]))
+            for row in assignments
+            if str(row["series_id"]) == series_id
+        }
+        if assignment_team_sets != {
+            tuple(membership["normalized_team_set"])
+        }:
+            raise FutureValueSourceError("Leaguepedia crosswalk series team binding changed")
+    return {
+        "artifact_path": str(artifact_path),
+        "artifact_bytes": int(artifact_bytes),
+        "artifact_sha256": artifact_sha256,
+        "receipt_path": str(receipt_file),
+        "receipt_bytes": int(receipt_file.stat().st_size),
+        "receipt_file_sha256": _sha256_path(receipt_file),
+        "expected_receipt_file_sha256": expected_receipt_file_sha256,
+        "receipt_sha256": receipt_hash,
+        "crosswalk_sha256": crosswalk_hash,
+        "source_receipt_sha256": source_hash,
+        "source_identity_sha256": str(source_receipt["source_identity_sha256"]),
+        "accepted_game_ids": list(source_accepted),
+        "model_eligible_game_ids": list(source_eligible),
+        "assignment_sha256": assignment_hash,
+        "mapped_game_ids": list(assignment_ids),
+        "assignments": assignments,
+        "series_membership": series_membership,
+    }
+
+
+def bind_verified_leaguepedia_series_crosswalk(
+    maps: pd.DataFrame,
+    *,
+    crosswalk_path: Path | str,
+    receipt_path: Path | str,
+    source_receipt: Mapping[str, Any],
+    expected_receipt_file_sha256: str,
+) -> pd.DataFrame:
+    """Attach a verified mixed series partition to an OE map frame."""
+
+    binding = load_verified_leaguepedia_series_crosswalk(
+        crosswalk_path,
+        receipt_path,
+        source_receipt=source_receipt,
+        expected_source_receipt_sha256=str(source_receipt.get("receipt_sha256") or ""),
+        expected_receipt_file_sha256=expected_receipt_file_sha256,
+    )
+    result = maps.copy()
+    result.attrs = dict(maps.attrs)
+    result.attrs["verified_leaguepedia_series_crosswalk"] = {
+        key: value
+        for key, value in binding.items()
+        if key != "assignments"
+    }
+    model_frame = _map_model_frame(
+        result,
+        verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+        verified_source_receipt=source_receipt,
+        verified_crosswalk_receipt_file_sha256=expected_receipt_file_sha256,
+    )
+    _validate_verified_source_receipt(
+        source_receipt,
+        model_frame,
+        require_full_eligible_set=False,
+    )
+    return result
 
 
 def _file_record(
@@ -4387,6 +4902,7 @@ def fit_future_value_model(
     rank: int = RANK_3,
     min_cell_support: int = 1,
     source_receipt: Mapping[str, Any] | None = None,
+    crosswalk_receipt_file_sha256: str | None = None,
     verified_model_frame: pd.DataFrame | None = None,
     variant: RatingVariant | str | None = None,
     feature_ledger: pd.DataFrame | None = None,
@@ -4405,6 +4921,8 @@ def fit_future_value_model(
                 and "receipt_sha256" in source_receipt
                 else None
             ),
+            verified_source_receipt=source_receipt,
+            verified_crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
         )
     )
     train_ids = tuple(sorted({str(value) for value in train_game_ids}))
@@ -5114,9 +5632,12 @@ def _roster_change_labels(frame: pd.DataFrame) -> pd.Series | None:
         return None
     blue = pd.to_numeric(frame["blue_roster_continuity"], errors="coerce")
     red = pd.to_numeric(frame["red_roster_continuity"], errors="coerce")
-    labels = pd.Series("<missing>", index=frame.index, dtype="string")
-    stable = blue.ge(1.0) & red.ge(1.0)
-    changed = blue.lt(1.0) | red.lt(1.0)
+    if not bool((blue.notna() | red.notna()).any()):
+        return None
+    labels = pd.Series("prior_roster_unavailable", index=frame.index, dtype="string")
+    both_available = blue.notna() & red.notna()
+    stable = both_available & blue.ge(1.0) & red.ge(1.0)
+    changed = both_available & (blue.lt(1.0) | red.lt(1.0))
     labels.loc[stable] = "stable_roster"
     labels.loc[changed] = "roster_change"
     return labels
@@ -5726,6 +6247,7 @@ def evaluate_future_value(
     source_receipt: Mapping[str, Any] | None = None,
     source_receipt_path: str | None = None,
     source_receipt_file_sha256: str | None = None,
+    crosswalk_receipt_file_sha256: str | None = None,
     runtime_receipt_path: str | None = None,
     variant: RatingVariant | str | None = None,
     feature_ledger: pd.DataFrame | Mapping[Any, pd.DataFrame] | None = None,
@@ -5745,16 +6267,35 @@ def evaluate_future_value(
             )
         feature_ledger = nested_outer
         inner_feature_ledger = nested_inner
-    map_frame = _map_model_frame(maps)
+    if maps.attrs.get("verified_leaguepedia_series_crosswalk") is not None:
+        map_frame = _map_model_frame(
+            maps,
+            verified_source_receipt=(
+                source_receipt if isinstance(source_receipt, Mapping) else None
+            ),
+            verified_source_receipt_sha256=(
+                str(source_receipt["receipt_sha256"])
+                if isinstance(source_receipt, Mapping)
+                and "receipt_sha256" in source_receipt
+                else None
+            ),
+            verified_crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+        )
+    else:
+        map_frame = _map_model_frame(maps)
     verified_eligible_ids = _validate_verified_source_receipt(
         source_receipt,
         map_frame,
         require_full_eligible_set=True,
     )
-    if isinstance(maps.attrs.get("verified_series_receipt"), Mapping):
+    if isinstance(maps.attrs.get("verified_series_receipt"), Mapping) or isinstance(
+        maps.attrs.get("verified_leaguepedia_series_crosswalk"), Mapping
+    ):
         map_frame = _map_model_frame(
             maps,
             verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+            verified_source_receipt=source_receipt,
+            verified_crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
         )
         _validate_verified_source_receipt(
             source_receipt,
@@ -5858,6 +6399,7 @@ def evaluate_future_value(
             fit_window_end=fold["validation_start"],
             min_cell_support=min_cell_support,
             source_receipt=source_receipt,
+            crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
             verified_model_frame=fold_map_frame,
             variant=None if variant_config is None else variant_config.variant,
             feature_ledger=fold_ledger,
@@ -6969,6 +7511,8 @@ __all__ = [
     "AcceptedFutureValueSource",
     "FutureValueFoldModel",
     "FutureValueSourceError",
+    "LEAGUEPEDIA_CROSSWALK_RECEIPT_SCHEMA_VERSION",
+    "LEAGUEPEDIA_CROSSWALK_SOURCE",
     "CURRENT_RATING_RAW_DIFFERENCE_FEATURES",
     "CURRENT_RATING_SIGNED_MAP_FEATURES",
     "CURRENT_RATING_STRENGTH_FEATURES",
@@ -7000,6 +7544,7 @@ __all__ = [
     "assert_rating_feature_names",
     "assert_rating_variant_features",
     "bind_accepted_future_value_source",
+    "bind_verified_leaguepedia_series_crosswalk",
     "bind_rating_feature_ledger",
     "build_strict_prior_player_form",
     "build_future_value_design",
@@ -7014,6 +7559,7 @@ __all__ = [
     "is_side_level_feature",
     "is_signed_map_feature",
     "load_accepted_future_value_source",
+    "load_verified_leaguepedia_series_crosswalk",
     "rating_variant_config",
     "rating_variant_config_receipt",
     "rating_variant_config_sha256",
