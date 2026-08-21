@@ -40,6 +40,52 @@ MODEL_VERSION = "future-phase-curve-v1"
 SOURCE = "oracle_elixir_only"
 PHASE_FEATURE_FAMILY = "checkpoint_forecasts"
 PHASE_FEATURE_DECLARATION = tuple(ATOM_GROUP_COLUMNS[PHASE_FEATURE_FAMILY])
+# This threshold is part of the phase-shape contract.  It is a signed
+# gold/XP-difference unit, not a probability or a model decision boundary.
+PHASE_SHAPE_MATERIAL_THRESHOLD = 250.0
+MATERIAL_ADVANTAGE_THRESHOLD = PHASE_SHAPE_MATERIAL_THRESHOLD
+
+
+def _phase_shape_metric_names(prefix: str) -> tuple[str, ...]:
+    """Return the fixed shape names for one signed checkpoint curve."""
+
+    return (
+        *(f"forecast_{prefix}_slope_{first}_{second}" for first, second in zip(PHASES, PHASES[1:])),
+        f"forecast_{prefix}_early_mean",
+        f"forecast_{prefix}_late_mean",
+        f"forecast_{prefix}_late_minus_early",
+        f"forecast_{prefix}_late_minus_early_slope",
+        f"forecast_{prefix}_late_minus_early_acceleration",
+        f"forecast_{prefix}_signed_area",
+        f"forecast_{prefix}_first_material_advantage_minute_signed",
+    )
+
+
+# These tuples are a closed feature contract.  Checkpoint target names such
+# as ``forecast_gold_diff_10`` are intentionally absent.
+PHASE_SHAPE_SIGNED_FEATURES = (
+    *_phase_shape_metric_names("gold"),
+    *_phase_shape_metric_names("xp"),
+)
+PHASE_SHAPE_INVARIANT_FEATURES = (
+    *(f"forecast_{prefix}_first_crossover_minute" for prefix in ("gold", "xp")),
+    *(f"forecast_{prefix}_crossover_count" for prefix in ("gold", "xp")),
+    "forecast_curve_available",
+    "forecast_curve_missing",
+)
+PHASE_SHAPE_AVAILABILITY_FEATURES = (
+    "forecast_curve_available",
+    "forecast_curve_missing",
+)
+PHASE_SHAPE_FEATURES = (
+    *PHASE_SHAPE_SIGNED_FEATURES,
+    *PHASE_SHAPE_INVARIANT_FEATURES,
+)
+
+# Short aliases keep the registry discoverable for callers that use the
+# phase-curve terminology rather than the forecast terminology.
+SIGNED_PHASE_SHAPE_FEATURES = PHASE_SHAPE_SIGNED_FEATURES
+INVARIANT_PHASE_SHAPE_FEATURES = PHASE_SHAPE_INVARIANT_FEATURES
 SOURCE_RECEIPT_SCHEMA = "scryglass:future-value-rating-source:v1"
 SOURCE_TRANSPORT = (
     "official_public_oracles_elixir_annual_exports_plus_oe_api_bridge"
@@ -1205,6 +1251,321 @@ def phase_curve_measures(
     }
 
 
+def _phase_shape_values(
+    values: Sequence[float | None] | Mapping[int | str, float | None],
+    *,
+    name: str,
+) -> list[float | None]:
+    """Normalize one four-checkpoint curve without filling missing values."""
+
+    if isinstance(values, Mapping):
+        normalized: list[float | None] = []
+        for phase in PHASES:
+            raw = values.get(phase, values.get(str(phase)))
+            if raw is None:
+                normalized.append(None)
+                continue
+            try:
+                number = float(raw)
+            except (TypeError, ValueError) as error:
+                raise FuturePhaseCurveError(f"{name} contains a non-numeric value") from error
+            normalized.append(number if math.isfinite(number) else None)
+        return normalized
+    try:
+        raw_values = list(values)
+    except TypeError as error:
+        raise FuturePhaseCurveError(f"{name} must contain four checkpoints") from error
+    if len(raw_values) != len(PHASES):
+        raise FuturePhaseCurveError(f"{name} must contain four checkpoints")
+    normalized = []
+    for raw in raw_values:
+        if raw is None:
+            normalized.append(None)
+            continue
+        try:
+            number = float(raw)
+        except (TypeError, ValueError) as error:
+            raise FuturePhaseCurveError(f"{name} contains a non-numeric value") from error
+        normalized.append(number if math.isfinite(number) else None)
+    return normalized
+
+
+def _phase_shape_availability(
+    available: bool | Mapping[str, bool] | Sequence[bool] | None,
+    *,
+    gold_available: bool | None,
+    xp_available: bool | None,
+    curve_available: bool | None,
+    complete: bool,
+) -> bool:
+    """Resolve explicit availability while keeping incomplete curves closed."""
+
+    explicit: bool | None = None
+    if available is not None:
+        if isinstance(available, Mapping):
+            values = [
+                available.get("gold", available.get("gold_available", True)),
+                available.get("xp", available.get("xp_available", True)),
+                available.get("curve", available.get("curve_available", True)),
+            ]
+            if not all(isinstance(value, (bool, np.bool_)) for value in values):
+                raise FuturePhaseCurveError("phase shape availability must be boolean")
+            explicit = all(bool(value) for value in values)
+        elif isinstance(available, (bool, np.bool_)):
+            explicit = bool(available)
+        else:
+            try:
+                values = list(available)
+            except TypeError as error:
+                raise FuturePhaseCurveError("phase shape availability must be boolean") from error
+            if len(values) != 2 or not all(isinstance(value, (bool, np.bool_)) for value in values):
+                raise FuturePhaseCurveError(
+                    "phase shape availability must be one boolean or two booleans"
+                )
+            explicit = all(bool(value) for value in values)
+    for value, label in (
+        (gold_available, "gold_available"),
+        (xp_available, "xp_available"),
+        (curve_available, "curve_available"),
+    ):
+        if value is not None and not isinstance(value, (bool, np.bool_)):
+            raise FuturePhaseCurveError(f"{label} must be boolean")
+        if value is not None:
+            explicit = bool(value) if explicit is None else explicit and bool(value)
+    return complete if explicit is None else bool(explicit) and complete
+
+
+def _phase_shape_slopes(values: Sequence[float]) -> list[float]:
+    return [
+        (float(second) - float(first)) / float(second_phase - first_phase)
+        for first, second, first_phase, second_phase in zip(
+            values,
+            values[1:],
+            PHASES,
+            PHASES[1:],
+        )
+    ]
+
+
+def _phase_shape_signed_area(values: Sequence[float]) -> float:
+    return float(
+        sum(
+            (float(first) + float(second)) * float(second_phase - first_phase) / 2.0
+            for first, second, first_phase, second_phase in zip(
+                values,
+                values[1:],
+                PHASES,
+                PHASES[1:],
+            )
+        )
+    )
+
+
+def _phase_shape_material_minute(values: Sequence[float]) -> float:
+    """Return the first threshold time, signed by the advantaged side."""
+
+    threshold = float(PHASE_SHAPE_MATERIAL_THRESHOLD)
+    candidates: list[tuple[float, float]] = []
+    for index, value in enumerate(values):
+        minute = float(PHASES[index])
+        if value >= threshold:
+            candidates.append((minute, minute))
+        if value <= -threshold:
+            candidates.append((minute, -minute))
+    for index, (first, second) in enumerate(zip(values, values[1:])):
+        first_minute = float(PHASES[index])
+        span = float(PHASES[index + 1] - PHASES[index])
+        if first < threshold <= second and second != first:
+            fraction = (threshold - first) / (second - first)
+            candidates.append((first_minute + span * fraction, 1.0))
+        if first > -threshold >= second and second != first:
+            fraction = (-threshold - first) / (second - first)
+            candidates.append((first_minute + span * fraction, -1.0))
+    if not candidates:
+        # Zero is registered as the no-threshold-crossing value.  It is
+        # distinct from unavailable data, which remains None.
+        return 0.0
+    first_minute, sign = min(candidates, key=lambda value: value[0])
+    return float(math.copysign(first_minute, sign))
+
+
+def _phase_shape_crossovers(values: Sequence[float]) -> tuple[float | None, float]:
+    """Count sign changes after removing zeros and interpolate their times."""
+
+    nonzero = [
+        (float(PHASES[index]), float(value))
+        for index, value in enumerate(values)
+        if value != 0.0
+    ]
+    crossings: list[float] = []
+    for (first_minute, first), (second_minute, second) in zip(nonzero, nonzero[1:]):
+        if (first < 0.0 and second > 0.0) or (first > 0.0 and second < 0.0):
+            if second == first:
+                crossing = second_minute
+            else:
+                crossing = first_minute + (0.0 - first) * (second_minute - first_minute) / (
+                    second - first
+                )
+            crossings.append(float(crossing))
+    return (
+        float(crossings[0]) if crossings else None,
+        float(len(crossings)),
+    )
+
+
+def phase_shape_features(
+    gold_values: Sequence[float | None] | Mapping[int | str, float | None],
+    xp_values: Sequence[float | None] | Mapping[int | str, float | None],
+    available: bool | Mapping[str, bool] | Sequence[bool] | None = None,
+    *,
+    gold_available: bool | None = None,
+    xp_available: bool | None = None,
+    curve_available: bool | None = None,
+) -> dict[str, float | None]:
+    """Return deterministic signed and side-invariant phase-shape features.
+
+    Both signed curves must contain all four finite checkpoints.  Missing or
+    partial input yields only the availability flags and ``None`` shape
+    values.  An explicit availability value can disable a complete curve.
+    The first material threshold time uses a fixed 250-unit threshold.
+    """
+
+    gold = _phase_shape_values(gold_values, name="gold_values")
+    xp = _phase_shape_values(xp_values, name="xp_values")
+    complete = all(value is not None for value in (*gold, *xp))
+    is_available = _phase_shape_availability(
+        available,
+        gold_available=gold_available,
+        xp_available=xp_available,
+        curve_available=curve_available,
+        complete=complete,
+    )
+    output: dict[str, float | None] = {
+        name: None
+        for name in (*PHASE_SHAPE_SIGNED_FEATURES, *PHASE_SHAPE_INVARIANT_FEATURES)
+    }
+    output.update(
+        {
+            "forecast_curve_available": 1.0 if is_available else 0.0,
+            "forecast_curve_missing": 0.0 if is_available else 1.0,
+        }
+    )
+    if not is_available:
+        return output
+
+    for prefix, values in (("gold", gold), ("xp", xp)):
+        finite_values = [float(value) for value in values]
+        slopes = _phase_shape_slopes(finite_values)
+        early_mean = float(np.mean(finite_values[:2]))
+        late_mean = float(np.mean(finite_values[2:]))
+        late_minus_early = late_mean - early_mean
+        early_slope = slopes[0]
+        late_slope = slopes[-1]
+        first_crossover, crossover_count = _phase_shape_crossovers(finite_values)
+        for index, slope in enumerate(slopes):
+            first_phase = PHASES[index]
+            second_phase = PHASES[index + 1]
+            output[f"forecast_{prefix}_slope_{first_phase}_{second_phase}"] = float(slope)
+        output.update(
+            {
+                f"forecast_{prefix}_early_mean": early_mean,
+                f"forecast_{prefix}_late_mean": late_mean,
+                f"forecast_{prefix}_late_minus_early": late_minus_early,
+                f"forecast_{prefix}_late_minus_early_slope": late_minus_early / 10.0,
+                f"forecast_{prefix}_late_minus_early_acceleration": late_slope - early_slope,
+                f"forecast_{prefix}_signed_area": _phase_shape_signed_area(finite_values),
+                f"forecast_{prefix}_first_material_advantage_minute_signed": _phase_shape_material_minute(
+                    finite_values
+                ),
+                f"forecast_{prefix}_first_crossover_minute": first_crossover,
+                f"forecast_{prefix}_crossover_count": crossover_count,
+            }
+        )
+    return output
+
+
+def side_swap_phase_shape_features(
+    gold_values: Sequence[float | None] | Mapping[int | str, float | None],
+    xp_values: Sequence[float | None] | Mapping[int | str, float | None],
+    available: bool | Mapping[str, bool] | Sequence[bool] | None = None,
+    *,
+    gold_available: bool | None = None,
+    xp_available: bool | None = None,
+    curve_available: bool | None = None,
+) -> dict[str, float | None]:
+    """Return phase-shape features after relabeling blue and red."""
+
+    gold_normalized = _phase_shape_values(gold_values, name="gold_values")
+    xp_normalized = _phase_shape_values(xp_values, name="xp_values")
+    return phase_shape_features(
+        [None if value is None else -value for value in gold_normalized],
+        [None if value is None else -value for value in xp_normalized],
+        available,
+        gold_available=gold_available,
+        xp_available=xp_available,
+        curve_available=curve_available,
+    )
+
+
+def phase_shape_side_swap(
+    features: Mapping[str, float | None],
+) -> dict[str, float | None]:
+    """Swap a previously computed feature mapping across the two sides."""
+
+    output = dict(features)
+    for name in PHASE_SHAPE_SIGNED_FEATURES:
+        value = output.get(name)
+        if value is not None:
+            output[name] = -float(value)
+    return output
+
+
+def validate_phase_shape_side_swap(
+    original: Mapping[str, float | None],
+    swapped: Mapping[str, float | None],
+    *,
+    tolerance: float = 1e-9,
+) -> dict[str, Any]:
+    """Validate signed antisymmetry and invariant preservation."""
+
+    signed_errors: dict[str, float | None] = {}
+    invariant_errors: dict[str, float | None] = {}
+    for name in PHASE_SHAPE_SIGNED_FEATURES:
+        left = original.get(name)
+        right = swapped.get(name)
+        if left is None or right is None:
+            signed_errors[name] = None if left is None and right is None else math.inf
+        else:
+            signed_errors[name] = abs(float(left) + float(right))
+    for name in PHASE_SHAPE_INVARIANT_FEATURES:
+        left = original.get(name)
+        right = swapped.get(name)
+        if left is None or right is None:
+            invariant_errors[name] = None if left is None and right is None else math.inf
+        else:
+            try:
+                invariant_errors[name] = abs(float(left) - float(right))
+            except (TypeError, ValueError):
+                invariant_errors[name] = 0.0 if left == right else math.inf
+    finite_signed = [value for value in signed_errors.values() if value is not None]
+    finite_invariant = [value for value in invariant_errors.values() if value is not None]
+    max_signed = max(finite_signed, default=None)
+    max_invariant = max(finite_invariant, default=None)
+    return {
+        "passed": bool(
+            max_signed is not None
+            and max_invariant is not None
+            and max_signed <= tolerance
+            and max_invariant <= tolerance
+        ),
+        "max_signed_error": max_signed,
+        "max_invariant_error": max_invariant,
+        "signed_errors": signed_errors,
+        "invariant_errors": invariant_errors,
+        "definition": "signed phase fields negate and crossover fields remain unchanged",
+    }
+
+
 def _fit_one(matrix: np.ndarray, target: np.ndarray, alpha: float) -> dict[str, Any] | None:
     valid = np.isfinite(target)
     if int(valid.sum()) < 2:
@@ -1945,9 +2306,17 @@ __all__ = [
     "FINAL_METRIC_ALIASES",
     "FuturePhaseCurveError",
     "MODEL_VERSION",
+    "MATERIAL_ADVANTAGE_THRESHOLD",
     "PHASE_FEATURE_DECLARATION",
     "PHASE_FEATURE_FAMILY",
+    "PHASE_SHAPE_AVAILABILITY_FEATURES",
+    "PHASE_SHAPE_FEATURES",
+    "PHASE_SHAPE_INVARIANT_FEATURES",
+    "PHASE_SHAPE_MATERIAL_THRESHOLD",
+    "PHASE_SHAPE_SIGNED_FEATURES",
     "PHASES",
+    "INVARIANT_PHASE_SHAPE_FEATURES",
+    "SIGNED_PHASE_SHAPE_FEATURES",
     "SCHEMA_VERSION",
     "assert_pregame_feature_names",
     "bind_phase_source",
@@ -1956,11 +2325,15 @@ __all__ = [
     "evaluate_phase_curve",
     "fit_phase_curve",
     "phase_curve_measures",
+    "phase_shape_features",
+    "phase_shape_side_swap",
     "prepare_phase_frame",
     "score_phase_curve",
+    "side_swap_phase_shape_features",
     "side_swap_invariance_report",
     "side_swap_frame",
     "strict_prior_final_history",
+    "validate_phase_shape_side_swap",
     "verify_accepted_census_artifact",
     "verify_source_receipt_artifact",
 ]
