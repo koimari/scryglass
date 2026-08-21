@@ -370,6 +370,7 @@ def _validate_pre_map_offset_provenance(
     *,
     selected_game_ids: Sequence[str],
     offset_values: Mapping[str, float],
+    expected_source_receipt_sha256: str,
 ) -> dict[str, Any]:
     """Validate the closed research receipt bound to an offset override."""
 
@@ -398,6 +399,8 @@ def _validate_pre_map_offset_provenance(
         value = provenance.get(field)
         if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
             raise PooledCandidateError(f"pre-map offset provenance {field} is invalid")
+    if provenance["source_receipt_sha256"].lower() != expected_source_receipt_sha256.lower():
+        raise PooledCandidateError("pre-map offset provenance source receipt is not trusted")
     source_game_count = provenance.get("source_game_count")
     if (
         isinstance(source_game_count, bool)
@@ -421,14 +424,26 @@ def _resolve_pre_map_offsets(
     *,
     override: Mapping[str, float] | None,
     provenance: Mapping[str, Any] | None,
+    expected_source_receipt_sha256: str | None = None,
 ) -> tuple[list[float], dict[str, Any] | None]:
     """Resolve the default or an exact source-bound pre-map offset vector."""
 
     if override is None and provenance is None:
+        if expected_source_receipt_sha256 is not None:
+            raise PooledCandidateError(
+                "expected pre-map offset source receipt requires an override and provenance"
+            )
         return _team_offsets(raw_maps), None
     if override is None or provenance is None:
         raise PooledCandidateError(
             "pre-map offset override and provenance must be supplied together"
+        )
+    if (
+        not isinstance(expected_source_receipt_sha256, str)
+        or _SHA256_RE.fullmatch(expected_source_receipt_sha256) is None
+    ):
+        raise PooledCandidateError(
+            "expected pre-map offset source receipt is required and must be a SHA-256 hash"
         )
     if not isinstance(override, Mapping):
         raise PooledCandidateError("pre-map offset override must be a mapping")
@@ -472,6 +487,7 @@ def _resolve_pre_map_offsets(
         provenance,
         selected_game_ids=selected_game_ids,
         offset_values=values,
+        expected_source_receipt_sha256=expected_source_receipt_sha256,
     )
     return [values[game_id] for game_id in selected_game_ids], validated_provenance
 
@@ -1291,6 +1307,7 @@ def build_pooled_candidate(
     allowed_game_ids: Collection[str] | None = None,
     pre_map_offset_override: Mapping[str, float] | None = None,
     pre_map_offset_provenance: Mapping[str, Any] | None = None,
+    expected_pre_map_offset_source_receipt_sha256: str | None = None,
 ) -> dict[str, Any]:
     if source_mode not in SOURCE_MODES:
         raise PooledCandidateError(f"source_mode must be one of {', '.join(SOURCE_MODES)}")
@@ -1331,6 +1348,7 @@ def build_pooled_candidate(
         raw_maps,
         override=pre_map_offset_override,
         provenance=pre_map_offset_provenance,
+        expected_source_receipt_sha256=expected_pre_map_offset_source_receipt_sha256,
     )
     observations: list[JointMapObservation] = []
     prepared: list[dict[str, Any]] = []

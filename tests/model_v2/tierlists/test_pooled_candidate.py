@@ -172,6 +172,7 @@ def test_pre_map_offset_override_requires_exact_finite_game_coverage() -> None:
         maps,
         override=values,
         provenance=provenance,
+        expected_source_receipt_sha256="a" * 64,
     )
     assert resolved == [0.12, -0.34]
     assert bound == provenance
@@ -180,18 +181,21 @@ def test_pre_map_offset_override_requires_exact_finite_game_coverage() -> None:
             maps,
             override={"g1": 0.12},
             provenance=provenance,
+            expected_source_receipt_sha256="a" * 64,
         )
     with pytest.raises(PooledCandidateError, match="extra"):
         _resolve_pre_map_offsets(
             maps,
             override={**values, "g3": 0.0},
             provenance=provenance,
+            expected_source_receipt_sha256="a" * 64,
         )
     with pytest.raises(PooledCandidateError, match="finite"):
         _resolve_pre_map_offsets(
             maps,
             override={"g1": float("nan"), "g2": -0.34},
             provenance=provenance,
+            expected_source_receipt_sha256="a" * 64,
         )
 
 
@@ -216,6 +220,7 @@ def test_pre_map_offset_override_rejects_duplicate_id_entries() -> None:
             [{"game_id": "g1"}, {"game_id": "g2"}],
             override=DuplicateMapping(),
             provenance=provenance,
+            expected_source_receipt_sha256="a" * 64,
         )
 
 
@@ -226,10 +231,52 @@ def test_pre_map_offset_override_requires_a_closed_self_bound_provenance() -> No
     changed = dict(provenance)
     changed["producer"] = "forged"
     with pytest.raises(PooledCandidateError, match="receipt hash"):
-        _resolve_pre_map_offsets(maps, override=values, provenance=changed)
+        _resolve_pre_map_offsets(
+            maps,
+            override=values,
+            provenance=changed,
+            expected_source_receipt_sha256="a" * 64,
+        )
     changed = dict(provenance)
     changed["extra"] = "closed"
     with pytest.raises(PooledCandidateError, match="closed"):
-        _resolve_pre_map_offsets(maps, override=values, provenance=changed)
+        _resolve_pre_map_offsets(
+            maps,
+            override=values,
+            provenance=changed,
+            expected_source_receipt_sha256="a" * 64,
+        )
     with pytest.raises(PooledCandidateError, match="together"):
-        _resolve_pre_map_offsets(maps, override=values, provenance=None)
+        _resolve_pre_map_offsets(
+            maps,
+            override=values,
+            provenance=None,
+            expected_source_receipt_sha256="a" * 64,
+        )
+
+
+def test_pre_map_offset_override_requires_an_independent_source_receipt() -> None:
+    maps = [{"game_id": "g1"}, {"game_id": "g2"}]
+    values = {"g1": 0.12, "g2": -0.34}
+    provenance = _offset_provenance(values, ["g1", "g2"])
+    with pytest.raises(PooledCandidateError, match="required"):
+        _resolve_pre_map_offsets(
+            maps,
+            override=values,
+            provenance=provenance,
+            expected_source_receipt_sha256=None,
+        )
+    forged = dict(provenance)
+    forged["source_receipt_sha256"] = "b" * 64
+    unsigned = dict(forged)
+    unsigned.pop("receipt_sha256")
+    forged["receipt_sha256"] = hashlib.sha256(
+        json.dumps(unsigned, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+    ).hexdigest()
+    with pytest.raises(PooledCandidateError, match="not trusted"):
+        _resolve_pre_map_offsets(
+            maps,
+            override=values,
+            provenance=forged,
+            expected_source_receipt_sha256="a" * 64,
+        )
