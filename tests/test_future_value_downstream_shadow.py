@@ -5,10 +5,45 @@ from pathlib import Path
 
 from benchmarks.build_future_value_downstream_shadow import (
     SCHEMA_VERSION,
+    _component_rows,
     _effect_metrics,
     _real_draft_rows,
     _real_tier_rows,
 )
+
+
+def test_component_rows_prefers_strict_prior_calibrated_evidence() -> None:
+    payload = {
+        "folds": [
+            {
+                "component_evidence": {
+                    "rows": [
+                        {
+                            "game_id": "g1",
+                            "current_rating_logit": 1.0,
+                            "player_value_logit": 2.0,
+                            "scaling_curve_logit": 3.0,
+                            "full_model_logit": 6.0,
+                            "calibrated_current_rating_logit": 0.5,
+                            "calibrated_player_value_logit": 1.0,
+                            "calibrated_scaling_curve_logit": 1.5,
+                            "calibrated_full_model_logit": 3.0,
+                            "calibration_slope": 0.5,
+                            "support_status": "adequate",
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+    rows = _component_rows(payload, "both")
+
+    assert rows["g1"]["current_rating_logit"] == 0.5
+    assert rows["g1"]["player_value_logit"] == 1.0
+    assert rows["g1"]["scaling_curve_logit"] == 1.5
+    assert rows["g1"]["full_model_logit"] == 3.0
+    assert rows["g1"]["component_scale"] == "strict_prior_calibrated"
 
 
 def test_real_draft_rows_keep_the_five_public_components() -> None:

@@ -228,11 +228,18 @@ def _component_rows(payload: Mapping[str, Any], variant: str) -> dict[str, dict[
             needed = ("current_rating_logit", "player_value_logit", "scaling_curve_logit", "full_model_logit")
             if any(key not in raw_row for key in needed):
                 raise ShadowBuildError(f"{variant} component evidence is incomplete for {game_id}")
-            output[game_id] = {
-                key: raw_row[key]
-                for key in (*needed, "team_context_logit", "data_quality_logit", "support_status")
-                if key in raw_row
-            }
+            selected: dict[str, Any] = {}
+            for key in (*needed, "team_context_logit", "data_quality_logit"):
+                calibrated_key = f"calibrated_{key}"
+                selected[key] = raw_row.get(calibrated_key, raw_row.get(key))
+            selected["support_status"] = raw_row.get("support_status")
+            selected["calibration_slope"] = raw_row.get("calibration_slope", 1.0)
+            selected["component_scale"] = (
+                "strict_prior_calibrated"
+                if "calibrated_full_model_logit" in raw_row
+                else "raw_identity"
+            )
+            output[game_id] = selected
     if not output:
         raise ShadowBuildError(f"{variant} component evidence is empty")
     return output
