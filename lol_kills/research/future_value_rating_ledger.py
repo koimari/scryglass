@@ -865,12 +865,17 @@ def build_fold_current_rating_feature_ledger(
             str(game_id): str(series_id).strip()
             for game_id, series_id in series_by_game.items()
         }
-        if not raw_map_ids.issubset(normalized_series) or any(
-            not normalized_series[game_id] for game_id in raw_map_ids
+        if not eligible_set.issubset(normalized_series) or any(
+            not normalized_series[game_id] for game_id in eligible_set
         ):
             raise CurrentRatingLedgerError("verified mixed series mapping is incomplete")
         full_series_by_id = pd.Series(
-            [normalized_series[str(game_id)] for game_id in raw_map_ids_series],
+            [
+                normalized_series.get(
+                    str(game_id), f"excluded-source-row:{game_id}"
+                )
+                for game_id in raw_map_ids_series
+            ],
             index=raw_map_ids_series,
         )
     map_frame["series_id"] = full_series_by_id.loc[

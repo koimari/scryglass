@@ -254,6 +254,9 @@ def _build_inner_fold_artifacts(
     fold_number: int,
     inner_fold: Mapping[str, Any],
     output_root: Path,
+    series_by_game: Mapping[str, str] | None = None,
+    series_partition_source: str = "conservative_series_superset",
+    series_partition_receipt_file_sha256: str | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     """Build and bind durable producer artifacts for one inner fold."""
 
@@ -283,6 +286,9 @@ def _build_inner_fold_artifacts(
         validation_game_ids=validation_ids,
         fit_window_end=fit_window_end,
         destination=current_root,
+        series_by_game=series_by_game,
+        series_partition_source=series_partition_source,
+        series_partition_receipt_file_sha256=series_partition_receipt_file_sha256,
     )
     validate_fold_current_rating_feature_ledger(
         current,
@@ -643,6 +649,25 @@ def build_bundle(
             fold_number=fold_number,
             inner_fold=inner_fold,
             output_root=nested_root,
+            series_by_game=(
+                dict(
+                    zip(
+                        identity["game_id"].astype(str),
+                        identity["series_id"].astype(str),
+                    )
+                )
+                if crosswalk_path is not None
+                else None
+            ),
+            series_partition_source=str(
+                model_frame.attrs.get("series_cluster_source")
+                or "conservative_series_superset"
+            ),
+            series_partition_receipt_file_sha256=(
+                str(crosswalk_receipt_file_sha256)
+                if crosswalk_path is not None
+                else None
+            ),
         )
         for variant in variants:
             variants[variant]["inner_folds"][str(fold_number)] = inner_records[variant]
