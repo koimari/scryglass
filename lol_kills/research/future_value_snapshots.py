@@ -220,6 +220,14 @@ def authorize_final_fit(
 
     if model_receipt.get("schema_version") != MODEL_FIT_SCHEMA_VERSION:
         blockers.add("final_fit_receipt_schema_invalid")
+    if model_receipt.get("status") != "final_fit_authorized":
+        blockers.add("final_fit_status_not_authorized")
+    declared_blockers = model_receipt.get("blockers")
+    if declared_blockers is not None:
+        if not isinstance(declared_blockers, (list, tuple)):
+            blockers.add("final_fit_blocker_list_invalid")
+        else:
+            blockers.update(str(value) for value in declared_blockers)
     variant = str(model_receipt.get("variant") or "")
     if variant not in {RatingVariant.FUTURE_PLAYER_FORM.value, RatingVariant.BOTH.value}:
         blockers.add("final_fit_variant_not_future_player_form")

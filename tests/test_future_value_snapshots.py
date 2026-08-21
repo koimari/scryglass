@@ -147,6 +147,7 @@ def test_final_fit_gate_rejects_fold_receipt_without_current_ledger() -> None:
     source = _source_receipt(["g1", "g2"])
     model = {
         "schema_version": "scryglass:future-value-model-fit:v1",
+        "status": "research_only_blocked",
         "variant": "future_player_form",
         "fit_game_ids": ["g1"],
         "fit_window_end": "2025-01-01T00:00:00Z",
@@ -197,6 +198,7 @@ def test_team_value_requires_exact_five_players_and_preserves_champion_split() -
         atom_model=_Atoms(),
         receipt=lambda: {
             "schema_version": "scryglass:future-value-model-fit:v1",
+            "status": "final_fit_authorized",
             "variant": "future_player_form",
             "fit_game_ids": [f"g{i}" for i in range(1, 7)],
             "fit_window_end": "2025-01-06T00:00:00Z",
