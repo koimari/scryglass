@@ -101,6 +101,43 @@ def _schedule_fixture() -> tuple[
     )
 
 
+def _stable_fixture() -> tuple[
+    list[dict[str, object]],
+    list[dict[str, object]],
+    dict[str, object],
+    dict[str, object],
+    dict[str, bytes],
+]:
+    oe = [
+        {
+            "gameid": "oe-stable-1",
+            "date": "2026-08-20T12:00:00Z",
+            "teams": ["Alpha Old", "Beta"],
+            "team_keys": ["oe-alpha", "oe-beta"],
+        },
+        {
+            "gameid": "oe-stable-2",
+            "date": "2026-08-21T12:00:00Z",
+            "teams": ["Alpha Rebrand", "Beta"],
+            "team_keys": ["oe-alpha", "oe-beta"],
+        },
+        {
+            "gameid": "oe-stable-3",
+            "date": "2026-08-22T12:00:00Z",
+            "teams": ["Alpha Old", "Beta"],
+            "team_keys": ["oe-alpha", "oe-beta"],
+        },
+    ]
+    scoreboard = [
+        {"GameId": "lp-stable-1", "DateTime UTC": "2026-08-20 12:00:30", "Team1": "Alpha Prime", "Team2": "Beta"},
+        {"GameId": "lp-stable-2", "DateTime UTC": "2026-08-21 12:00:30", "Team1": "Alpha Prime", "Team2": "Beta"},
+        {"GameId": "lp-stable-3", "DateTime UTC": "2026-08-22 12:00:30", "Team1": "Alpha Prime", "Team2": "Beta"},
+    ]
+    oe_record, oe_raw = _record("oe", oe)
+    scoreboard_record, scoreboard_raw = _record("scoreboardgames", scoreboard)
+    return oe, scoreboard, oe_record, scoreboard_record, {"oe": oe_raw, "scoreboardgames": scoreboard_raw}
+
+
 def test_repeated_timestamp_evidence_is_accepted_and_singletons_stay_review_only() -> None:
     result = _derive()
 
@@ -177,6 +214,108 @@ def test_hash_mutations_fail_closed() -> None:
 def test_single_evidence_threshold_is_rejected() -> None:
     with pytest.raises(AliasDerivationError, match="at least two"):
         _derive(minimum_repeated_evidence=1)
+
+
+def test_stable_oe_team_keys_accept_display_rebrands_and_bind_digest(tmp_path: Path) -> None:
+    oe, scoreboard, oe_record, scoreboard_record, raw = _stable_fixture()
+    result = derive_team_alias_mapping(
+        oe,
+        scoreboard,
+        oe_source_record=oe_record,
+        scoreboard_source_record=scoreboard_record,
+        raw_source_bytes=raw,
+        captured_at="2026-08-15T00:00:00Z",
+    )
+    alpha = next(row for row in result["mapping"] if row["oe_team_key"] == "oe-alpha")
+    assert alpha["allowed_source_names"] == ["Alpha Old", "Alpha Rebrand"]
+    assert alpha["stable_oe_team_keys"] == ["oe-alpha"]
+    binding = result["input_bindings"]["oe"]["stable_team_key_binding"]
+    assert binding["row_count"] == len(oe)
+    assert result["stable_oe_team_key_binding"] == binding
+    assert result["coverage"]["accepted_stable_team_key_coverage"] == 1.0
+    verify_alias_mapping(result)
+
+    artifact = tmp_path / "stable-aliases.json"
+    artifact.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+    loaded = load_verified_alias_mapping(
+        artifact,
+        expected_oe_payload_sha256=result["input_bindings"]["oe"]["payload_sha256"],
+        expected_scoreboard_payload_sha256=result["input_bindings"]["scoreboardgames"]["payload_sha256"],
+        expected_stable_team_key_rows_sha256=binding["rows_sha256"],
+    )
+    assert loaded["source_to_allowed_targets"]["ScoreboardGames"]["oe-alpha"] == ["Alpha Prime"]
+    with pytest.raises(AliasDerivationError, match="stable OE team-key identity"):
+        load_verified_alias_mapping(
+            artifact,
+            expected_oe_payload_sha256=result["input_bindings"]["oe"]["payload_sha256"],
+            expected_scoreboard_payload_sha256=result["input_bindings"]["scoreboardgames"]["payload_sha256"],
+            expected_stable_team_key_rows_sha256="f" * 64,
+        )
+
+
+def test_display_name_spanning_stable_ids_is_rejected() -> None:
+    oe, scoreboard, oe_record, scoreboard_record, raw = _stable_fixture()
+    oe[0]["teams"] = ["Alpha Old", "Beta"]
+    oe[1]["teams"] = ["Alpha Old", "Beta"]
+    oe[1]["team_keys"] = ["oe-alpha-2", "oe-beta"]
+    oe[2]["teams"] = ["Alpha Old", "Beta"]
+    oe_record, oe_raw = _record("oe", oe)
+    result = derive_team_alias_mapping(
+        oe,
+        scoreboard,
+        oe_source_record=oe_record,
+        scoreboard_source_record=scoreboard_record,
+        raw_source_bytes={"oe": oe_raw, "scoreboardgames": raw["scoreboardgames"]},
+        captured_at="2026-08-15T00:00:00Z",
+    )
+    assert any(item["kind"] == "oe_display_name_stable_key_conflict" for item in result["issues"])
+    assert not any(row["oe_team"] == "Alpha Old" for row in result["mapping"])
+    assert result["coverage"]["stable_display_name_conflict_count"] == 1
+
+
+def test_multiple_stable_ids_converging_on_one_target_are_blocked() -> None:
+    oe, scoreboard, oe_record, scoreboard_record, raw = _stable_fixture()
+    oe[0]["teams"] = ["Alpha First", "Beta"]
+    oe[0]["team_keys"] = ["oe-alpha-one", "oe-beta"]
+    oe[1]["team_keys"] = ["oe-alpha-two", "oe-beta"]
+    oe[2]["team_keys"] = ["oe-alpha-two", "oe-beta"]
+    oe_record, oe_raw = _record("oe", oe)
+    result = derive_team_alias_mapping(
+        oe,
+        scoreboard,
+        oe_source_record=oe_record,
+        scoreboard_source_record=scoreboard_record,
+        raw_source_bytes={"oe": oe_raw, "scoreboardgames": raw["scoreboardgames"]},
+        captured_at="2026-08-15T00:00:00Z",
+    )
+    assert any(item["kind"] == "target_alias_conflict" for item in result["conflicts"])
+    assert not any(row["leaguepedia_team"] == "Alpha Prime" for row in result["mapping"])
+
+
+def test_partial_or_misaligned_stable_team_keys_fail_closed() -> None:
+    oe, scoreboard, oe_record, scoreboard_record, raw = _stable_fixture()
+    oe[1].pop("team_keys")
+    oe_record, oe_raw = _record("oe", oe)
+    with pytest.raises(AliasDerivationError, match="present for every row"):
+        derive_team_alias_mapping(
+            oe,
+            scoreboard,
+            oe_source_record=oe_record,
+            scoreboard_source_record=scoreboard_record,
+            raw_source_bytes={"oe": oe_raw, "scoreboardgames": raw["scoreboardgames"]},
+        )
+
+    oe, scoreboard, oe_record, scoreboard_record, raw = _stable_fixture()
+    oe[0]["team_keys"] = ["oe-alpha"]
+    oe_record, oe_raw = _record("oe", oe)
+    with pytest.raises(AliasDerivationError, match="pair exactly"):
+        derive_team_alias_mapping(
+            oe,
+            scoreboard,
+            oe_source_record=oe_record,
+            scoreboard_source_record=scoreboard_record,
+            raw_source_bytes={"oe": oe_raw, "scoreboardgames": raw["scoreboardgames"]},
+        )
 
 
 def test_unique_game_prefix_bridges_scoreboard_to_schedule_and_is_transitive(tmp_path: Path) -> None:

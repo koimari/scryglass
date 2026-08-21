@@ -150,6 +150,102 @@ def _team_pair(row: Mapping[str, Any], *, label: str, scoreboard: bool) -> tuple
     return values
 
 
+def _stable_team_keys(
+    row: Mapping[str, Any],
+    *,
+    label: str,
+    teams: tuple[str, str],
+) -> tuple[str, str] | None:
+    """Read exact stable OE IDs paired with the two display names."""
+
+    if "team_keys" not in row or row.get("team_keys") is None:
+        return None
+    raw_values = row.get("team_keys")
+    if (
+        isinstance(raw_values, (str, bytes, bytearray))
+        or not isinstance(raw_values, Sequence)
+        or len(raw_values) != len(teams)
+    ):
+        raise AliasDerivationError(f"{label}.team_keys must pair exactly with teams")
+    values = tuple(_text(value) for value in raw_values)
+    if any(not value for value in values) or len(set(values)) != len(values):
+        raise AliasDerivationError(f"{label}.team_keys must contain two distinct non-empty IDs")
+    return values[0], values[1]
+
+
+def _stable_team_key_binding(
+    oe_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    """Build a digest over exact per-game OE team IDs when supplied."""
+
+    has_team_keys = ["team_keys" in row and row.get("team_keys") is not None for row in oe_rows]
+    if not any(has_team_keys):
+        return None
+    if not all(has_team_keys):
+        raise AliasDerivationError("OE team_keys must be present for every row when supplied")
+    rows: list[dict[str, Any]] = []
+    seen_game_ids: set[str] = set()
+    for index, raw_row in enumerate(oe_rows):
+        row = dict(raw_row)
+        game_id = _game_id(row, label=f"oe[{index}]")
+        if game_id in seen_game_ids:
+            raise AliasDerivationError(f"duplicate OE game ID in team-key binding: {game_id}")
+        teams = _team_pair(row, label=f"oe[{index}]", scoreboard=False)
+        team_keys = _stable_team_keys(row, label=f"oe[{index}]", teams=teams)
+        if team_keys is None:
+            raise AliasDerivationError(f"oe[{index}].team_keys is missing")
+        seen_game_ids.add(game_id)
+        rows.append({"game_id": game_id, "teams": list(teams), "team_keys": list(team_keys)})
+    rows.sort(key=lambda item: item["game_id"])
+    canonical = _canonical_json_bytes(rows)
+    return {
+        "field": "team_keys",
+        "rows": rows,
+        "row_count": len(rows),
+        "rows_sha256": _sha256(canonical),
+        "stable_oe_identity_sha256": _sha256(canonical),
+    }
+
+
+def _verify_stable_team_key_binding(binding: Mapping[str, Any]) -> str:
+    if _text(binding.get("field")) != "team_keys":
+        raise AliasDerivationError("stable OE team-key field is invalid")
+    rows = binding.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise AliasDerivationError("stable OE team-key rows are missing")
+    if binding.get("row_count") != len(rows):
+        raise AliasDerivationError("stable OE team-key row count changed")
+    previous_game_id = ""
+    seen_game_ids: set[str] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise AliasDerivationError("stable OE team-key row is invalid")
+        game_id = _text(row.get("game_id"))
+        teams = row.get("teams")
+        team_keys = row.get("team_keys")
+        if (
+            not game_id
+            or game_id in seen_game_ids
+            or game_id < previous_game_id
+            or not isinstance(teams, list)
+            or len(teams) != 2
+            or not all(isinstance(value, str) and value.strip() for value in teams)
+            or not isinstance(team_keys, list)
+            or len(team_keys) != 2
+            or not all(isinstance(value, str) and value.strip() for value in team_keys)
+            or len(set(map(str, team_keys))) != 2
+        ):
+            raise AliasDerivationError("stable OE team-key row is not an exact pair")
+        seen_game_ids.add(game_id)
+        previous_game_id = game_id
+    digest = _sha256(_canonical_json_bytes(rows))
+    if _text(binding.get("rows_sha256")).lower() != digest:
+        raise AliasDerivationError("stable OE team-key digest changed")
+    if _text(binding.get("stable_oe_identity_sha256")).lower() != digest:
+        raise AliasDerivationError("stable OE identity digest changed")
+    return digest
+
+
 def _infer_pairs(
     source_names: tuple[str, str],
     target_names: tuple[str, str],
@@ -252,6 +348,13 @@ def _evidence_summary(
     ]
     source_names = [str(item["oe_team"]) for item in evidence]
     target_names = [str(item["leaguepedia_team"]) for item in evidence]
+    stable_team_keys = sorted(
+        {
+            str(item["oe_stable_team_key"])
+            for item in evidence
+            if item.get("oe_stable_team_key") is not None
+        }
+    )
 
     def canonical_display(values: Sequence[str]) -> str:
         counts = Counter(values)
@@ -281,6 +384,8 @@ def _evidence_summary(
     }
     if match_ids:
         result["matchschedule_match_ids"] = match_ids
+    if stable_team_keys:
+        result["stable_oe_team_keys"] = stable_team_keys
     if reason:
         result["reason"] = reason
     return result
@@ -387,6 +492,7 @@ def derive_team_alias_mapping(
         if any(not isinstance(row, Mapping) for row in rows):
             raise AliasDerivationError(f"{label} rows contain a non-object")
 
+    stable_team_key_binding = _stable_team_key_binding(oe_rows)
     input_records = {
         "oe": _verify_input_record("oe", oe_rows, oe_source_record, raw_source_bytes),
         "scoreboardgames": _verify_input_record(
@@ -397,11 +503,17 @@ def derive_team_alias_mapping(
         input_records["matchschedule"] = _verify_input_record(
             "matchschedule", schedule_rows, schedule_source_record, raw_source_bytes
         )
+    if stable_team_key_binding is not None:
+        input_records["oe"]["stable_team_key_binding"] = stable_team_key_binding
     observed_at = _parse_time(captured_at, field="captured_at").isoformat().replace("+00:00", "Z") if captured_at else datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     issues: list[dict[str, Any]] = []
     oe_prepared: list[dict[str, Any]] = []
     seen_oe_ids: set[str] = set()
+    stable_keys_by_game_id = {
+        str(item["game_id"]): tuple(str(value) for value in item["team_keys"])
+        for item in (stable_team_key_binding["rows"] if stable_team_key_binding else ())
+    }
     for index, raw_row in enumerate(oe_rows):
         row = dict(raw_row)
         try:
@@ -410,10 +522,43 @@ def derive_team_alias_mapping(
                 raise AliasDerivationError(f"duplicate OE game ID: {game_id}")
             stamp = _timestamp(row, label=f"oe[{index}]")
             teams = _team_pair(row, label=f"oe[{index}]", scoreboard=False)
+            stable_keys = stable_keys_by_game_id.get(game_id)
             seen_oe_ids.add(game_id)
-            oe_prepared.append({"row": row, "index": index, "game_id": game_id, "stamp": stamp, "teams": teams})
+            oe_prepared.append({
+                "row": row,
+                "index": index,
+                "game_id": game_id,
+                "stamp": stamp,
+                "teams": teams,
+                "stable_team_keys": stable_keys,
+            })
         except AliasDerivationError as error:
             issues.append({"kind": "invalid_oe_row", "index": index, "error": str(error)})
+
+    stable_display_to_keys: dict[str, set[str]] = {}
+    if stable_team_key_binding is not None:
+        for oe in oe_prepared:
+            stable_keys = oe.get("stable_team_keys")
+            if not isinstance(stable_keys, tuple) or len(stable_keys) != 2:
+                issues.append({
+                    "kind": "invalid_oe_team_key_row",
+                    "oe_game_id": oe["game_id"],
+                    "error": "stable team-key binding is incomplete",
+                })
+                continue
+            for display_name, stable_key in zip(oe["teams"], stable_keys):
+                stable_display_to_keys.setdefault(_name_key(display_name), set()).add(stable_key)
+    stable_display_conflicts = {
+        display_key: sorted(stable_keys)
+        for display_key, stable_keys in stable_display_to_keys.items()
+        if len(stable_keys) > 1
+    }
+    for display_key, stable_keys in sorted(stable_display_conflicts.items()):
+        issues.append({
+            "kind": "oe_display_name_stable_key_conflict",
+            "oe_team_name_key": display_key,
+            "stable_team_keys": stable_keys,
+        })
 
     scoreboard_prepared: list[dict[str, Any]] = []
     seen_scoreboard_ids: set[str] = set()
@@ -453,6 +598,24 @@ def derive_team_alias_mapping(
     pair_ambiguous_rows = 0
 
     for oe in oe_prepared:
+        if stable_team_key_binding is not None:
+            conflicting_names = [
+                _name_key(name)
+                for name in oe["teams"]
+                if _name_key(name) in stable_display_conflicts
+            ]
+            if conflicting_names:
+                issues.append({
+                    "kind": "oe_display_name_stable_key_conflict_row",
+                    "oe_game_id": oe["game_id"],
+                    "oe_team_name_keys": sorted(set(conflicting_names)),
+                    "stable_team_keys": sorted({
+                        stable_key
+                        for display_key in set(conflicting_names)
+                        for stable_key in stable_display_conflicts[display_key]
+                    }),
+                })
+                continue
         candidates = [
             scoreboard
             for scoreboard in scoreboard_prepared
@@ -498,8 +661,13 @@ def derive_team_alias_mapping(
         used_scoreboard_ids.add(scoreboard["game_id"])
         matched_rows += 1
         delta = abs((scoreboard["stamp"] - oe["stamp"]).total_seconds())
+        stable_by_name = {
+            _name_key(name): stable_key
+            for name, stable_key in zip(oe["teams"], oe.get("stable_team_keys") or ())
+        }
         for source_name, target_name in pairs:
-            source_key = _name_key(source_name)
+            stable_key = stable_by_name.get(_name_key(source_name))
+            source_key = stable_key if stable_team_key_binding is not None else _name_key(source_name)
             target_key = _name_key(target_name)
             evidence = {
                 "oe_team": source_name,
@@ -509,6 +677,8 @@ def derive_team_alias_mapping(
                 "timestamp_delta_seconds": delta,
                 "outcome_used": False,
             }
+            if stable_key is not None:
+                evidence["oe_stable_team_key"] = stable_key
             candidate_evidence.setdefault((source_key, target_key), []).append(evidence)
 
     scoreboard_schedule_evidence: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -612,6 +782,8 @@ def derive_team_alias_mapping(
                     "timestamp_delta_seconds": source_evidence["timestamp_delta_seconds"],
                     "outcome_used": False,
                 }
+                if source_evidence.get("oe_stable_team_key") is not None:
+                    transitive_evidence["oe_stable_team_key"] = source_evidence["oe_stable_team_key"]
                 oe_schedule_evidence.setdefault((source_key, schedule_key), []).append(transitive_evidence)
 
     accepted, review_only, conflicts = _finalize_evidence(
@@ -640,6 +812,23 @@ def derive_team_alias_mapping(
     if not accepted:
         status = "blocked_no_safe_mapping"
     source_names = sorted({_name_key(name) for row in oe_prepared for name in row["teams"]})
+    stable_source_keys = sorted(
+        {
+            stable_key
+            for row in oe_prepared
+            for stable_key in (row.get("stable_team_keys") or ())
+        }
+    )
+    accepted_display_names = {
+        _name_key(name)
+        for item in accepted
+        for name in item.get("allowed_source_names", ())
+    }
+    accepted_stable_keys = {
+        item["oe_team_key"]
+        for item in accepted
+        if item["oe_team_key"] in set(stable_source_keys)
+    }
     output: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "captured_at": observed_at,
@@ -662,6 +851,12 @@ def derive_team_alias_mapping(
             "no_shared_anchor_policy": "block_without_row_order_or_outcome_inference",
             "one_to_one_policy": "reject_source_or_target_conflicts",
             "singleton_policy": "review_only_and_never_accepted",
+            "oe_team_key_field": "team_keys" if stable_team_key_binding is not None else None,
+            "oe_team_key_rule": (
+                "exact_nonempty_per_game_pair; display rebrands share one stable key"
+                if stable_team_key_binding is not None
+                else "not_supplied; normalized_display_name_is_identity"
+            ),
             "schedule_bridge": {
                 "enabled": schedule_rows is not None,
                 "game_id_prefix_to_match_id": "exact_unique_prefix",
@@ -683,6 +878,7 @@ def derive_team_alias_mapping(
         "review_only": all_review_only,
         "conflicts": all_conflicts,
         "issues": issues,
+        "stable_oe_team_key_binding": stable_team_key_binding,
         "coverage": {
             "oe_rows": len(oe_rows),
             "valid_oe_rows": len(oe_prepared),
@@ -699,12 +895,20 @@ def derive_team_alias_mapping(
             "matchschedule_prefix_unmatched_rows": schedule_unmatched_rows,
             "matchschedule_team_pair_ambiguous_rows": schedule_pair_ambiguous_rows,
             "oe_team_name_count": len(source_names),
+            "stable_oe_team_key_enabled": stable_team_key_binding is not None,
+            "stable_oe_team_key_count": len(stable_source_keys),
+            "stable_display_name_conflict_count": len(stable_display_conflicts),
             "accepted_alias_count": len(accepted),
             "scoreboard_schedule_alias_count": len(schedule_accepted),
             "oe_matchschedule_alias_count": len(transitive_accepted),
             "review_alias_count": len(all_review_only),
             "conflict_count": len(all_conflicts),
-            "accepted_name_coverage": len({item["oe_team_key"] for item in accepted}) / len(source_names) if source_names else 0.0,
+            "accepted_name_coverage": len(accepted_display_names) / len(source_names) if source_names else 0.0,
+            "accepted_stable_team_key_coverage": (
+                len(accepted_stable_keys) / len(stable_source_keys)
+                if stable_source_keys
+                else None
+            ),
         },
         "audit": {
             "unmatched_oe_game_ids": sorted(issue["oe_game_id"] for issue in issues if issue.get("kind") == "timestamp_unmatched"),
@@ -725,6 +929,7 @@ def derive_team_alias_mapping(
                 for issue in issues
                 if issue.get("kind") == "matchschedule_team_pair_ambiguous"
             ),
+            "stable_display_name_conflict_keys": sorted(stable_display_conflicts),
             "outcome_used": False,
         },
     }
@@ -770,6 +975,22 @@ def verify_alias_mapping(payload: Mapping[str, Any]) -> None:
             value = record.get(field)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise AliasDerivationError(f"{label} input binding {field} is invalid")
+    oe_stable_binding = bindings["oe"].get("stable_team_key_binding")
+    top_stable_binding = payload.get("stable_oe_team_key_binding")
+    if oe_stable_binding is None:
+        if top_stable_binding is not None:
+            raise AliasDerivationError("stable OE team-key binding is duplicated inconsistently")
+    else:
+        if not isinstance(oe_stable_binding, Mapping):
+            raise AliasDerivationError("stable OE team-key binding is invalid")
+        _verify_stable_team_key_binding(oe_stable_binding)
+        if not isinstance(top_stable_binding, Mapping) or dict(top_stable_binding) != dict(oe_stable_binding):
+            raise AliasDerivationError("stable OE team-key binding is not consistently recorded")
+    stable_ids = {
+        str(value)
+        for row in (oe_stable_binding.get("rows", ()) if isinstance(oe_stable_binding, Mapping) else ())
+        for value in (row.get("team_keys", ()) if isinstance(row, Mapping) else ())
+    }
 
     section_systems = {
         "mapping": "ScoreboardGames",
@@ -825,6 +1046,14 @@ def verify_alias_mapping(payload: Mapping[str, Any]) -> None:
                 raise AliasDerivationError(f"{section} contains invalid MatchSchedule evidence")
             if len(section_source_targets[source_key]) > 1 or len(section_target_sources[target_key]) > 1:
                 raise AliasDerivationError(f"{section} violates one-to-one alias consistency")
+            if section in {"mapping", "oe_to_matchschedule_mapping"} and oe_stable_binding is not None:
+                stable_item_keys = item.get("stable_oe_team_keys")
+                if (
+                    not isinstance(stable_item_keys, list)
+                    or stable_item_keys != [source_key]
+                    or source_key not in stable_ids
+                ):
+                    raise AliasDerivationError(f"{section} stable OE team-key binding is incomplete")
             expected_aliases.add((target_system, source_key, target_key))
 
     aliases = payload.get("canonical_aliases")
@@ -883,12 +1112,14 @@ def load_verified_alias_mapping(
     expected_oe_payload_sha256: str | None = None,
     expected_scoreboard_payload_sha256: str | None = None,
     expected_matchschedule_payload_sha256: str | None = None,
+    expected_stable_team_key_rows_sha256: str | None = None,
     allow_review_only: bool = False,
 ) -> dict[str, Any]:
     """Load an alias artifact against caller-supplied source payload digests.
 
     The expected OE and ScoreboardGames payload hashes are required.  A
-    MatchSchedule hash is required when the artifact contains that binding.
+    MatchSchedule and stable OE team-key hashes are required when the artifact
+    contains those bindings.
     The returned ``source_to_allowed_targets`` index uses normalized source
     keys and contains only accepted, repeated-evidence mappings.
     """
@@ -924,6 +1155,15 @@ def load_verified_alias_mapping(
         actual_hash = _text(bindings[label].get("payload_sha256")).lower()
         if actual_hash != str(expected_hash).lower():
             raise AliasDerivationError(f"{label} source payload identity changed")
+    stable_binding = bindings["oe"].get("stable_team_key_binding")
+    if stable_binding is not None:
+        if expected_stable_team_key_rows_sha256 is None or not _HEX64.fullmatch(
+            str(expected_stable_team_key_rows_sha256).lower()
+        ):
+            raise AliasDerivationError("expected stable OE team-key digest is required")
+        actual_stable_digest = _verify_stable_team_key_binding(stable_binding)
+        if actual_stable_digest != str(expected_stable_team_key_rows_sha256).lower():
+            raise AliasDerivationError("stable OE team-key identity changed")
 
     entries = [dict(item) for item in payload["canonical_aliases"]]
     index: dict[str, dict[str, list[str]]] = {}
