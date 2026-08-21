@@ -273,14 +273,6 @@ def build_audit(
             "current_source_bound_tournament_values": False,
             "reason": "The current accepted census contains map IDs only.",
         },
-        "bootstrap": {
-            "method": "paired_exact_series_bootstrap",
-            "draws_requested": 2_000,
-            "draws_accepted": 2_000,
-            "draws_rejected": 0,
-            "seed": None,
-            "seed_status": "not_present_in_bound_artifacts",
-        },
         "blockers": sorted(set(blockers)),
         "artifacts": {
             "variant_bundle": _external_record(bundle_path),

@@ -13,6 +13,7 @@ from lol_kills.research.future_value_series_authority import (
     file_record,
     verify_series_authority_audit,
 )
+from tools.build_future_value_exact_series_subset_audit import build_audit
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,3 +133,34 @@ def test_exact_series_subset_receipt_binds_counts_and_current_source_blocker() -
     assert "external_subset_source_receipt_differs_from_current_accepted_receipt" in audit[
         "blockers"
     ]
+
+
+def test_exact_series_subset_receipt_has_no_unbound_bootstrap_claims() -> None:
+    audit = _load(EXACT_AUDIT_PATH)
+    assert "bootstrap" not in audit
+    assert audit["receipt_sha256"] == canonical_sha256(
+        {key: value for key, value in audit.items() if key != "receipt_sha256"}
+    )
+
+
+def test_exact_series_subset_builder_omits_unbound_bootstrap_claims(
+    tmp_path: Path,
+) -> None:
+    external_paths = (
+        Path(
+            "/private/tmp/scryglass-leaguepedia-series-2025-2026/"
+            "oe-leaguepedia-series-crosswalk-v5.json"
+        ),
+        Path(
+            "/private/tmp/scryglass-leaguepedia-series-2025-2026/"
+            "oe-leaguepedia-series-crosswalk-v5.receipt.json"
+        ),
+        Path(
+            "/private/tmp/scryglass-four-variant-runs/"
+            "four-variant-feature-ledger-bundle-leaguepedia-pre-eligible-audit.json"
+        ),
+    )
+    if not all(path.is_file() for path in external_paths):
+        pytest.skip("captured exact-series inputs are not available")
+    audit = build_audit(output_path=tmp_path / "exact-series-audit.json")
+    assert "bootstrap" not in audit
