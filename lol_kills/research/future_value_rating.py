@@ -2232,10 +2232,28 @@ def bind_verified_leaguepedia_series_crosswalk(
         verified_source_receipt=source_receipt,
         verified_crosswalk_receipt_file_sha256=expected_receipt_file_sha256,
     )
+    frame_ids = set(model_frame["game_id"].astype(str))
+    accepted_ids = set(map(str, source_receipt["accepted_game_ids"]))
+    eligible_ids = set(map(str, source_receipt["model_eligible_game_ids"]))
+    if not frame_ids.issubset(accepted_ids):
+        raise FutureValueSourceError(
+            "Leaguepedia crosswalk maps are outside the accepted census"
+        )
+    if frame_ids == accepted_ids:
+        validation_frame = model_frame[
+            model_frame["game_id"].astype(str).isin(eligible_ids)
+        ].copy()
+    elif frame_ids.issubset(eligible_ids):
+        validation_frame = model_frame
+    else:
+        raise FutureValueSourceError(
+            "Leaguepedia crosswalk maps mix eligible and excluded rows"
+        )
     _validate_verified_source_receipt(
         source_receipt,
-        model_frame,
-        require_full_eligible_set=False,
+        validation_frame,
+        require_full_eligible_set=set(validation_frame["game_id"].astype(str))
+        == eligible_ids,
     )
     return result
 
