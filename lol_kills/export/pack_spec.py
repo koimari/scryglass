@@ -93,6 +93,7 @@ EVIDENCE_STATE_COLS = (
 RATINGS_SNAPSHOT_COLS = (
     "team",
     "team_key",
+    "team_id",
     "mu_base_total",
     "mu_total",
     "mu_effective",
@@ -110,6 +111,7 @@ RATINGS_SNAPSHOT_COLS = (
 
 PLAYER_RATINGS_SNAPSHOT_COLS = (
     "player",
+    "player_id",
     "mu_base_total",
     "mu_total",
     "mu_effective",
@@ -119,6 +121,7 @@ PLAYER_RATINGS_SNAPSHOT_COLS = (
     "sigma",
     "n_maps",
     "last_team",
+    "team_id",
     "home_league",
     *EVIDENCE_STATE_COLS,
 )

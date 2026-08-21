@@ -902,9 +902,13 @@ def _rank_diffs(
     total_future = int(len(futures))
     assignments: dict[str, dict[str, Any]] = {}
     if not futures.empty and identity in futures.columns and future_value in futures.columns:
-        futures[identity] = futures[identity].astype(str)
+        futures[identity] = futures[identity].astype("string")
         futures[future_value] = pd.to_numeric(futures[future_value], errors="coerce")
-        finite = futures[future_value].notna() & ~futures[identity].eq("")
+        finite = (
+            futures[future_value].notna()
+            & futures[identity].notna()
+            & futures[identity].str.strip().ne("")
+        )
         if bool(finite.any()) and not futures.loc[finite, identity].duplicated().any():
             futures.loc[finite, "__future_rank"] = futures.loc[finite, future_value].rank(
                 method="min", ascending=False
@@ -931,12 +935,20 @@ def _rank_diffs(
     if value_column is None:
         return [], [f"current_{identity}_rating_value_missing"], coverage, assignments
     frame = current[[identity, value_column]].copy()
-    frame[identity] = frame[identity].astype(str)
+    frame[identity] = frame[identity].astype("string")
     frame[value_column] = pd.to_numeric(frame[value_column], errors="coerce")
-    if frame[identity].duplicated().any() or frame[value_column].isna().any():
+    frame = frame[
+        frame[identity].notna()
+        & frame[identity].str.strip().ne("")
+        & frame[value_column].notna()
+    ].copy()
+    if frame[identity].duplicated().any():
         return [], [f"current_{identity}_rating_identity_or_value_ambiguous"], coverage, assignments
     if futures.empty or identity not in futures.columns or future_value not in futures.columns:
         return [], [f"future_{identity}_snapshot_missing"], coverage, assignments
+    futures = futures[
+        futures[identity].notna() & futures[identity].str.strip().ne("")
+    ].copy()
     if futures[identity].duplicated().any():
         return [], [f"future_{identity}_snapshot_identity_or_value_ambiguous"], coverage, assignments
     finite_future = futures[future_value].notna()
@@ -966,7 +978,7 @@ def _rank_diffs(
                 "future_rank": int(row["__rank"]),
                 "rank_delta": int(current_rank[key] - row["__rank"]),
                 "current_value": float(
-                    current.loc[current[identity].astype(str).eq(key), value_column].iloc[0]
+                    frame.loc[frame[identity].eq(key), value_column].iloc[0]
                 ),
                 "future_value": float(row[future_value]),
             }

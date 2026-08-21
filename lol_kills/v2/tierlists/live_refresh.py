@@ -373,6 +373,13 @@ def _bind_rating_step_to_census(
         **step,
         "accepted_source_game_count": accepted["game_count"],
         "accepted_source_identity_sha256": accepted["source_identity_sha256"],
+        "identity_mapping": source.get(
+            "identity_mapping",
+            {
+                "status": "unavailable",
+                "source_identity_sha256": source.get("source_identity_sha256"),
+            },
+        ),
     }
 
 
@@ -747,6 +754,7 @@ def refresh_candidate(
             ],
             "source_mode": candidate["source_mode"],
             "rating_refresh_completed": rating_step["completed"],
+            "identity_mapping": rating_step.get("identity_mapping"),
         },
         "accepted_census": (
             {
@@ -757,6 +765,7 @@ def refresh_candidate(
             if accepted is not None
             else None
         ),
+        "identity_mapping": rating_step.get("identity_mapping"),
         "regional_refresh": _regional_refresh_summary(candidate),
         "patch_refresh": _patch_refresh_summary(candidate),
         "authority": {

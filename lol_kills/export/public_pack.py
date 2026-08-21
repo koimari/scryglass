@@ -81,6 +81,15 @@ from lol_kills.ratings.player_elo import (
     build_player_ratings,
     build_player_weekly_ranks,
 )
+from lol_kills.ratings.source_identity import (
+    attach_player_ids,
+    attach_player_rating_ids,
+    attach_record_ids,
+    attach_sequential_team_ids,
+    attach_team_ids,
+    attach_weekly_ids,
+    build_rating_identity_maps,
+)
 from lol_kills.research.composition_signal import (
     CompositionSignalError,
     build_composition_games,
@@ -1358,7 +1367,7 @@ def export_public_pack(
         (
             "gameid", "game_uid", "oe_gameid", "date", "year", "oe_year",
             "league", "league_source", "tournament", "result", "side",
-            "position", "teamname", "grid_series_id",
+            "position", "teamname", "grid_series_id", "teamid",
             "firstPick",
             *(f"ban{slot}" for slot in range(1, 6)),
             *(f"pick{slot}" for slot in range(1, 6)),
@@ -1380,7 +1389,7 @@ def export_public_pack(
     team_rating_frame = _filter_year_frame(team_source, years, ("year", "oe_year"))
     team_maps_for_ratings = build_maps_frame_from_team_games(team_rating_frame)
     team_profile_source = _filter_year_frame(team_source, years, ("year", "oe_year"))
-    del team_rating_frame, team_source
+    del team_rating_frame
 
     player_path = warehouse / "oe_player_games.parquet"
     player_available = pq.ParquetFile(player_path).schema_arrow.names
@@ -1404,7 +1413,7 @@ def export_public_pack(
         identity_columns = _present(
             (
                 "gameid", "game_uid", "oe_gameid", "year", "oe_year",
-                "playername", "side", "position",
+                "playername", "side", "position", "playerid", "teamid",
             ),
             player_available,
         )
@@ -1545,7 +1554,7 @@ def export_public_pack(
             "gameid", "game_uid", "oe_gameid", "year", "oe_year", "league",
             "league_source", "competition_scope", "event_kind", "is_international",
             "is_interregional", "competition_tier", "date", "position", "side",
-            "playername", "teamname", "result", "tournament",
+            "playername", "teamname", "playerid", "teamid", "result", "tournament",
         ),
         player_available,
     )
@@ -1619,7 +1628,7 @@ def export_public_pack(
     player_rating_columns = _present(
         (
             "gameid", "game_uid", "date", "year", "oe_year", "league", "result",
-            "side", "position", "teamname", "playername",
+            "side", "position", "teamname", "playername", "playerid", "teamid",
             # The global BT performance anchor is built from measured
             # contribution, so the rating input must carry it. Without these
             # columns the anchor reads all-NaN, anchors zero players, and the
@@ -1651,6 +1660,24 @@ def export_public_pack(
     )
     if player_maps_for_ratings.empty:
         raise RuntimeError("public pack rating source has no complete player maps")
+    team_identity_source = team_source
+    if "game_uid" in team_identity_source.columns:
+        team_identity_source = team_identity_source[
+            _normalized_game_uid(team_identity_source).astype(str).isin(source_game_ids)
+        ].copy()
+    identity_maps = build_rating_identity_maps(
+        player_rating_input,
+        team_identity_source,
+        source_identity_sha256=rating_source_identity,
+        source_game_count=len(rating_game_ids),
+    )
+    team_records_payload = attach_record_ids(
+        team_records_payload, identity_maps, kind="team"
+    )
+    player_records_payload = attach_record_ids(
+        player_records_payload, identity_maps, kind="player"
+    )
+    del team_identity_source, team_source
     team_rating_cfg = DualEloConfig(
         momentum_window_games=momentum_window_games,
         momentum_scale=momentum_scale,
@@ -1674,6 +1701,24 @@ def export_public_pack(
         output_dir=features_root,
         player_records=player_records_payload,
     )
+    ratings_path = features_root / "ratings.parquet"
+    if ratings_path.exists():
+        ratings = pd.read_parquet(ratings_path)
+        attach_sequential_team_ids(ratings, identity_maps).to_parquet(
+            ratings_path, index=False
+        )
+    player_ratings_path = features_root / "player_ratings.parquet"
+    if player_ratings_path.exists():
+        player_ratings = pd.read_parquet(player_ratings_path)
+        attach_player_rating_ids(
+            player_ratings, player_rating_input, identity_maps
+        ).to_parquet(player_ratings_path, index=False)
+    dual_snapshot_path = features_root / "ratings_dual_snapshot.parquet"
+    if dual_snapshot_path.exists():
+        dual_snapshot = pd.read_parquet(dual_snapshot_path)
+        attach_team_ids(dual_snapshot, identity_maps).to_parquet(
+            dual_snapshot_path, index=False
+        )
     progress("checking player performance anchor")
     player_anchor_evidence = require_player_performance_anchor(
         features_root / "player_ratings_meta.json"
@@ -1686,6 +1731,7 @@ def export_public_pack(
     if player_snapshot_path.exists():
         progress("attaching player evidence")
         player_snapshot = pd.read_parquet(player_snapshot_path)
+        player_snapshot = attach_player_ids(player_snapshot, identity_maps)
         player_snapshot = attach_player_evidence(
             player_snapshot,
             source_as_of=source_as_of,
@@ -1705,12 +1751,14 @@ def export_public_pack(
         sequential_team_snapshot,
         team_rating_cfg,
     )
+    public_ratings = attach_team_ids(public_ratings, identity_maps)
     public_ratings.to_parquet(features_root / "ratings_snapshot.parquet", index=False)
     public_ratings_meta["pack_years"] = list(years)
     public_ratings_meta["rating_window"] = "full canonical OE team-game window as this pack"
     public_ratings_meta["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
     public_ratings_meta["source_mode"] = "oe_live" if live_source else "warehouse"
     public_ratings_meta["evidence_contract"] = "2026-08-09.1"
+    public_ratings_meta["identity_mapping"] = identity_maps.coverage
     public_ratings_meta["momentum"] = momentum_manifest_metadata(
         window_games=momentum_window_games,
         scale=momentum_scale,
@@ -1739,6 +1787,9 @@ def export_public_pack(
         cache_dir=features_root,
         source_identity_sha256=rating_source_identity,
     )
+    team_weekly_ranks = attach_weekly_ids(
+        team_weekly_ranks, identity_maps, kind="team"
+    )
     public_ratings = _attach_public_team_evidence(
         public_ratings,
         source_as_of=source_as_of,
@@ -1766,6 +1817,7 @@ def export_public_pack(
         min_games=20,
         player_records=player_records_payload,
     )
+    weekly_ranks = attach_weekly_ids(weekly_ranks, identity_maps, kind="player")
     player_meta_path = features_root / "player_ratings_meta.json"
     player_model_manifest: dict[str, Any] = {}
     if player_meta_path.exists():
@@ -1774,6 +1826,7 @@ def export_public_pack(
         player_meta["source_mode"] = "oe_live" if live_source else "warehouse"
         player_meta["window_years"] = list(years)
         player_meta["evidence_contract"] = "2026-08-09.1"
+        player_meta["identity_mapping"] = identity_maps.coverage
         player_meta_path.write_text(json.dumps(player_meta, indent=2), encoding="utf-8")
         global_rating = player_meta.get("global_rating") or {}
         player_model_manifest = {
@@ -2700,6 +2753,7 @@ def export_public_pack(
             "source_game_count": len(source_game_ids),
             "source_identity_sha256": source_identity_sha256(source_game_ids),
             "source_completeness": source_completeness_audit,
+            "identity_mapping": identity_maps.coverage,
             "team_rating_rows": int(len(rating_input)),
             "player_rating_rows": int(player_rating_row_count),
             "player_model": player_model_manifest,
