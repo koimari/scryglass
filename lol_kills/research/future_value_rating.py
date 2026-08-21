@@ -530,10 +530,29 @@ def _model_eligibility(players: pd.DataFrame, teams: pd.DataFrame) -> tuple[tupl
                 or player_rows[team_identity_column].astype(str).nunique() != 2
             ):
                 current.append("player_team_identity_closure_invalid")
-            if "champion" not in player_rows.columns or player_rows["champion"].isna().any():
+            if "champion" not in player_rows.columns:
                 current.append("champion_identity_missing")
-            elif player_rows["champion"].astype(str).str.strip().replace("", pd.NA).nunique() != 10:
-                current.append("champion_identity_not_unique")
+            else:
+                champions = (
+                    player_rows["champion"]
+                    .astype("string")
+                    .str.strip()
+                    .replace("", pd.NA)
+                )
+                if champions.isna().any():
+                    current.append("champion_identity_missing")
+                else:
+                    side_keys = player_rows["side"].map(_side)
+                    per_side_unique = (
+                        pd.DataFrame(
+                            {"_side": side_keys.to_numpy(), "_champion": champions.to_numpy()}
+                        )
+                        .groupby("_side", sort=False, observed=True)["_champion"]
+                        .nunique()
+                        .reindex(SIDES, fill_value=0)
+                    )
+                    if not per_side_unique.eq(5).all():
+                        current.append("champion_identity_not_unique")
         if team_rows is not None and len(team_rows) == 2:
             sides = {_side(value) for value in team_rows["side"]}
             if sides != set(SIDES):

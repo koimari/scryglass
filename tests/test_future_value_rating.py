@@ -158,6 +158,44 @@ def test_exact_roster_identity_mismatch_is_explicit_model_exclusion() -> None:
     ]
 
 
+def test_cross_side_champion_mirror_is_model_eligible() -> None:
+    maps, players, teams, census = _frames()
+    game_mask = players["game_uid"].eq("oe-api:2")
+    blue_top = players.index[game_mask & players["side"].eq("Blue")][0]
+    red_top = players.index[game_mask & players["side"].eq("Red")][0]
+    players.loc[red_top, "champion"] = players.loc[blue_top, "champion"]
+
+    source = bind_accepted_future_value_source(
+        maps,
+        players,
+        teams,
+        census=census,
+        source_as_of="2026-08-20T11:00:00Z",
+    )
+
+    assert source.receipt["model_eligible_game_count"] == 2
+    assert "2" not in source.receipt["model_exclusions"]["by_game"]
+
+
+def test_same_side_duplicate_champion_is_model_exclusion() -> None:
+    maps, players, teams, census = _frames()
+    game_mask = players["game_uid"].eq("oe-api:2")
+    blue_rows = players.index[game_mask & players["side"].eq("Blue")]
+    players.loc[blue_rows[1], "champion"] = players.loc[blue_rows[0], "champion"]
+
+    source = bind_accepted_future_value_source(
+        maps,
+        players,
+        teams,
+        census=census,
+        source_as_of="2026-08-20T11:00:00Z",
+    )
+
+    assert source.receipt["model_exclusions"]["by_game"]["2"] == [
+        "champion_identity_not_unique"
+    ]
+
+
 def test_census_mutation_fails_closed() -> None:
     maps, players, teams, census = _frames()
     changed = copy.deepcopy(census)
