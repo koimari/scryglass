@@ -1303,6 +1303,16 @@ def _apply_verified_leaguepedia_partition(
     team_columns = _crosswalk_team_columns(maps)
     map_ids = set(partition["game_id"].astype(str))
     mapped_ids = sorted(map_ids & set(assignment_by_id))
+    mapped_mask = partition["game_id"].astype(str).isin(mapped_ids)
+    partition["_series_crosswalk_mapped"] = mapped_mask
+    partition["_series_crosswalk_assignment"] = partition["game_id"].astype(
+        str
+    ).map(
+        {
+            game_id: str(assignment_by_id[game_id]["series_id"])
+            for game_id in mapped_ids
+        }
+    )
     if mapped_ids and team_columns is None:
         raise FutureValueSourceError("Leaguepedia crosswalk team columns are missing")
     if team_columns is not None:
@@ -1568,21 +1578,52 @@ def _scope_series_cluster_audit_to_frame(
     crosswalk = attrs.get("verified_leaguepedia_series_crosswalk")
     if crosswalk is not None and not isinstance(crosswalk, Mapping):
         raise FutureValueSourceError("series crosswalk binding is invalid")
-    mapped_ids = {
-        str(value)
-        for value in (crosswalk.get("mapped_game_ids", ()) if isinstance(crosswalk, Mapping) else ())
-    }
-    mapped_in_frame = set(game_ids) & mapped_ids
     promoted = series.astype(str).str.startswith("leaguepedia:")
     proxy_series = series.loc[~promoted].astype(str)
+    mapped_column = "_series_crosswalk_mapped"
+    assignment_column = "_series_crosswalk_assignment"
+    has_internal_binding = {
+        mapped_column,
+        assignment_column,
+    }.issubset(frame.columns)
+    if str(attrs.get("series_cluster_source") or "") == LEAGUEPEDIA_CROSSWALK_SOURCE:
+        if not has_internal_binding and not isinstance(crosswalk, Mapping):
+            raise FutureValueSourceError(
+                "model series audit has no crosswalk row binding"
+            )
+    if has_internal_binding:
+        mapped_mask = frame[mapped_column]
+        if not pd.api.types.is_bool_dtype(mapped_mask.dtype) or mapped_mask.isna().any():
+            raise FutureValueSourceError("series crosswalk mapped flags are invalid")
+        assignments = frame[assignment_column].astype("string").str.strip()
+        if assignments.loc[mapped_mask].isna().any() or assignments.loc[
+            mapped_mask
+        ].eq("").any():
+            raise FutureValueSourceError("series crosswalk assignments are incomplete")
+        if assignments.loc[~mapped_mask].notna().any():
+            raise FutureValueSourceError("unmapped series rows have crosswalk assignments")
+        mapped_game_count = int(mapped_mask.sum())
+        mapped_series_count = int(assignments.loc[mapped_mask].nunique())
+    else:
+        mapped_ids = {
+            str(value)
+            for value in (
+                crosswalk.get("mapped_game_ids", ())
+                if isinstance(crosswalk, Mapping)
+                else ()
+            )
+        }
+        mapped_in_frame = set(game_ids) & mapped_ids
+        mapped_game_count = int(len(mapped_in_frame))
+        mapped_series_count = int(series.loc[promoted].nunique())
     scoped = dict(source_audit)
     scoped.update(
         {
             "scope": str(scope),
             "map_count": int(len(frame)),
-            "mapped_game_count": int(len(mapped_in_frame)),
-            "unmatched_game_count": int(len(frame) - len(mapped_in_frame)),
-            "mapped_series_count": int(series.loc[promoted].nunique()),
+            "mapped_game_count": mapped_game_count,
+            "unmatched_game_count": int(len(frame) - mapped_game_count),
+            "mapped_series_count": mapped_series_count,
             "promoted_game_count": int(promoted.sum()),
             "promoted_series_count": int(series.loc[promoted].nunique()),
             "retained_proxy_game_count": int((~promoted).sum()),
@@ -1599,7 +1640,10 @@ def _scope_series_cluster_audit_to_frame(
     )
     attrs["full_source_series_cluster_audit"] = source_audit
     attrs["series_cluster_audit"] = scoped
-    result = frame.copy(deep=False)
+    result = frame.drop(
+        columns=[mapped_column, assignment_column],
+        errors="ignore",
+    )
     result.attrs = attrs
     return result
 

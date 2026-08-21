@@ -9,6 +9,7 @@ import pytest
 from lol_kills.research.future_value_rating import (
     CURRENT_RATING_SIGNED_MAP_FEATURES,
     FutureValueSourceError,
+    LEAGUEPEDIA_CROSSWALK_SOURCE,
     SIDE_LEVEL_TO_MODEL_FEATURE,
     _side_level_column,
     _map_model_frame,
@@ -860,7 +861,7 @@ def test_series_audit_scopes_verified_model_frame_and_keeps_full_source_audit() 
             ],
         }
     )
-    frame.attrs["series_cluster_source"] = "leaguepedia_crosswalk"
+    frame.attrs["series_cluster_source"] = LEAGUEPEDIA_CROSSWALK_SOURCE
     frame.attrs["series_cluster_audit"] = {
         "source": "leaguepedia_crosswalk",
         "authoritative": False,
@@ -882,6 +883,56 @@ def test_series_audit_scopes_verified_model_frame_and_keeps_full_source_audit() 
     assert audit["promoted_game_count"] == 2
     assert audit["retained_proxy_game_count"] == 1
     assert audit["cluster_count"] == 2
+
+
+def test_series_audit_uses_row_bound_crosswalk_assignments() -> None:
+    frame = pd.DataFrame(
+        {
+            "game_id": ["g1", "g2", "g3"],
+            "series_id": [
+                "leaguepedia:series-a",
+                "proxy:league|tournament|teams",
+                "proxy:other|tournament|teams",
+            ],
+            "_series_crosswalk_mapped": [True, True, False],
+            "_series_crosswalk_assignment": ["series-a", "series-b", pd.NA],
+        }
+    )
+    frame.attrs["series_cluster_source"] = LEAGUEPEDIA_CROSSWALK_SOURCE
+    frame.attrs["series_cluster_audit"] = {
+        "source": "leaguepedia_crosswalk",
+        "authoritative": False,
+        "map_count": 7,
+        "mapped_game_count": 5,
+        "unmatched_game_count": 2,
+    }
+
+    scoped = _scope_series_cluster_audit_to_frame(frame)
+
+    audit = scoped.attrs["series_cluster_audit"]
+    assert audit["mapped_game_count"] == 2
+    assert audit["unmatched_game_count"] == 1
+    assert audit["mapped_series_count"] == 2
+    assert "_series_crosswalk_mapped" not in scoped.columns
+    assert "_series_crosswalk_assignment" not in scoped.columns
+
+
+def test_series_audit_rejects_mixed_partition_without_row_binding() -> None:
+    frame = pd.DataFrame(
+        {
+            "game_id": ["g1"],
+            "series_id": ["leaguepedia:series-a"],
+        }
+    )
+    frame.attrs["series_cluster_source"] = LEAGUEPEDIA_CROSSWALK_SOURCE
+    frame.attrs["series_cluster_audit"] = {
+        "source": "leaguepedia_crosswalk",
+        "authoritative": False,
+        "map_count": 1,
+    }
+
+    with pytest.raises(FutureValueSourceError, match="crosswalk row binding"):
+        _scope_series_cluster_audit_to_frame(frame)
 
 
 def test_sequential_current_rating_uses_bound_team_logit(monkeypatch: pytest.MonkeyPatch) -> None:
