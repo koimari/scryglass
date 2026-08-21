@@ -3660,24 +3660,253 @@ def _select_fold_regularization(
     min_cell_support: int,
     variant: RatingVariant | None = None,
     feature_ledger: pd.DataFrame | None = None,
+    inner_feature_ledger: pd.DataFrame | None = None,
     source_receipt: Mapping[str, Any] | None = None,
     fit_window_end: Any | None = None,
 ) -> dict[str, Any]:
     """Select L2 strength on one strictly earlier nested chronological fold."""
 
     if variant is not None:
-        # The outer producer ledger is valid for the outer fit only.  Reusing
-        # it in an inner selector would make the selector see future producer
-        # state.  Use the frozen value and make the missing inner-ledger gate
-        # explicit in every research receipt.
+        config = rating_variant_config(variant)
+        if inner_feature_ledger is None:
+            # The outer producer ledger is valid for the outer fit only.
+            # Reusing it in an inner selector would make the selector see
+            # future producer state.  Keep the fixed value as an explicit
+            # research blocker until a separately bound inner ledger exists.
+            return {
+                "method": "predeclared_regularization_c",
+                "candidate_grid": [float(PREDECLARED_VARIANT_REGULARIZATION_C)],
+                "selected_c": float(PREDECLARED_VARIANT_REGULARIZATION_C),
+                "inner_ledger_status": "missing",
+                "blockers": ["nested_inner_feature_ledger_missing_fixed_c_used"],
+                "outer_ledger_reuse": False,
+                "selection_scope": "predeclared_before_outer_fold",
+                "variant": config.variant.value,
+            }
+
+        outer_train_maps = map_frame[map_frame["game_id"].isin(train_game_ids)].copy()
+        outer_train_ids = tuple(sorted(str(value) for value in train_game_ids))
+        outer_model_ids = tuple(sorted(outer_train_maps["game_id"].astype(str)))
+        if outer_model_ids != outer_train_ids:
+            raise FutureValueSourceError("nested selector outer training census is incomplete")
+        inner_fold = chronological_whole_series_folds(
+            outer_train_maps,
+            n_folds=1,
+            verified_model_frame=outer_train_maps,
+        )[0]
+        inner_train_ids = tuple(str(value) for value in inner_fold["train_game_ids"])
+        inner_validation_ids = tuple(
+            str(value) for value in inner_fold["validation_game_ids"]
+        )
+        if set(inner_train_ids) & set(inner_validation_ids):
+            raise FutureValueSourceError("nested selector train and validation IDs overlap")
+        if set(inner_train_ids) | set(inner_validation_ids) != set(outer_train_ids):
+            raise FutureValueSourceError("nested selector does not cover the outer training census")
+
+        # An inner producer ledger is a separate source-bound artifact.  Its
+        # model census is exactly the outer training census.  This proves that
+        # no outer validation row, feature value, or producer state entered
+        # candidate-C selection.
+        inner_ledger = validate_rating_feature_ledger(
+            inner_feature_ledger,
+            feature_names=config.signed_map_features,
+            model_game_ids=outer_train_ids,
+            train_game_ids=inner_train_ids,
+            fit_window_end=inner_fold["validation_start"],
+            source_receipt=source_receipt,
+        )
+        if set(inner_ledger["game_id"].astype(str)) & set(
+            map_frame.loc[~map_frame["game_id"].isin(outer_train_ids), "game_id"].astype(str)
+        ):
+            raise FutureValueSourceError("nested inner feature ledger contains outer validation IDs")
+        inner_dates = pd.to_datetime(inner_ledger["date"], utc=True, errors="coerce")
+        if inner_dates.isna().any():
+            raise FutureValueSourceError("nested inner feature ledger has invalid dates")
+        inner_cutoff = _utc_timestamp(inner_fold["validation_start"], "inner validation start")
+        if not bool(inner_dates.loc[inner_ledger["game_id"].isin(inner_train_ids)].lt(inner_cutoff).all()):
+            raise FutureValueSourceError("nested inner feature ledger training rows violate cutoff")
+        if not bool(inner_dates.loc[inner_ledger["game_id"].isin(inner_validation_ids)].ge(inner_cutoff).all()):
+            raise FutureValueSourceError("nested inner feature ledger validation rows violate cutoff")
+
+        inner_form = form[form["game_id"].astype(str).isin(outer_train_ids)].copy()
+        if set(inner_form["game_id"].astype(str)) != set(outer_train_ids):
+            raise FutureValueSourceError("nested inner form does not cover the outer training census")
+        atom_model = fit_rank3_player_champion_role_atoms(
+            inner_form,
+            train_game_ids=inner_train_ids,
+            rank=rank,
+            min_cell_support=min_cell_support,
+            fit_window_end=inner_fold["validation_start"],
+        )
+        inner_design = build_future_value_design(
+            outer_train_maps,
+            inner_form,
+            atom_model,
+            verified_model_frame=outer_train_maps,
+            variant=config.variant,
+            feature_ledger=inner_ledger,
+            source_receipt=source_receipt,
+            train_game_ids=inner_train_ids,
+            fit_window_end=inner_fold["validation_start"],
+        )
+        inner_train = inner_design[inner_design["game_id"].isin(inner_train_ids)].copy()
+        inner_validation = inner_design[
+            inner_design["game_id"].isin(inner_validation_ids)
+        ].copy()
+        train_target = pd.to_numeric(inner_train["target"], errors="coerce")
+        validation_target = pd.to_numeric(inner_validation["target"], errors="coerce")
+        if (
+            len(inner_train) < 10
+            or len(inner_validation) < 10
+            or train_target.nunique() != 2
+            or validation_target.nunique() != 2
+        ):
+            raise FutureValueSourceError(
+                "nested regularization fold has insufficient two-class rows"
+            )
+        selected_features = tuple(config.feature_names)
+        imputation = _variant_imputation_values(inner_train, config)
+        matrix = _antisymmetric_design_matrix(
+            inner_train,
+            imputation,
+            feature_names=selected_features,
+        )
+        validation_matrix = _antisymmetric_design_matrix(
+            inner_validation,
+            imputation,
+            feature_names=selected_features,
+        )
+        scales = matrix.std(axis=0, ddof=0)
+        scales = np.where(np.isfinite(scales) & (scales > 1e-12), scales, 1.0)
+        candidate_scores: list[dict[str, Any]] = []
+        inner_atom_receipt = atom_model.parameter_receipt()
+        inner_feature_binding = {
+            "schema_version": RATING_FEATURE_LEDGER_SCHEMA_VERSION,
+            "source_identity_sha256": inner_ledger.attrs.get("source_identity_sha256"),
+            "source_receipt_sha256": inner_ledger.attrs.get("source_receipt_sha256"),
+            "producer_receipt_sha256": inner_ledger.attrs.get("producer_receipt_sha256"),
+            "ledger_rows_sha256": inner_ledger.attrs.get("ledger_rows_sha256"),
+            "feature_value_digest": inner_ledger.attrs.get("feature_value_digest"),
+            "feature_names": list(config.signed_map_features),
+            "game_identity_sha256": inner_ledger.attrs.get("game_identity_sha256"),
+            "fit_game_identity_sha256": inner_ledger.attrs.get("fit_game_identity_sha256"),
+            "validation_game_identity_sha256": inner_ledger.attrs.get(
+                "validation_game_identity_sha256"
+            ),
+            "fit_window_end": inner_ledger.attrs.get("fit_window_end"),
+            "fit_date_min": inner_ledger.attrs.get("fit_date_min"),
+            "fit_date_max": inner_ledger.attrs.get("fit_date_max"),
+            "validation_date_min": _utc_text(
+                inner_dates.loc[inner_ledger["game_id"].isin(inner_validation_ids)].min()
+            ),
+            "validation_date_max": _utc_text(
+                inner_dates.loc[inner_ledger["game_id"].isin(inner_validation_ids)].max()
+            ),
+            "fit_game_ids": list(inner_ledger.attrs.get("fit_game_ids", ())),
+            "validation_game_ids": list(inner_ledger.attrs.get("validation_game_ids", ())),
+            "producer_artifacts": dict(
+                inner_ledger.attrs.get("producer_receipt", {}).get(
+                    "producer_artifacts", {}
+                )
+                or {}
+            ),
+        }
+        inner_feature_binding["binding_sha256"] = hashlib.sha256(
+            _canonical_json_bytes(inner_feature_binding)
+        ).hexdigest()
+        transform_payload = {
+            "atom_parameter_sha256": inner_atom_receipt["parameter_sha256"],
+            "imputation_values": [float(value) for value in imputation],
+            "scales": [float(value) for value in scales],
+            "feature_names": list(selected_features),
+            "feature_value_digest": inner_feature_binding["feature_value_digest"],
+            "feature_ledger_binding_sha256": inner_feature_binding["binding_sha256"],
+        }
+        transform_sha256 = hashlib.sha256(
+            _canonical_json_bytes(transform_payload)
+        ).hexdigest()
+        for regularization_c in REGULARIZATION_GRID:
+            classifier, optimizer = _fit_zero_intercept_logistic(
+                matrix / scales,
+                train_target.to_numpy(dtype=int),
+                regularization_c=float(regularization_c),
+            )
+            if (
+                optimizer.get("success") is not True
+                or optimizer.get("finite_coefficients") is not True
+            ):
+                raise FutureValueSourceError(
+                    "nested regularization candidate optimizer evidence is not converged"
+                )
+            with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                probability = classifier.predict_proba(validation_matrix / scales)[:, 1]
+            if not np.isfinite(probability).all():
+                raise FutureValueSourceError("nested regularization prediction is non-finite")
+            prediction_rows = [
+                {
+                    "game_id": str(game_id),
+                    "target": int(target_value),
+                    "probability": float(probability_value),
+                }
+                for game_id, target_value, probability_value in zip(
+                    inner_validation["game_id"], validation_target, probability
+                )
+            ]
+            candidate_scores.append(
+                {
+                    "c": float(regularization_c),
+                    "log_loss": float(
+                        log_loss(validation_target.to_numpy(dtype=int), probability)
+                    ),
+                    "optimizer": optimizer,
+                    "prediction_sha256": hashlib.sha256(
+                        _canonical_json_bytes(prediction_rows)
+                    ).hexdigest(),
+                }
+            )
+        selected = min(candidate_scores, key=lambda row: (row["log_loss"], row["c"]))
         return {
-            "method": "predeclared_regularization_c",
-            "candidate_grid": [float(PREDECLARED_VARIANT_REGULARIZATION_C)],
-            "selected_c": float(PREDECLARED_VARIANT_REGULARIZATION_C),
-            "inner_ledger_status": "missing",
-            "blockers": ["nested_inner_feature_ledger_missing_fixed_c_used"],
+            "method": "nested_chronological_whole_series_log_loss",
+            "candidate_grid": [float(value) for value in REGULARIZATION_GRID],
+            "candidate_scores": candidate_scores,
+            "selected_c": float(selected["c"]),
+            "inner_ledger_status": "verified",
+            "blockers": [],
             "outer_ledger_reuse": False,
-            "selection_scope": "predeclared_before_outer_fold",
+            "selection_scope": "inner_train_and_validation_only",
+            "variant": config.variant.value,
+            "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
+            "source_identity_sha256": str(source_receipt["source_identity_sha256"]),
+            "outer_train_game_count": len(outer_train_ids),
+            "outer_train_identity_sha256": identity_sha256(outer_train_ids),
+            "outer_validation_game_count": len(
+                set(map_frame["game_id"].astype(str)) - set(outer_train_ids)
+            ),
+            "outer_validation_identity_sha256": identity_sha256(
+                tuple(sorted(set(map_frame["game_id"].astype(str)) - set(outer_train_ids)))
+            ),
+            "inner_feature_ledger_binding": inner_feature_binding,
+            "inner_feature_value_digest": inner_feature_binding["feature_value_digest"],
+            "inner_producer_receipt_sha256": inner_feature_binding[
+                "producer_receipt_sha256"
+            ],
+            "inner_transform_sha256": transform_sha256,
+            "inner_atom_parameter_sha256": inner_atom_receipt["parameter_sha256"],
+            "inner_train_game_count": len(inner_train_ids),
+            "inner_train_identity_sha256": identity_sha256(inner_train_ids),
+            "inner_validation_game_count": len(inner_validation_ids),
+            "inner_validation_identity_sha256": identity_sha256(inner_validation_ids),
+            "inner_validation_start": str(inner_fold["validation_start"]),
+            "inner_validation_end": str(inner_fold["validation_end"]),
+            "inner_overlap_audit": dict(inner_fold["overlap_audit"]),
+            "optimizer_evidence": {
+                "all_candidates_converged": all(
+                    bool(row["optimizer"].get("success"))
+                    and bool(row["optimizer"].get("finite_coefficients"))
+                    for row in candidate_scores
+                ),
+                "selected_candidate": dict(selected["optimizer"]),
+            },
         }
 
     outer_train_maps = map_frame[map_frame["game_id"].isin(train_game_ids)].copy()
@@ -4161,6 +4390,7 @@ def fit_future_value_model(
     verified_model_frame: pd.DataFrame | None = None,
     variant: RatingVariant | str | None = None,
     feature_ledger: pd.DataFrame | None = None,
+    inner_feature_ledger: pd.DataFrame | None = None,
 ) -> tuple[FutureValueFoldModel, pd.DataFrame]:
     """Fit one fold with all representation work bound to its train games."""
 
@@ -4201,6 +4431,7 @@ def fit_future_value_model(
         min_cell_support=min_cell_support,
         variant=None if variant_config is None else variant_config.variant,
         feature_ledger=feature_ledger,
+        inner_feature_ledger=inner_feature_ledger,
         source_receipt=source_receipt,
         fit_window_end=boundary if variant_config is not None else None,
     )
@@ -5332,6 +5563,29 @@ def _run_current_rating_baselines(
         method="hierarchical_bt",
         excluded_game_ids=excluded_hierarchical,
     )
+    # Keep the exclusion reason from the hierarchical research receipt.  The
+    # finite prediction count is a valid partial comparison when validation
+    # teams were unseen in the training fold.  The reason must stay visible in
+    # the method-specific evidence so downstream reports do not treat the
+    # missing rows as imputed values.
+    if isinstance(hierarchical_receipt, Mapping):
+        missing = hierarchical_receipt.get("missing")
+        if isinstance(missing, Mapping):
+            missing_blockers = missing.get("blockers")
+            if isinstance(missing_blockers, Sequence) and not isinstance(
+                missing_blockers, (str, bytes, bytearray)
+            ):
+                hierarchical_alignment["blockers"] = sorted(
+                    {str(value) for value in hierarchical_alignment["blockers"]}
+                    | {str(value) for value in missing_blockers}
+                )
+            if missing.get("unseen_model_game_ids"):
+                hierarchical_alignment["exclusion_reason"] = (
+                    "validation rows with unseen teams are excluded"
+                )
+                hierarchical_alignment["unseen_team_keys"] = list(
+                    missing.get("unseen_team_keys", [])
+                )
     if hierarchical_binding["status"] != "available":
         hierarchical_probability.loc[:] = np.nan
         hierarchical_alignment["blockers"] = sorted(
@@ -5378,10 +5632,22 @@ def evaluate_future_value(
     runtime_receipt_path: str | None = None,
     variant: RatingVariant | str | None = None,
     feature_ledger: pd.DataFrame | Mapping[Any, pd.DataFrame] | None = None,
+    inner_feature_ledger: pd.DataFrame | Mapping[Any, pd.DataFrame] | None = None,
 ) -> dict[str, Any]:
     """Run a development-only chronological whole-series evaluation."""
 
     variant_config = None if variant is None else rating_variant_config(variant)
+    if variant_config is not None and isinstance(feature_ledger, Mapping) and "outer" in feature_ledger:
+        nested_outer = feature_ledger.get("outer")
+        nested_inner = feature_ledger.get("inner")
+        if not isinstance(nested_outer, Mapping) or not isinstance(nested_inner, Mapping):
+            raise FutureValueSourceError("nested feature ledger binding is invalid")
+        if inner_feature_ledger is not None:
+            raise FutureValueSourceError(
+                "nested feature ledger inner binding was supplied twice"
+            )
+        feature_ledger = nested_outer
+        inner_feature_ledger = nested_inner
     map_frame = _map_model_frame(maps)
     verified_eligible_ids = _validate_verified_source_receipt(
         source_receipt,
@@ -5481,6 +5747,13 @@ def evaluate_future_value(
                 fold_ledger = feature_ledger.get(str(fold["fold"]))
         else:
             fold_ledger = feature_ledger
+        fold_inner_ledger: pd.DataFrame | None
+        if isinstance(inner_feature_ledger, Mapping):
+            fold_inner_ledger = inner_feature_ledger.get(fold["fold"])
+            if fold_inner_ledger is None:
+                fold_inner_ledger = inner_feature_ledger.get(str(fold["fold"]))
+        else:
+            fold_inner_ledger = inner_feature_ledger
         model, design = fit_future_value_model(
             fold_map_frame,
             fold_form,
@@ -5491,6 +5764,7 @@ def evaluate_future_value(
             verified_model_frame=fold_map_frame,
             variant=None if variant_config is None else variant_config.variant,
             feature_ledger=fold_ledger,
+            inner_feature_ledger=fold_inner_ledger,
         )
         validation = design[design["game_id"].isin(fold["validation_game_ids"])].copy()
         raw_logit = model.predict_logit(validation)
@@ -5565,6 +5839,50 @@ def evaluate_future_value(
                 current_blockers.extend(str(value) for value in binding.get("blockers", []))
         if common_ids_set != paired_ids_set:
             current_blockers.append("current_rating_row_id_parity_incomplete")
+        method_specific_current_methods: dict[str, dict[str, Any]] = {}
+        for method_name, values in (
+            ("sequential_player_elo", sequential_probability),
+            ("hierarchical_bt", hierarchical_probability),
+        ):
+            method_report = current_reports[method_name]
+            method_binding = method_report.get("source_binding", {})
+            method_mask = paired_mask & values.notna()
+            method_target = target.loc[method_mask]
+            method_values = values.loc[method_mask]
+            method_ids = sorted(
+                set(validation.loc[method_mask, "game_id"].astype(str))
+            )
+            method_blockers = {
+                str(value) for value in method_report.get("blockers", [])
+            }
+            method_blockers.update(
+                str(value) for value in method_binding.get("blockers", [])
+            )
+            method_requested_rows = int(len(paired_target))
+            method_scored_rows = int(len(method_values))
+            if (
+                method_report.get("status") == "available"
+                and method_binding.get("status") == "available"
+                and method_scored_rows == method_requested_rows
+                and not method_blockers
+            ):
+                method_status = "available"
+            elif method_scored_rows:
+                method_status = "partial"
+            else:
+                method_status = "blocked"
+            method_specific_current_methods[method_name] = {
+                "status": method_status,
+                "requested_rows": method_requested_rows,
+                "scored_rows": method_scored_rows,
+                "scored_game_ids": method_ids,
+                "missing_game_ids": sorted(set(paired_ids_set) - set(method_ids)),
+                "metrics": _classification_metrics(method_target, method_values),
+                "calibration": _calibration_metrics(method_target, method_values),
+                "source_binding_status": str(method_binding.get("status") or "unavailable"),
+                "blockers": sorted(method_blockers),
+                "exclusion_reason": method_report.get("exclusion_reason"),
+            }
         common_target = target.loc[current_mask]
         common_predictions = {
             "candidate": prediction.loc[current_mask],
@@ -5646,6 +5964,14 @@ def evaluate_future_value(
                 "scored_game_ids": list(current_ids),
             },
             "methods": current_methods,
+            "method_specific": method_specific_current_methods,
+            "common_all_method": {
+                "status": "available" if not current_blockers else "blocked",
+                "rows": int(len(common_target)),
+                "game_ids": list(current_ids),
+                "methods": current_methods,
+                "blockers": sorted(set(current_blockers)),
+            },
             "candidate_paired_methods": candidate_paired_method_reports,
             "baselines": {
                 method_name: current_reports[method_name]
@@ -5983,6 +6309,64 @@ def evaluate_future_value(
             "metrics": _classification_metrics(method_target, method_prediction),
             "calibration": _calibration_metrics(method_target, method_prediction),
         }
+    pooled_method_specific_current: dict[str, dict[str, Any]] = {}
+    for method_name in ("sequential_player_elo", "hierarchical_bt"):
+        fold_methods = [
+            report.get("method_specific", {}).get(method_name, {})
+            for report in current_fold_reports
+        ]
+        method_rows = int(
+            pooled_candidate_paired_methods.get(method_name, {}).get("rows", 0)
+        )
+        method_requested_rows = int(
+            sum(int(report.get("requested_rows", 0)) for report in fold_methods)
+        )
+        method_scored_ids = sorted(
+            {
+                str(game_id)
+                for report in fold_methods
+                for game_id in report.get("scored_game_ids", [])
+            }
+        )
+        method_blockers = sorted(
+            {
+                str(blocker)
+                for report in fold_methods
+                for blocker in report.get("blockers", [])
+            }
+        )
+        method_statuses = [str(report.get("status") or "blocked") for report in fold_methods]
+        if (
+            method_statuses
+            and all(status == "available" for status in method_statuses)
+            and method_rows == method_requested_rows
+            and not method_blockers
+        ):
+            method_status = "available"
+        elif method_rows:
+            method_status = "partial"
+        else:
+            method_status = "blocked"
+        method_payload = dict(pooled_candidate_paired_methods.get(method_name, {}))
+        method_payload.update(
+            {
+                "status": method_status,
+                "requested_rows": method_requested_rows,
+                "scored_rows": method_rows,
+                "scored_game_ids": method_scored_ids,
+                "missing_game_count": max(0, method_requested_rows - method_rows),
+                "fold_statuses": method_statuses,
+                "blockers": method_blockers,
+                "exclusion_reasons": sorted(
+                    {
+                        str(report["exclusion_reason"])
+                        for report in fold_methods
+                        if report.get("exclusion_reason")
+                    }
+                ),
+            }
+        )
+        pooled_method_specific_current[method_name] = method_payload
     pooled_current_comparison: dict[str, Any]
     if pooled_current_targets:
         pooled_current_target = pd.concat(pooled_current_targets, ignore_index=True)
@@ -6014,6 +6398,31 @@ def evaluate_future_value(
             ),
             "rows": int(len(pooled_current_target)),
             "methods": pooled_current_methods,
+            "method_specific": pooled_method_specific_current,
+            "common_all_method": {
+                "status": (
+                    "available"
+                    if current_fold_reports
+                    and all(report["status"] == "available" for report in current_fold_reports)
+                    else "blocked"
+                ),
+                "rows": int(len(pooled_current_target)),
+                "game_ids": sorted(
+                    {
+                        str(game_id)
+                        for report in current_fold_reports
+                        for game_id in report.get("common_finite_game_ids", [])
+                    }
+                ),
+                "methods": pooled_current_methods,
+                "blockers": sorted(
+                    {
+                        blocker
+                        for report in current_fold_reports
+                        for blocker in report["blockers"]
+                    }
+                ),
+            },
             "candidate_paired_methods": pooled_candidate_paired_methods,
             "blockers": sorted(
                 {
@@ -6030,6 +6439,14 @@ def evaluate_future_value(
             "valid_comparison_folds": 0,
             "rows": 0,
             "methods": {},
+            "method_specific": pooled_method_specific_current,
+            "common_all_method": {
+                "status": "blocked",
+                "rows": 0,
+                "game_ids": [],
+                "methods": {},
+                "blockers": ["current_rating_no_common_finite_rows"],
+            },
             "candidate_paired_methods": pooled_candidate_paired_methods,
             "blockers": ["current_rating_no_common_finite_rows"],
         }

@@ -22,7 +22,7 @@ import pandas as pd
 
 from lol_kills.ratings.global_player_bt import PrefixBaselineCache
 from lol_kills.research.future_value_rating import (
-    PREDECLARED_VARIANT_REGULARIZATION_C,
+    REGULARIZATION_GRID,
     CURRENT_RATING_SIGNED_MAP_FEATURES,
     FutureValueFoldModel,
     FutureValueSourceError,
@@ -163,6 +163,226 @@ def _evaluation_blockers(path: Path, source_receipt: Mapping[str, Any]) -> tuple
     return tuple(sorted({str(value) for value in blockers}))
 
 
+def _verified_nested_selection(
+    path: Path,
+    source_receipt: Mapping[str, Any],
+    *,
+    expected_file_sha256: str | None = None,
+    variant: RatingVariant = RatingVariant.FUTURE_PLAYER_FORM,
+) -> dict[str, Any]:
+    """Verify nested candidate-C evidence before a final fit consumes it.
+
+    The evidence is fold-local.  Each outer fold must carry a separately bound
+    inner feature ledger.  The final fit accepts a C only when every supplied
+    outer fold selected the same value from the declared grid and every
+    candidate fit converged.
+    """
+
+    payload = _load_json(path, "nested regularization evidence")
+    if expected_file_sha256 is None:
+        raise FinalFitError("independent nested selection file hash is required")
+    expected_file_sha256 = str(expected_file_sha256).lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_file_sha256) or _sha256_path(path) != expected_file_sha256:
+        raise FinalFitError("nested selection evidence file changed")
+    source = payload.get("source")
+    if not isinstance(source, Mapping):
+        raise FinalFitError("nested selection source binding is missing")
+    for field in (
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "source_receipt_sha256",
+    ):
+        if source.get(field) != (
+            source_receipt.get("receipt_sha256")
+            if field == "source_receipt_sha256"
+            else source_receipt.get(field)
+        ):
+            raise FinalFitError(f"nested selection source binding changed: {field}")
+    variants = payload.get("variants")
+    if isinstance(variants, Mapping):
+        variant_payload = variants.get(variant.value)
+        if not isinstance(variant_payload, Mapping):
+            raise FinalFitError("nested selection variant is missing")
+        folds = variant_payload.get("folds")
+    elif payload.get("variant") == variant.value:
+        folds = payload.get("folds")
+    else:
+        raise FinalFitError("nested selection variants are missing")
+    if not isinstance(folds, list) or not folds:
+        raise FinalFitError("nested selection fold evidence is missing")
+    selections: list[dict[str, Any]] = []
+    for fold in folds:
+        if not isinstance(fold, Mapping):
+            raise FinalFitError("nested selection fold evidence is invalid")
+        selection = fold.get("regularization_selection")
+        if not isinstance(selection, Mapping):
+            raise FinalFitError("nested selection receipt is missing from a fold")
+        if selection.get("method") != "nested_chronological_whole_series_log_loss":
+            raise FinalFitError("nested selection method is not chronological")
+        if selection.get("inner_ledger_status") != "verified":
+            raise FinalFitError("nested selection inner ledger is not verified")
+        if selection.get("blockers"):
+            raise FinalFitError("nested selection carries blockers")
+        if selection.get("variant") != variant.value:
+            raise FinalFitError("nested selection variant changed")
+        grid = tuple(float(value) for value in selection.get("candidate_grid", ()))
+        if grid != tuple(float(value) for value in REGULARIZATION_GRID):
+            raise FinalFitError("nested selection candidate grid changed")
+        selected = float(selection.get("selected_c"))
+        if not math.isfinite(selected) or selected not in grid:
+            raise FinalFitError("nested selection selected C is invalid")
+        scores = selection.get("candidate_scores")
+        if not isinstance(scores, list) or len(scores) != len(grid):
+            raise FinalFitError("nested selection candidate scores are incomplete")
+        score_cs = tuple(float(row.get("c")) for row in scores if isinstance(row, Mapping))
+        if score_cs != grid:
+            raise FinalFitError("nested selection candidate score grid changed")
+        for row in scores:
+            if not isinstance(row, Mapping):
+                raise FinalFitError("nested selection candidate score is invalid")
+            optimizer = row.get("optimizer")
+            if not isinstance(optimizer, Mapping) or optimizer.get("success") is not True:
+                raise FinalFitError("nested selection candidate optimizer did not converge")
+            if optimizer.get("finite_coefficients") is not True:
+                raise FinalFitError("nested selection candidate coefficients are non-finite")
+            if not isinstance(row.get("prediction_sha256"), str) or not re.fullmatch(
+                r"[0-9a-f]{64}", row["prediction_sha256"], re.I
+            ):
+                raise FinalFitError("nested selection prediction digest is invalid")
+        binding = selection.get("inner_feature_ledger_binding")
+        if not isinstance(binding, Mapping):
+            raise FinalFitError("nested selection inner feature ledger binding is missing")
+        for field, expected in (
+            ("source_receipt_sha256", source_receipt.get("receipt_sha256")),
+            ("source_identity_sha256", source_receipt.get("source_identity_sha256")),
+        ):
+            if binding.get(field) != expected:
+                raise FinalFitError(f"nested selection feature ledger source changed: {field}")
+        for field in (
+            "producer_receipt_sha256",
+            "ledger_rows_sha256",
+            "feature_value_digest",
+            "game_identity_sha256",
+            "fit_game_identity_sha256",
+            "validation_game_identity_sha256",
+            "binding_sha256",
+        ):
+            if not isinstance(binding.get(field), str) or not re.fullmatch(
+                r"[0-9a-f]{64}", binding[field], re.I
+            ):
+                raise FinalFitError(f"nested selection feature ledger binding is incomplete: {field}")
+        binding_payload = dict(binding)
+        binding_payload.pop("binding_sha256", None)
+        if _canonical_sha(binding_payload) != str(binding.get("binding_sha256") or "").lower():
+            raise FinalFitError("nested selection feature ledger binding hash changed")
+        artifacts = binding.get("producer_artifacts")
+        if not isinstance(artifacts, Mapping) or not artifacts:
+            raise FinalFitError("nested selection producer artifact bindings are missing")
+
+        def verify_artifact_records(value: Any, label: str) -> int:
+            if isinstance(value, Mapping):
+                if set(value) == {"path", "bytes", "sha256"}:
+                    artifact_path = Path(str(value["path"]))
+                    if (
+                        not artifact_path.is_absolute()
+                        or artifact_path.is_symlink()
+                        or not artifact_path.is_file()
+                        or int(value["bytes"]) != artifact_path.stat().st_size
+                        or str(value["sha256"]).lower() != _sha256_path(artifact_path)
+                    ):
+                        raise FinalFitError(f"nested selection artifact binding changed: {label}")
+                    return 1
+                return sum(
+                    verify_artifact_records(child, f"{label}.{key}")
+                    for key, child in value.items()
+                )
+            if isinstance(value, (list, tuple)):
+                return sum(
+                    verify_artifact_records(child, f"{label}[{index}]")
+                    for index, child in enumerate(value)
+                )
+            return 0
+
+        if verify_artifact_records(artifacts, "producer_artifacts") < 1:
+            raise FinalFitError("nested selection producer artifact records are missing")
+        train_ids = tuple(str(value) for value in binding.get("fit_game_ids", ()))
+        validation_ids = tuple(str(value) for value in binding.get("validation_game_ids", ()))
+        if not train_ids or not validation_ids or set(train_ids) & set(validation_ids):
+            raise FinalFitError("nested selection feature ledger IDs are invalid")
+        inner_start = selection.get("inner_validation_start")
+        inner_end = selection.get("inner_validation_end")
+        fit_cutoff = binding.get("fit_window_end")
+        fit_max = binding.get("fit_date_max")
+        validation_min = binding.get("validation_date_min")
+        validation_max = binding.get("validation_date_max")
+        if not all(
+            isinstance(value, str)
+            and value
+            for value in (inner_start, inner_end, fit_cutoff, fit_max, validation_min, validation_max)
+        ):
+            raise FinalFitError("nested selection chronology evidence is incomplete")
+        inner_start_stamp = pd.Timestamp(inner_start)
+        inner_end_stamp = pd.Timestamp(inner_end)
+        cutoff_stamp = pd.Timestamp(fit_cutoff)
+        fit_max_stamp = pd.Timestamp(fit_max)
+        validation_min_stamp = pd.Timestamp(validation_min)
+        validation_max_stamp = pd.Timestamp(validation_max)
+        if any(
+            stamp.tzinfo is None
+            for stamp in (
+                inner_start_stamp,
+                inner_end_stamp,
+                cutoff_stamp,
+                fit_max_stamp,
+                validation_min_stamp,
+                validation_max_stamp,
+            )
+        ):
+            raise FinalFitError("nested selection chronology timestamps must include a timezone")
+        if not (
+            cutoff_stamp == inner_start_stamp
+            and fit_max_stamp < inner_start_stamp
+            and validation_min_stamp >= inner_start_stamp
+            and validation_max_stamp <= inner_end_stamp
+            and validation_min_stamp <= validation_max_stamp
+        ):
+            raise FinalFitError("nested selection chronology violates strict prior timing")
+        if binding.get("fit_game_identity_sha256") != identity_sha256(train_ids):
+            raise FinalFitError("nested selection inner training identity changed")
+        if binding.get("validation_game_identity_sha256") != identity_sha256(validation_ids):
+            raise FinalFitError("nested selection inner validation identity changed")
+        selections.append(
+            {
+                "fold": int(fold.get("fold") or 0),
+                "selected_c": selected,
+                "candidate_grid": list(grid),
+                "inner_feature_ledger_binding": dict(binding),
+                "inner_train_identity_sha256": binding["fit_game_identity_sha256"],
+                "inner_validation_identity_sha256": binding[
+                    "validation_game_identity_sha256"
+                ],
+                "inner_validation_start": selection.get("inner_validation_start"),
+                "inner_validation_end": selection.get("inner_validation_end"),
+            }
+        )
+    selected_values = {float(row["selected_c"]) for row in selections}
+    if len(selected_values) != 1:
+        raise FinalFitError("nested selection folds disagree on selected C")
+    return {
+        "schema_version": "scryglass:future-value-nested-selection-binding:v1",
+        "path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": expected_file_sha256,
+        "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
+        "source_identity_sha256": str(source_receipt["source_identity_sha256"]),
+        "variant": variant.value,
+        "folds": selections,
+        "selected_c": float(next(iter(selected_values))),
+        "candidate_grid": list(float(value) for value in REGULARIZATION_GRID),
+    }
+
+
 def _source_frame_sha256(path: Path) -> str:
     return _sha256_path(path)
 
@@ -285,6 +505,8 @@ def fit_final_v2(
     expected_source_receipt_sha256: str | None = None,
     expected_current_receipt_sha256: str | None = None,
     expected_current_artifact_sha256: str | None = None,
+    nested_selection_path: Path | None = None,
+    expected_nested_selection_sha256: str | None = None,
 ) -> dict[str, Any]:
     source_receipt = _load_json(source_receipt_path, "source receipt")
     _verify_source_receipt(
@@ -293,6 +515,17 @@ def fit_final_v2(
         expected_source_receipt_sha256=expected_source_receipt_sha256,
     )
     evaluation_blockers = _evaluation_blockers(evaluation_path, source_receipt)
+    if nested_selection_path is None:
+        raise FinalFitError("verified nested selection evidence is required")
+    if "nested_inner_feature_ledger_missing_fixed_c_used" in evaluation_blockers:
+        raise FinalFitError(
+            "evaluation still carries the missing nested feature ledger blocker"
+        )
+    nested_selection = _verified_nested_selection(
+        nested_selection_path,
+        source_receipt,
+        expected_file_sha256=expected_nested_selection_sha256,
+    )
     eligible_ids = tuple(sorted(str(value) for value in source_receipt["model_eligible_game_ids"]))
     source_root = source_root.resolve()
     _verify_source_frames(source_root, source_receipt)
@@ -416,7 +649,7 @@ def fit_final_v2(
     classifier, optimizer = _fit_zero_intercept_logistic(
         matrix / scales,
         target.to_numpy(dtype=int),
-        regularization_c=PREDECLARED_VARIANT_REGULARIZATION_C,
+        regularization_c=float(nested_selection["selected_c"]),
     )
     source_frame_hashes = {
         "maps": _source_frame_sha256(source_maps_path),
@@ -440,12 +673,13 @@ def fit_final_v2(
         coefficients=classifier.coef_[0].astype(float),
         intercept=0.0,
         regularization_selection={
-            "method": "predeclared_regularization_c",
-            "candidate_grid": [float(PREDECLARED_VARIANT_REGULARIZATION_C)],
-            "selected_c": float(PREDECLARED_VARIANT_REGULARIZATION_C),
-            "inner_ledger_status": "missing",
-            "blockers": ["nested_inner_feature_ledger_missing_fixed_c_used"],
-            "selection_scope": "predeclared_before_final_fit",
+            "method": "verified_nested_chronological_whole_series_log_loss",
+            "candidate_grid": list(nested_selection["candidate_grid"]),
+            "selected_c": float(nested_selection["selected_c"]),
+            "inner_ledger_status": "verified",
+            "blockers": [],
+            "selection_scope": "verified_outer_fold_inner_evidence",
+            "nested_selection_binding": nested_selection,
         },
         optimizer_evidence=optimizer,
         atom_model=atom_model,
@@ -508,6 +742,7 @@ def fit_final_v2(
                 "variant": RatingVariant.FUTURE_PLAYER_FORM.value,
                 "blockers": list(evaluation_blockers),
             },
+            "nested_selection_receipt": nested_selection,
             "authority": {
                 "research_only": True,
                 "public_player_rating": False,
@@ -558,6 +793,7 @@ def fit_final_v2(
         "fit_game_count": len(eligible_ids),
         "fit_game_identity_sha256": identity_sha256(eligible_ids),
         "fit_window_end": fit_window_end,
+        "nested_selection": nested_selection,
         "model_receipt_sha256": receipt["receipt_sha256"],
         "model_artifact_sha256": _sha256_path(output_dir / "final-v2-model.json"),
         "blockers": sorted(blockers),
@@ -580,6 +816,8 @@ def main() -> int:
     parser.add_argument("--source-receipt-sha256", required=True)
     parser.add_argument("--current-receipt-sha256", required=True)
     parser.add_argument("--current-artifact-sha256", required=True)
+    parser.add_argument("--nested-selection", type=Path, required=True)
+    parser.add_argument("--nested-selection-sha256", required=True)
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args()
     run = fit_final_v2(
@@ -592,6 +830,8 @@ def main() -> int:
         expected_source_receipt_sha256=args.source_receipt_sha256,
         expected_current_receipt_sha256=args.current_receipt_sha256,
         expected_current_artifact_sha256=args.current_artifact_sha256,
+        nested_selection_path=args.nested_selection,
+        expected_nested_selection_sha256=args.nested_selection_sha256,
     )
     print(json.dumps(run, sort_keys=True))
     return 0

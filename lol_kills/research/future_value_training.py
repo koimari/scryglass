@@ -648,17 +648,32 @@ def _load_feature_ledger_bundle(path: Path | None) -> Mapping[str, Any] | None:
         folds = variant_value.get("folds")
         if not isinstance(folds, Mapping):
             raise FutureValueTrainingError("feature ledger fold bindings are missing")
-        fold_bundle: dict[str, pd.DataFrame] = {}
-        for fold, record in folds.items():
-            if not isinstance(record, Mapping) or not isinstance(record.get("rows"), list):
-                raise FutureValueTrainingError("feature ledger fold record is invalid")
-            attrs = record.get("attrs")
-            if not isinstance(attrs, Mapping):
-                raise FutureValueTrainingError("feature ledger fold attrs are missing")
-            frame = pd.DataFrame(record["rows"])
-            frame.attrs = dict(attrs)
-            fold_bundle[str(fold)] = frame
-        bundle[str(variant_name)] = fold_bundle
+        def read_folds(raw_folds: Mapping[str, Any]) -> dict[str, pd.DataFrame]:
+            fold_bundle: dict[str, pd.DataFrame] = {}
+            for fold, record in raw_folds.items():
+                if not isinstance(record, Mapping) or not isinstance(record.get("rows"), list):
+                    raise FutureValueTrainingError("feature ledger fold record is invalid")
+                attrs = record.get("attrs")
+                if not isinstance(attrs, Mapping):
+                    raise FutureValueTrainingError("feature ledger fold attrs are missing")
+                frame = pd.DataFrame(record["rows"])
+                frame.attrs = dict(attrs)
+                fold_bundle[str(fold)] = frame
+            return fold_bundle
+
+        outer_bundle = read_folds(folds)
+        raw_inner = variant_value.get("inner_folds")
+        if raw_inner is None:
+            raw_inner = variant_value.get("inner")
+        if raw_inner is not None:
+            if not isinstance(raw_inner, Mapping):
+                raise FutureValueTrainingError("feature ledger inner fold bindings are invalid")
+            bundle[str(variant_name)] = {
+                "outer": outer_bundle,
+                "inner": read_folds(raw_inner),
+            }
+        else:
+            bundle[str(variant_name)] = outer_bundle
     return bundle
 
 
@@ -800,6 +815,17 @@ def run_model_evaluation(
                     raise FutureValueTrainingError(
                         f"feature ledger bundle is missing variant: {variant_key}"
                     )
+                inner_variant_ledger = None
+                if "outer" in variant_ledger:
+                    outer_variant_ledger = variant_ledger.get("outer")
+                    inner_variant_ledger = variant_ledger.get("inner")
+                    if not isinstance(outer_variant_ledger, Mapping) or not isinstance(
+                        inner_variant_ledger, Mapping
+                    ):
+                        raise FutureValueTrainingError(
+                            f"feature ledger nested bindings are invalid: {variant_key}"
+                        )
+                    variant_ledger = outer_variant_ledger
                 variant_results[variant_key] = evaluate_future_value(
                     frames["maps"],
                     frames["players"],
@@ -810,6 +836,7 @@ def run_model_evaluation(
                     runtime_receipt_path=str(runtime_receipt_path),
                     variant=variant,
                     feature_ledger=variant_ledger,
+                    inner_feature_ledger=inner_variant_ledger,
                 )
             result = {
                 "schema_version": "scryglass:future-value-four-variant-evaluation:v1",
