@@ -1292,6 +1292,8 @@ def _apply_verified_leaguepedia_partition(
     # The verified binding contains every assignment. Pandas otherwise deep
     # copies that large attribute on each column selection below.
     partition.attrs.clear()
+    partition = partition.copy(deep=False)
+    partition.attrs.clear()
     assignments = binding.get("assignments")
     if not isinstance(assignments, Sequence) or isinstance(
         assignments, (str, bytes, bytearray)
@@ -1343,8 +1345,10 @@ def _apply_verified_leaguepedia_partition(
     promoted_ids: set[str] = set()
     promoted_series_by_game: dict[str, str] = {}
     retained_proxy_ids: set[str] = set()
-    for proxy_id, group_index in partition.groupby(proxy_ids, sort=False).groups.items():
-        group_game_ids = {str(value) for value in game_ids.loc[group_index]}
+    proxy_game_ids: dict[str, set[str]] = {}
+    for proxy_id, game_id in zip(proxy_ids.to_numpy(), game_ids.to_numpy()):
+        proxy_game_ids.setdefault(str(proxy_id), set()).add(str(game_id))
+    for proxy_id, group_game_ids in proxy_game_ids.items():
         group_assignments = [
             assignment_by_id[game_id]
             for game_id in sorted(group_game_ids)
@@ -2153,9 +2157,18 @@ def load_verified_leaguepedia_series_crosswalk(
             "normalized_team_set": list(team_set),
         }
     assignments_by_series: dict[str, set[str]] = {}
+    assignment_team_sets_by_series: dict[str, set[tuple[str, ...]]] = {}
     for assignment in assignments:
         series_id = str(assignment["series_id"])
         assignments_by_series.setdefault(series_id, set()).add(str(assignment["oe_game_id"]))
+        assignment_team_sets_by_series.setdefault(series_id, set()).add(
+            tuple(
+                sorted(
+                    _leaguepedia_team_key(value)
+                    for value in assignment["normalized_team_set"]
+                )
+            )
+        )
         membership = series_membership.get(series_id)
         if membership is None:
             raise FutureValueSourceError("Leaguepedia crosswalk series membership is missing")
@@ -2163,11 +2176,7 @@ def load_verified_leaguepedia_series_crosswalk(
         membership = series_membership[series_id]
         if set(membership["oe_game_ids"]) != assigned_ids:
             raise FutureValueSourceError("Leaguepedia crosswalk series membership changed")
-        assignment_team_sets = {
-            tuple(sorted(_leaguepedia_team_key(value) for value in row["normalized_team_set"]))
-            for row in assignments
-            if str(row["series_id"]) == series_id
-        }
+        assignment_team_sets = assignment_team_sets_by_series[series_id]
         if assignment_team_sets != {
             tuple(membership["normalized_team_set"])
         }:
