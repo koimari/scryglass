@@ -535,6 +535,41 @@ def test_chronological_folds_keep_series_whole() -> None:
         seen.update(test_series)
 
 
+def test_chronological_folds_produce_three_valid_folds_from_four_blocks() -> None:
+    frame = _phase_frame(16)
+    folds = chronological_folds(
+        frame,
+        n_splits=4,
+        min_train_rows=1,
+        cluster_column="series_id",
+    )
+    assert len(folds) == 3
+    seen_test_clusters: set[str] = set()
+    last_by_cluster = frame.groupby("series_id")["date"].max()
+    for train_indices, test_indices in folds:
+        train = frame.iloc[train_indices]
+        test = frame.iloc[test_indices]
+        test_start = test["date"].min()
+        train_clusters = set(train["series_id"])
+        test_clusters = set(test["series_id"])
+        assert not train_clusters.intersection(test_clusters)
+        assert not seen_test_clusters.intersection(test_clusters)
+        assert train["date"].max() < test_start
+        assert all(last_by_cluster[cluster] < test_start for cluster in train_clusters)
+        seen_test_clusters.update(test_clusters)
+    report = evaluate_phase_curve(
+        frame,
+        source_receipt=_receipt(frame["game_uid"].tolist()),
+        feature_columns=["prior_form_gold_diff"],
+        n_splits=4,
+        required_validation_folds=3,
+        transfer_columns=(),
+    )
+    assert report["chronological_blocks_requested"] == 4
+    assert report["validation_folds_required"] == 3
+    assert report["validation_folds_valid"] == 3
+
+
 def test_chronological_folds_exclude_clusters_that_continue_into_test() -> None:
     frame = _phase_frame(8)
     frame["date"] = pd.to_datetime(

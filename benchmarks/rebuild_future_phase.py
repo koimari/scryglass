@@ -38,6 +38,8 @@ FEATURE_COLUMNS = (
     "prior_form_dpm_diff",
     "prior_form_visionscore_diff",
 )
+CHRONOLOGICAL_BLOCKS_REQUESTED = 4
+REQUIRED_VALIDATION_FOLDS = 3
 DEFAULT_OUTPUT_ROOT = Path("/private/tmp/scryglass-future-phase-rebuild-v5")
 OUTPUT_FILENAMES = (
     "future-phase-candidate.json",
@@ -454,7 +456,8 @@ def rebuild_phase_artifacts(
             source_receipt_path=receipt_path,
             source_receipt_file_sha256=receipt_file_sha256,
             feature_columns=FEATURE_COLUMNS,
-            n_splits=3,
+            n_splits=CHRONOLOGICAL_BLOCKS_REQUESTED,
+            required_validation_folds=REQUIRED_VALIDATION_FOLDS,
             cluster_column=None,
             max_transfer_groups=max_transfer_groups,
             crosswalk_path=crosswalk_path,
@@ -539,11 +542,12 @@ def rebuild_phase_artifacts(
     ]
     if fit_partition["proxy_authority_blocker"]:
         candidate_blockers.append("authoritative_series_id_missing_proxy_cluster_used")
-    if int(evaluation.get("fold_count") or 0) < 3:
+    validation_folds_valid = int(evaluation.get("validation_folds_valid") or 0)
+    if validation_folds_valid < REQUIRED_VALIDATION_FOLDS:
         candidate_blockers.extend(
             [
                 "complete_chronological_evaluation_missing",
-                "requested three chronological folds produced fewer than three valid folds",
+                "requested chronological blocks produced fewer than required validation folds",
             ]
         )
     transfer_group_counts = {
@@ -565,6 +569,9 @@ def rebuild_phase_artifacts(
         "source_receipt_artifact": receipt_reference,
         "accepted_game_count": len(accepted_ids),
         "model_eligible_game_count": int(receipt["model_eligible_game_count"]),
+        "chronological_blocks_requested": CHRONOLOGICAL_BLOCKS_REQUESTED,
+        "validation_folds_required": REQUIRED_VALIDATION_FOLDS,
+        "validation_folds_valid": validation_folds_valid,
         "series_identity": fit["series_identity"],
         "cross_model_series_partition": fit["cross_model_series_partition"],
         "series_partition_source": fit_partition["source"],
@@ -617,6 +624,9 @@ def rebuild_phase_artifacts(
         "model_eligible_game_count": len(eligible_ids),
         "transfer_group_limit": int(max_transfer_groups),
         "transfer_group_counts": transfer_group_counts,
+        "chronological_blocks_requested": CHRONOLOGICAL_BLOCKS_REQUESTED,
+        "validation_folds_required": REQUIRED_VALIDATION_FOLDS,
+        "validation_folds_valid": validation_folds_valid,
         "cross_model_series_partition": evaluation["cross_model_series_partition"],
         "series_partition_source": evaluation_partition["source"],
         "series_partition_mapping_sha256": evaluation_partition["mapping_sha256"],
@@ -673,6 +683,9 @@ def rebuild_phase_artifacts(
             "evaluation_rows": int(len(eligible_frame)),
             "transfer_group_limit": int(max_transfer_groups),
             "transfer_group_counts": transfer_group_counts,
+            "chronological_blocks_requested": CHRONOLOGICAL_BLOCKS_REQUESTED,
+            "validation_folds_required": REQUIRED_VALIDATION_FOLDS,
+            "validation_folds_valid": validation_folds_valid,
         },
         "partition": fit_partition,
         "numerical_warnings": numeric_warnings,

@@ -2975,6 +2975,7 @@ def evaluate_phase_curve(
     source_receipt_file_sha256: str | None = None,
     feature_columns: Sequence[str],
     n_splits: int = 3,
+    required_validation_folds: int | None = None,
     cluster_column: str | None = None,
     alpha: float = 10.0,
     transfer_columns: Sequence[str] = ("region", "patch"),
@@ -2987,6 +2988,9 @@ def evaluate_phase_curve(
     _series_partition_reference: _VerifiedPhaseSeriesReference | None = None,
 ) -> dict[str, Any]:
     """Evaluate each phase on future rows with fold-internal fitting."""
+
+    if required_validation_folds is not None and int(required_validation_folds) < 1:
+        raise FuturePhaseCurveError("required_validation_folds must be positive")
 
     bound = bind_phase_source(
         frame,
@@ -3168,6 +3172,13 @@ def evaluate_phase_curve(
         },
         "folds": fold_rows,
         "metrics": metrics,
+        "chronological_blocks_requested": int(n_splits),
+        "validation_folds_required": (
+            int(required_validation_folds)
+            if required_validation_folds is not None
+            else None
+        ),
+        "validation_folds_valid": len(fold_rows),
         "fold_count": len(fold_rows),
         "cluster_safe": bool(series_identity["authoritative"]),
         "cluster_column": effective_cluster_column or "game_uid",
