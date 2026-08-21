@@ -21,7 +21,8 @@
     "separate complete and imputed-row proper scores with imputed-only blockers",
     "fold-local equal-side imputation with signed missingness and support indicators",
     "minimum and per-metric support diagnostics with named missing features",
-    "structural side-swap probability-complement identity"
+    "structural side-swap probability-complement identity",
+    "serialized player, team-context, and data-quality logit reconstruction with per-player support evidence"
   ],
   "estimands": {
     "future_player_value": "Development-only marginal map-win logit contribution for one player in the next eligible map, using strictly prior form, role, champion-role atoms, and explicit support diagnostics.",
@@ -31,12 +32,12 @@
     "metric_weights": "fit inside development folds; no hand-assigned performance weights",
     "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red; allow neutral zero only for all-missing centered atom coordinates and fail closed otherwise",
     "optimizer": "require finite converged zero-intercept L-BFGS evidence for every nested candidate and final fold fit",
-    "player_state": "strictly prior time-decayed form with fold-local rank-3 atoms and support diagnostics",
+    "player_state": "strictly prior time-decayed form and fold-local rank-3 atoms summed across each exact five-player side",
     "regularization": "select L2 strength inside each outer training fold with a nested chronological whole-series log-loss comparison",
     "representation": "atom-derived rank-3 champion embedding refit inside each chronological fold",
     "role_identity": "normalize top, jungle, mid, bot, and support aliases before every atom fit and transform lookup",
     "side_symmetry": "zero-intercept linear logit over blue-minus-red features after equal fold-local side imputation",
-    "team_state": "exact-five roster aggregation plus strictly prior team win state and roster continuity"
+    "team_state": "blue-minus-red difference of exact five-player side sums plus strictly prior team win state and roster continuity"
   },
   "future_scope_blockers": [
     "current_player_team_rating_comparison",
@@ -64,7 +65,7 @@
     },
     "future_value_model_builder": {
       "locator": "lol_kills/research/future_value_rating.py",
-      "raw_sha256": "d3264f66e8c73d574660079fc6d47e631254542d12ed8139a0a3edbeb25ced49"
+      "raw_sha256": "e7816a451a99276745f227a818c1d46a8283826899049f471c42db962279f84d"
     },
     "phase_curve_builder": {
       "locator": "lol_kills/research/future_phase_curve.py",

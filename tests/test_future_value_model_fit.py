@@ -17,6 +17,7 @@ from lol_kills.research.future_value_rating import (
     _frame_game_ids,
     _baseline_output_alignment,
     _baseline_source_binding,
+    _bind_baseline_fold_series,
     _fold_level_imputation_values,
     build_future_value_design,
     build_time_decayed_prior_player_form,
@@ -186,6 +187,20 @@ def test_rank3_fit_and_design_use_exact_five_rosters() -> None:
     assert atom.rank == 3
     assert len(design) == len(maps)
     assert set("rank_3_player_atom_1 rank_3_player_atom_2 rank_3_player_atom_3".split()).issubset(design)
+    game_id = "20"
+    selected_form = form.loc[form["game_id"].eq(game_id)]
+    expected_sum_difference = (
+        selected_form.loc[
+            selected_form["side"].eq("blue"), "prior_form_cs_per_min"
+        ].sum()
+        - selected_form.loc[
+            selected_form["side"].eq("red"), "prior_form_cs_per_min"
+        ].sum()
+    )
+    actual_sum_difference = design.loc[
+        design["game_id"].eq(game_id), "player_form_cs_per_min"
+    ].iloc[0]
+    assert actual_sum_difference == pytest.approx(expected_sum_difference)
     broken = form.drop(form.index[0]).copy()
     with pytest.raises(FutureValueSourceError, match="exact five-player"):
         build_future_value_design(maps, broken, atom)
@@ -233,6 +248,11 @@ def test_rank3_fit_normalizes_frozen_jng_and_sup_roles() -> None:
     broken.loc[broken.index[0], "role"] = pd.NA
     with pytest.raises(FutureValueSourceError, match="missing champion or role"):
         fit_rank3_player_champion_role_atoms(broken, train_game_ids=train_ids)
+    for missing_champion in (None, np.nan, pd.NA):
+        broken = form.copy()
+        broken.loc[broken.index[0], "champion"] = missing_champion
+        with pytest.raises(FutureValueSourceError, match="missing champion or role"):
+            fit_rank3_player_champion_role_atoms(broken, train_game_ids=train_ids)
 
 
 def test_imputation_fails_closed_for_all_missing_non_centered_features() -> None:
@@ -407,6 +427,61 @@ def test_fit_requires_a_verified_source_receipt() -> None:
         )
 
 
+def test_evaluation_cross_binds_series_receipt_to_validated_source() -> None:
+    maps, players = _raw_source(60)
+    maps["grid_series_id"] = [f"series-{index}" for index in range(len(maps))]
+    maps["blue_teamid"] = "oe:team:0"
+    maps["red_teamid"] = "oe:team:1"
+    game_ids = list(_frame_game_ids(maps, "maps"))
+    source = _source_receipt(game_ids, source_as_of=maps["date"].max().isoformat())
+    assignment_rows = [
+        {"game_id": str(row.game_uid), "series_id": str(row.grid_series_id)}
+        for row in maps.sort_values("game_uid").itertuples(index=False)
+    ]
+    pair_rows = [
+        {
+            "game_id": str(row.game_uid),
+            "series_id": str(row.grid_series_id),
+            "team_pair": "oe:team:0|oe:team:1",
+        }
+        for row in maps.sort_values("game_uid").itertuples(index=False)
+    ]
+    series_receipt = {
+        "source_type": "verified_grid_series",
+        "series_column": "grid_series_id",
+        "game_count": len(maps),
+        "game_identity_sha256": identity_sha256(game_ids),
+        "series_assignment_sha256": hashlib.sha256(
+            json.dumps(assignment_rows, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest(),
+        "series_pair_assignment_sha256": hashlib.sha256(
+            json.dumps(pair_rows, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest(),
+        "source_receipt_sha256": source["receipt_sha256"],
+    }
+    series_receipt["receipt_sha256"] = hashlib.sha256(
+        json.dumps(series_receipt, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    maps.attrs["verified_series_receipt"] = series_receipt
+    forged_source = dict(source)
+    forged_source["source_files"] = {
+        "fixture": {"bytes": 2, "sha256": "1" * 64}
+    }
+    forged_source.pop("receipt_sha256")
+    forged_source["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            forged_source, separators=(",", ":"), sort_keys=True
+        ).encode()
+    ).hexdigest()
+    with pytest.raises(FutureValueSourceError, match="does not bind maps"):
+        evaluate_future_value(
+            maps,
+            players,
+            n_folds=1,
+            source_receipt=forged_source,
+        )
+
+
 def test_partial_authoritative_series_ids_use_a_proxy_cluster() -> None:
     maps = pd.DataFrame(
         [
@@ -521,26 +596,42 @@ def test_authoritative_series_requires_source_bound_assignment_receipt() -> None
     payload["receipt_sha256"] = hashlib.sha256(
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     ).hexdigest()
-    maps.attrs["verified_source_receipt_sha256"] = source_receipt_sha256
     maps.attrs["verified_series_receipt"] = payload
-    frame = _map_model_frame(maps)
+    frame = _map_model_frame(
+        maps, verified_source_receipt_sha256=source_receipt_sha256
+    )
     audit = frame.attrs["series_cluster_audit"]
     assert audit["authoritative"] is True
     assert audit["cluster_count"] == 2
     assert audit["colliding_cluster_count"] == 1
     assert audit["collision_extra_map_count"] == 1
     assert audit["max_cluster_size"] == 2
+    fold_maps, fold_ids, fold_cluster, series_column = _bind_baseline_fold_series(
+        maps,
+        requested_game_ids={"g1", "g2"},
+        full_map_frame=frame,
+    )
+    assert series_column == "grid_series_id"
+    assert list(fold_maps["grid_series_id"]) == ["series-a", "series-a"]
+    assert list(fold_ids) == ["g1", "g2"]
+    assert fold_cluster["authoritative"] is True
 
     mutated = maps.copy()
     mutated.attrs = dict(maps.attrs)
     mutated.loc[0, "grid_series_id"] = "forged"
     with pytest.raises(FutureValueSourceError, match="assignments changed"):
-        _map_model_frame(mutated)
+        _map_model_frame(
+            mutated, verified_source_receipt_sha256=source_receipt_sha256
+        )
 
     unbound = maps.copy()
     unbound.attrs = {"verified_series_receipt": payload}
+    unbound_frame = _map_model_frame(unbound)
+    assert unbound_frame.attrs["series_cluster_audit"]["authoritative"] is False
     with pytest.raises(FutureValueSourceError, match="does not bind"):
-        _map_model_frame(unbound)
+        _map_model_frame(
+            unbound, verified_source_receipt_sha256="b" * 64
+        )
 
 
 def test_proxy_series_prefers_stable_team_ids_over_alias_keys() -> None:
@@ -596,6 +687,17 @@ def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None
     assert fold["side_swap"]["within_tolerance"] is True
     assert fold["side_swap"]["max_probability_complement_error"] <= 1e-12
     assert fold["side_swap"]["blockers"] == []
+    assert fold["imputation_policy"]["all_missing_non_centered_features"] == (
+        "fail_closed"
+    )
+    components = fold["component_evidence"]
+    assert components["row_count"] == fold["paired_rows"]
+    assert components["maximum_absolute_reconstruction_error"] <= 1e-12
+    assert len(components["sha256"]) == 64
+    assert all(len(row["player_support_records"]) == 10 for row in components["rows"])
+    assert result["evaluation"]["component_reconstruction_audit"]["status"] == (
+        "passed"
+    )
     assert fold["regional_transfer"]["status"] == "unavailable"
     assert fold["patch_transfer"]["status"] == "unavailable"
     assert fold["tournament_boundary"]["status"] == "unavailable"
@@ -956,6 +1058,8 @@ def test_model_runtime_receipt_binds_code_source_environment_and_output(
     assert receipt["source"]["source_receipt_file_sha256"] == source_file_hash
     assert receipt["environment"]["logical_cpu_count"]
     assert receipt["authority"]["deployment"] is False
+    for field in ("odds", "expected_value", "recommendation", "betting"):
+        assert receipt["authority"][field] is False
     assert json.loads(runtime_path.read_text())["receipt_sha256"] == receipt[
         "receipt_sha256"
     ]

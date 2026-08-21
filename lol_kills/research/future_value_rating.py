@@ -842,9 +842,11 @@ class Rank3AtomModel:
 
 
 def _champion_role_key(champion: Any, role: Any) -> str:
+    if champion is None or bool(pd.isna(champion)):
+        raise FutureValueSourceError("rank-3 atom has missing champion or role")
     champion_text = str(champion).strip().casefold()
     role_text = _role(role)
-    if not champion_text or champion_text == "nan" or role_text is None:
+    if champion_text in {"", "nan", "none", "<na>"} or role_text is None:
         raise FutureValueSourceError("rank-3 atom has missing champion or role")
     return f"{champion_text}|{role_text}"
 
@@ -944,6 +946,8 @@ def fit_rank3_player_champion_role_atoms(
 def _verified_authoritative_series_column(
     maps: pd.DataFrame,
     frame: pd.DataFrame,
+    *,
+    verified_source_receipt_sha256: str,
 ) -> str | None:
     receipt = maps.attrs.get("verified_series_receipt")
     if not isinstance(receipt, Mapping):
@@ -957,7 +961,6 @@ def _verified_authoritative_series_column(
     if hashlib.sha256(_canonical_json_bytes(payload)).hexdigest() != claimed_hash:
         raise FutureValueSourceError("authoritative series receipt changed")
     column = payload.get("series_column")
-    source_receipt_sha256 = maps.attrs.get("verified_source_receipt_sha256")
     game_count = payload.get("game_count")
     if (
         payload.get("source_type") != "verified_grid_series"
@@ -967,8 +970,8 @@ def _verified_authoritative_series_column(
         or game_count != len(frame)
         or payload.get("game_identity_sha256")
         != identity_sha256(frame["game_id"].astype(str))
-        or not isinstance(source_receipt_sha256, str)
-        or payload.get("source_receipt_sha256") != source_receipt_sha256
+        or payload.get("source_receipt_sha256")
+        != verified_source_receipt_sha256
         or column not in frame.columns
     ):
         raise FutureValueSourceError("authoritative series receipt does not bind maps")
@@ -1026,7 +1029,11 @@ def _verified_authoritative_series_column(
     return str(column)
 
 
-def _map_model_frame(maps: pd.DataFrame) -> pd.DataFrame:
+def _map_model_frame(
+    maps: pd.DataFrame,
+    *,
+    verified_source_receipt_sha256: str | None = None,
+) -> pd.DataFrame:
     required = {"date", "y_blue_win"}
     missing = sorted(required - set(maps.columns))
     if missing:
@@ -1039,7 +1046,16 @@ def _map_model_frame(maps: pd.DataFrame) -> pd.DataFrame:
         raise FutureValueSourceError("model maps do not have one dated row per game")
     if not frame["target"].isin({0, 1}).all():
         raise FutureValueSourceError("model maps contain an invalid result target")
-    series_column = _verified_authoritative_series_column(maps, frame)
+    series_column = (
+        _verified_authoritative_series_column(
+            maps,
+            frame,
+            verified_source_receipt_sha256=verified_source_receipt_sha256,
+        )
+        if verified_source_receipt_sha256 is not None
+        and isinstance(maps.attrs.get("verified_series_receipt"), Mapping)
+        else None
+    )
     valid_authoritative_series = False
     if series_column is not None:
         series = frame[series_column].astype("string").str.strip()
@@ -1241,10 +1257,16 @@ def build_future_value_design(
     maps: pd.DataFrame,
     form: pd.DataFrame,
     atom_model: Rank3AtomModel,
+    *,
+    verified_model_frame: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Build side-neutral map differences from pregame state only."""
 
-    map_frame = _map_model_frame(maps)
+    map_frame = (
+        verified_model_frame.copy()
+        if verified_model_frame is not None
+        else _map_model_frame(maps)
+    )
     required = {"game_id", "date", "side", "role", "player_id", *[f"prior_form_{m}" for m in FORM_METRICS]}
     missing = sorted(required - set(form.columns))
     if missing:
@@ -1304,7 +1326,7 @@ def build_future_value_design(
         .mean()
         .mean(axis=1)
     )
-    side_means = grouped_values[side_feature_names].mean()
+    side_means = grouped_values[side_feature_names].sum(min_count=5)
     side_finite_counts = grouped_values[side_feature_names].count()
     side_means = side_means.mask(side_finite_counts.lt(5))
     side_wide = side_means.unstack("side")
@@ -1584,7 +1606,11 @@ def _select_fold_regularization(
     """Select L2 strength on one strictly earlier nested chronological fold."""
 
     outer_train_maps = map_frame[map_frame["game_id"].isin(train_game_ids)].copy()
-    inner_fold = chronological_whole_series_folds(outer_train_maps, n_folds=1)[0]
+    inner_fold = chronological_whole_series_folds(
+        outer_train_maps,
+        n_folds=1,
+        verified_model_frame=outer_train_maps,
+    )[0]
     inner_train_ids = tuple(str(value) for value in inner_fold["train_game_ids"])
     inner_validation_ids = tuple(
         str(value) for value in inner_fold["validation_game_ids"]
@@ -1596,7 +1622,12 @@ def _select_fold_regularization(
         min_cell_support=min_cell_support,
         fit_window_end=inner_fold["validation_start"],
     )
-    design = build_future_value_design(map_frame, form, atom_model)
+    design = build_future_value_design(
+        map_frame,
+        form,
+        atom_model,
+        verified_model_frame=map_frame,
+    )
     inner_train = design[design["game_id"].isin(inner_train_ids)].copy()
     inner_validation = design[
         design["game_id"].isin(inner_validation_ids)
@@ -1984,10 +2015,23 @@ def fit_future_value_model(
     rank: int = RANK_3,
     min_cell_support: int = 1,
     source_receipt: Mapping[str, Any] | None = None,
+    verified_model_frame: pd.DataFrame | None = None,
 ) -> tuple[FutureValueFoldModel, pd.DataFrame]:
     """Fit one fold with all representation work bound to its train games."""
 
-    map_frame = _map_model_frame(maps)
+    map_frame = (
+        verified_model_frame.copy()
+        if verified_model_frame is not None
+        else _map_model_frame(
+            maps,
+            verified_source_receipt_sha256=(
+                str(source_receipt["receipt_sha256"])
+                if isinstance(source_receipt, Mapping)
+                and "receipt_sha256" in source_receipt
+                else None
+            ),
+        )
+    )
     train_ids = tuple(sorted({str(value) for value in train_game_ids}))
     if not train_ids:
         raise FutureValueSourceError("future-value fit has no training games")
@@ -2015,7 +2059,12 @@ def fit_future_value_model(
         min_cell_support=min_cell_support,
         fit_window_end=None if fit_window_end is None else boundary,
     )
-    design = build_future_value_design(map_frame, form, atom_model)
+    design = build_future_value_design(
+        map_frame,
+        form,
+        atom_model,
+        verified_model_frame=map_frame,
+    )
     train = design[design["game_id"].isin(train_ids)].copy()
     feature_names = tuple(MODEL_FEATURES)
     target = pd.to_numeric(train["target"], errors="coerce")
@@ -2056,12 +2105,17 @@ def chronological_whole_series_folds(
     maps: pd.DataFrame,
     *,
     n_folds: int = 3,
+    verified_model_frame: pd.DataFrame | None = None,
 ) -> list[dict[str, Any]]:
     """Return expanding chronological folds with whole series clusters."""
 
     if int(n_folds) < 1:
         raise FutureValueSourceError("chronological fold count must be positive")
-    frame = _map_model_frame(maps)
+    frame = (
+        verified_model_frame.copy()
+        if verified_model_frame is not None
+        else _map_model_frame(maps)
+    )
     series_summary = (
         frame.groupby("series_id", sort=True, observed=True)
         .agg(first_date=("date", "min"), last_date=("date", "max"))
@@ -2645,6 +2699,43 @@ def _baseline_source_binding(
     return report
 
 
+def _bind_baseline_fold_series(
+    maps: pd.DataFrame,
+    *,
+    requested_game_ids: set[str],
+    full_map_frame: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.Series, dict[str, Any], str]:
+    """Subset prevalidated full-source series assignments for one baseline fold."""
+
+    raw_map_ids = _frame_game_ids(maps, "maps").astype(str)
+    fold_maps = maps.loc[raw_map_ids.isin(requested_game_ids)].copy().reset_index(
+        drop=True
+    )
+    fold_map_ids = _frame_game_ids(fold_maps, "maps").astype(str)
+    full_series = full_map_frame.set_index("game_id", drop=False)
+    fold_series = full_series.reindex(fold_map_ids.to_numpy())
+    if fold_series["series_id"].isna().any():
+        raise FutureValueSourceError("baseline fold series assignments are missing")
+    series_source = str(full_map_frame.attrs.get("series_cluster_source", ""))
+    series_authoritative = series_source.startswith("authoritative:")
+    series_id_column = "grid_series_id" if series_authoritative else "series_id"
+    fold_maps[series_id_column] = fold_series["series_id"].astype(str).to_numpy()
+    fold_maps["series_id_source"] = series_source
+    subset_sizes = fold_series["series_id"].astype(str).value_counts(sort=False)
+    series_cluster = {
+        "source": series_source,
+        "audit": {
+            **dict(full_map_frame.attrs.get("series_cluster_audit") or {}),
+            "fold_subset_map_count": int(len(fold_series)),
+            "fold_subset_cluster_count": int(len(subset_sizes)),
+            "fold_subset_max_cluster_size": int(subset_sizes.max()),
+        },
+        "authoritative": series_authoritative,
+        "series_id_column": series_id_column,
+    }
+    return fold_maps, fold_map_ids, series_cluster, series_id_column
+
+
 def _run_current_rating_baselines(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -2654,6 +2745,7 @@ def _run_current_rating_baselines(
     validation_game_ids: Sequence[str],
     strict_cutoff: str,
     source_receipt: Mapping[str, Any],
+    full_map_frame: pd.DataFrame,
 ) -> tuple[pd.Series, pd.Series, dict[str, Any]]:
     """Run fold-local current rating baselines without production artifacts."""
 
@@ -2669,22 +2761,14 @@ def _run_current_rating_baselines(
     )
 
     requested = set(str(value) for value in (*train_game_ids, *validation_game_ids))
-    raw_map_ids = _frame_game_ids(maps, "maps").astype(str)
-    fold_maps = maps.loc[raw_map_ids.isin(requested)].copy().reset_index(drop=True)
-    fold_map_ids = _frame_game_ids(fold_maps, "maps").astype(str)
-    fold_players = players.copy().reset_index(drop=True)
-    derived_map_frame = _map_model_frame(fold_maps)
-    fold_maps["series_id"] = derived_map_frame["series_id"].astype(str).to_numpy()
-    fold_maps["series_id_source"] = str(
-        derived_map_frame.attrs.get("series_cluster_source", "")
+    fold_maps, fold_map_ids, series_cluster, series_id_column = (
+        _bind_baseline_fold_series(
+            maps,
+            requested_game_ids=requested,
+            full_map_frame=full_map_frame,
+        )
     )
-    series_cluster = {
-        "source": derived_map_frame.attrs.get("series_cluster_source"),
-        "audit": derived_map_frame.attrs.get("series_cluster_audit"),
-        "authoritative": str(
-            derived_map_frame.attrs.get("series_cluster_source", "")
-        ).startswith("authoritative:"),
-    }
+    fold_players = players.copy().reset_index(drop=True)
     validation_ids = validation["game_id"].astype(str)
     reports: dict[str, Any] = {}
     errors: dict[str, str] = {}
@@ -2751,7 +2835,7 @@ def _run_current_rating_baselines(
         if "series_id_column" in inspect.signature(
             fit_hierarchical_bt_research_prediction
         ).parameters:
-            hierarchical_kwargs["series_id_column"] = "series_id"
+            hierarchical_kwargs["series_id_column"] = series_id_column
         hierarchical_receipt = fit_hierarchical_bt_research_prediction(
             fold_maps[fold_map_ids.isin(set(train_game_ids))].copy(),
             fold_maps[fold_map_ids.isin(set(validation_game_ids))].copy(),
@@ -2851,6 +2935,16 @@ def evaluate_future_value(
         map_frame,
         require_full_eligible_set=True,
     )
+    if isinstance(maps.attrs.get("verified_series_receipt"), Mapping):
+        map_frame = _map_model_frame(
+            maps,
+            verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+        )
+        _validate_verified_source_receipt(
+            source_receipt,
+            map_frame,
+            require_full_eligible_set=True,
+        )
     if (source_receipt_path is None) != (source_receipt_file_sha256 is None):
         raise FutureValueSourceError("source receipt path and file hash must be paired")
     if source_receipt_path is not None:
@@ -2869,7 +2963,11 @@ def evaluate_future_value(
         ) != source_receipt.get("receipt_sha256"):
             raise FutureValueSourceError("durable source receipt payload changed")
     form = build_time_decayed_prior_player_form(map_frame, players, half_life_days=half_life_days)
-    folds = chronological_whole_series_folds(map_frame, n_folds=n_folds)
+    folds = chronological_whole_series_folds(
+        map_frame,
+        n_folds=n_folds,
+        verified_model_frame=map_frame,
+    )
     fold_reports: list[dict[str, Any]] = []
     pooled_targets: list[pd.Series] = []
     pooled_predictions: list[pd.Series] = []
@@ -2904,6 +3002,7 @@ def evaluate_future_value(
             fit_window_end=fold["validation_start"],
             min_cell_support=min_cell_support,
             source_receipt=source_receipt,
+            verified_model_frame=map_frame,
         )
         validation = design[design["game_id"].isin(fold["validation_game_ids"])].copy()
         prediction = model.predict_probability(validation)
@@ -2932,6 +3031,7 @@ def evaluate_future_value(
                 ),
                 strict_cutoff=str(fold["validation_start"]),
                 source_receipt=source_receipt,
+                full_map_frame=map_frame,
             )
         )
         current_mask = (
@@ -3149,6 +3249,25 @@ def evaluate_future_value(
         pooled_predictions.append(paired_prediction)
         pooled_baselines.append(paired_baseline)
         model_parameters = model.parameter_receipt()
+        component_frame = model.player_value_logit(form, validation)
+        component_rows = [
+            {
+                "game_id": str(row.game_id),
+                "player_value_logit": float(row.player_value_logit),
+                "team_context_logit": float(row.team_context_logit),
+                "data_quality_logit": float(row.data_quality_logit),
+                "full_model_logit": float(row.full_model_logit),
+                "component_reconstruction_error": float(
+                    row.component_reconstruction_error
+                ),
+                "support_status": str(row.support_status),
+                "player_support_records": row.player_support_records,
+            }
+            for row in component_frame.itertuples(index=False)
+        ]
+        component_sha256 = hashlib.sha256(
+            _canonical_json_bytes(component_rows)
+        ).hexdigest()
         fold_reports.append(
             {
                 "fold": fold["fold"],
@@ -3177,6 +3296,7 @@ def evaluate_future_value(
                 "fold_local_side_imputation": model_parameters[
                     "fold_local_side_imputation"
                 ],
+                "imputation_policy": model_parameters["imputation_policy"],
                 "antisymmetric_fit": model_parameters["antisymmetric_fit"],
                 "regularization_selection": model_parameters[
                     "regularization_selection"
@@ -3198,6 +3318,17 @@ def evaluate_future_value(
                 "missingness": missingness,
                 "side_swap": side_swap,
                 "current_rating_comparison": current_comparison,
+                "component_evidence": {
+                    "schema_version": "scryglass:future-value-logit-components:v1",
+                    "row_count": len(component_rows),
+                    "sha256": component_sha256,
+                    "maximum_absolute_reconstruction_error": float(
+                        component_frame["component_reconstruction_error"]
+                        .abs()
+                        .max()
+                    ),
+                    "rows": component_rows,
+                },
             }
         )
     cluster_source = map_frame.attrs.get("series_cluster_source")
@@ -3389,6 +3520,23 @@ def evaluate_future_value(
                     for report in fold_reports
                 ],
             },
+            "component_reconstruction_audit": {
+                "status": "passed",
+                "row_count": sum(
+                    report["component_evidence"]["row_count"]
+                    for report in fold_reports
+                ),
+                "maximum_absolute_error": max(
+                    report["component_evidence"][
+                        "maximum_absolute_reconstruction_error"
+                    ]
+                    for report in fold_reports
+                ),
+                "fold_component_sha256": [
+                    report["component_evidence"]["sha256"]
+                    for report in fold_reports
+                ],
+            },
         },
         "folds": fold_reports,
         "prediction_ledger": prediction_ledger,
@@ -3457,8 +3605,8 @@ def future_value_model_contract() -> dict[str, Any]:
         },
         "fit_contract": {
             "representation": "atom-derived rank-3 champion embedding refit inside each chronological fold",
-            "player_state": "strictly prior time-decayed form with fold-local rank-3 atoms and support diagnostics",
-            "team_state": "exact-five roster aggregation plus strictly prior team win state and roster continuity",
+            "player_state": "strictly prior time-decayed form and fold-local rank-3 atoms summed across each exact five-player side",
+            "team_state": "blue-minus-red difference of exact five-player side sums plus strictly prior team win state and roster continuity",
             "metric_weights": "fit inside development folds; no hand-assigned performance weights",
             "side_symmetry": "zero-intercept linear logit over blue-minus-red features after equal fold-local side imputation",
             "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red; allow neutral zero only for all-missing centered atom coordinates and fail closed otherwise",
@@ -3477,6 +3625,7 @@ def future_value_model_contract() -> dict[str, Any]:
             "fold-local equal-side imputation with signed missingness and support indicators",
             "minimum and per-metric support diagnostics with named missing features",
             "structural side-swap probability-complement identity",
+            "serialized player, team-context, and data-quality logit reconstruction with per-player support evidence",
         ],
         "future_scope_blockers": [
             "current_player_team_rating_comparison",
