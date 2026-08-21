@@ -777,8 +777,16 @@ def _player_contributions(
     work = pd.concat([form.reset_index(drop=True), atoms.reset_index(drop=True)], axis=1)
     atom_player_available = atoms["rank_3_player_atom_available"].astype(bool)
     atom_champion_available = atoms["rank_3_champion_role_atom_available"].astype(bool)
-    work["rank_3_atom_missing_rate"] = (~atom_player_available).astype(float)
-    work["rank_3_champion_role_atom_missing_rate"] = (~atom_champion_available).astype(float)
+    # ``form`` can retain the source frame's row labels after the latest-row
+    # selection.  ``work`` has a fresh range index, so assign atom flags by
+    # position.  Label-aligned assignment would turn almost every valid atom
+    # into NaN and mark the player as missing.
+    work["rank_3_atom_missing_rate"] = (
+        ~atom_player_available.to_numpy()
+    ).astype(float)
+    work["rank_3_champion_role_atom_missing_rate"] = (
+        ~atom_champion_available.to_numpy()
+    ).astype(float)
     support_columns = [f"prior_form_{metric}_support" for metric in FORM_METRICS]
     effective_columns = [f"prior_form_{metric}_effective_support" for metric in FORM_METRICS]
     if not set(support_columns).issubset(work.columns):

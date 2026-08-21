@@ -18,6 +18,8 @@ from lol_kills.research.future_value_snapshots import (
     SNAPSHOT_AUTHORITY,
     SNAPSHOT_RECEIPT_SCHEMA_VERSION,
     FutureValueSnapshotError,
+    _latest_player_form,
+    _player_contributions,
     authorize_final_fit,
     build_future_value_snapshots,
 )
@@ -180,6 +182,27 @@ class _Atoms:
         output["rank_3_champion_role_atom_available"] = True
         output["rank_3_champion_role_support"] = 10
         return output
+
+
+def test_atom_missing_flags_follow_row_position_after_latest_selection() -> None:
+    maps, players, _teams = _rows(6)
+    form = build_strict_prior_player_form(maps, players)
+    latest = form[form["game_id"].eq("g6")].iloc[[0]].copy()
+    latest["team_id"] = "oe:team:blue"
+    latest["playername"] = "P0"
+    latest["champion"] = "Champ0"
+    latest.index = [99117]
+    model = SimpleNamespace(
+        feature_names=("rank_3_atom_missing_rate",),
+        scales=np.ones(1),
+        coefficients=np.ones(1),
+        imputation_values=np.zeros(1),
+        atom_model=_Atoms(),
+    )
+
+    output = _player_contributions(model, latest)
+
+    assert output["model_feature_missing"].tolist() == [False]
 
 
 def test_team_value_requires_exact_five_players_and_preserves_champion_split() -> None:
