@@ -97,8 +97,16 @@ def _fixtures() -> tuple[dict[str, object], dict[str, object], dict[str, object]
         "source_as_of": "2026-08-20T00:00:00Z",
         "source_game_count": 10,
         "snapshots": {
-            "player": {"value_column": "mu_effective", "verified_rows": 3},
-            "team": {"value_column": "mu_effective", "verified_rows": 2},
+            "player": {
+                "value_column": "mu_effective",
+                "verified_rows": 3,
+                "sha256": "e" * 64,
+            },
+            "team": {
+                "value_column": "mu_effective",
+                "verified_rows": 2,
+                "sha256": "f" * 64,
+            },
         },
     }
     current["receipt_sha256"] = hashlib.sha256(_canonical(current, newline=True)).hexdigest()
@@ -146,8 +154,61 @@ def _fixtures() -> tuple[dict[str, object], dict[str, object], dict[str, object]
     return current, future, player, team
 
 
+def _trust_root(
+    current: dict[str, object],
+    future: dict[str, object],
+    player: dict[str, object],
+    team: dict[str, object],
+) -> dict[str, object]:
+    def digest(identity: str, ids: list[str]) -> str:
+        return hashlib.sha256(
+            _canonical({"identity": identity, "ids": sorted(ids)})
+        ).hexdigest()
+
+    player_ids = sorted(
+        [str(row["player_id"]) for row in player["rows"]]
+        + ["oe:player_id:c"]
+    )
+    team_ids = sorted(str(row["team_id"]) for row in team["rows"])
+    source = future["source"]
+    assert isinstance(source, dict)
+    return {
+        "schema_version": "scryglass:future-value-current-rating-input-binding:v1",
+        "receipt": {
+            "sha256": "d" * 64,
+            "receipt_sha256": current["receipt_sha256"],
+            "schema_version": current["schema_version"],
+        },
+        "source_receipt_sha256": source["source_receipt_sha256"],
+        "source_identity_sha256": source["source_identity_sha256"],
+        "source_as_of": source["source_as_of"],
+        "source_game_count": source["source_game_count"],
+        "snapshots": {
+            "player": {
+                "identity_column": "player_id",
+                "value_column": "mu_effective",
+                "verified_rows": len(player_ids),
+                "finite_rows": len(player_ids),
+                "identity_ids": player_ids,
+                "identity_sha256": digest("player_id", player_ids),
+                "sha256": "e" * 64,
+            },
+            "team": {
+                "identity_column": "team_id",
+                "value_column": "mu_effective",
+                "verified_rows": len(team_ids),
+                "finite_rows": len(team_ids),
+                "identity_ids": team_ids,
+                "identity_sha256": digest("team_id", team_ids),
+                "sha256": "f" * 64,
+            },
+        },
+    }
+
+
 def test_snapshot_comparison_binds_common_ids_and_inherited_blocker() -> None:
     current, future, player, team = _fixtures()
+    trust_root = _trust_root(current, future, player, team)
     report = build_snapshot_comparison_report(
         current_receipt=current,
         future_receipt=future,
@@ -158,19 +219,25 @@ def test_snapshot_comparison_binds_common_ids_and_inherited_blocker() -> None:
         player_rank_diff_file_sha256="f" * 64,
         team_rank_diff_file_sha256="0" * 64,
         expected_source_receipt_sha256="a" * 64,
+        current_snapshot_trust_root=trust_root,
     )
     assert report["status"] == "research_only_partial"
-    assert report["independent_join"] == {
-        "status": "verified",
-        "player_rows": 2,
-        "team_rows": 2,
-        "current_value_fields": {"player": "mu_effective", "team": "mu_effective"},
-        "future_value_fields": {
-            "player": "future_player_value_logit",
-            "team": "future_team_value_logit",
-        },
-    }
+    assert report["independent_join"]["status"] == "verified"
+    assert report["independent_join"]["source_bound"] is True
+    assert report["independent_join"]["rank_universe"] == "common_verified_finite_ids"
+    assert report["independent_join"]["player_rank_pairs"] == 2
+    assert report["independent_join"]["team_rank_pairs"] == 2
+    assert report["independent_join"]["player"]["join_rate"] == pytest.approx(2 / 3)
+    assert report["independent_join"]["team"]["full_snapshot_rank_status"] == "incomparable"
     assert report["blocker_context"]["identity_blocker_is_join_failure"] is False
+    assert report["model_authorization_blocker"]["status"] == "stale_inherited"
+    assert report["model_authorization_blocker"]["label"] == (
+        "stale_inherited_for_model_authorization"
+    )
+    assert report["model_authorization_blocker"]["blockers"] == [
+        "current_rating_player_team_identity_missing_for_rank_diffs"
+    ]
+    assert report["blocker_context"]["status"] == "stale_inherited"
     assert report["full_snapshot_rank_status"] == "incomparable"
     assert report["snapshot_comparisons"]["player"]["join_rate"] == pytest.approx(2 / 3)
     assert len(report["snapshot_comparisons"]["player"]["common_ids"]) == 2
@@ -181,6 +248,7 @@ def test_snapshot_comparison_binds_common_ids_and_inherited_blocker() -> None:
 
 def test_snapshot_comparison_rejects_changed_paired_digest() -> None:
     current, future, player, team = _fixtures()
+    trust_root = _trust_root(current, future, player, team)
     player["rank_coverage"]["paired_row_digest_sha256"] = "1" * 64
     with pytest.raises(SnapshotComparisonError, match="player_id rank coverage changed"):
         build_snapshot_comparison_report(
@@ -188,11 +256,13 @@ def test_snapshot_comparison_rejects_changed_paired_digest() -> None:
             future_receipt=future,
             player_rank_diff_artifact=player,
             team_rank_diff_artifact=team,
+            current_snapshot_trust_root=trust_root,
         )
 
 
 def test_snapshot_comparison_rejects_source_mismatch() -> None:
     current, future, player, team = _fixtures()
+    trust_root = _trust_root(current, future, player, team)
     player["source_receipt_sha256"] = "2" * 64
     with pytest.raises(SnapshotComparisonError, match="player_id rank artifact source receipt changed"):
         build_snapshot_comparison_report(
@@ -200,4 +270,36 @@ def test_snapshot_comparison_rejects_source_mismatch() -> None:
             future_receipt=future,
             player_rank_diff_artifact=player,
             team_rank_diff_artifact=team,
+            current_snapshot_trust_root=trust_root,
+        )
+
+
+def test_snapshot_comparison_rejects_unbound_current_ids() -> None:
+    current, future, player, team = _fixtures()
+    trust_root = _trust_root(current, future, player, team)
+    trust_root["snapshots"]["player"]["identity_ids"] = [
+        "oe:player_id:outside"
+    ]
+    with pytest.raises(SnapshotComparisonError, match="trust identity digest changed"):
+        build_snapshot_comparison_report(
+            current_receipt=current,
+            future_receipt=future,
+            player_rank_diff_artifact=player,
+            team_rank_diff_artifact=team,
+            current_receipt_file_sha256="d" * 64,
+            expected_source_receipt_sha256="a" * 64,
+            current_snapshot_trust_root=trust_root,
+        )
+
+
+def test_snapshot_comparison_requires_current_trust_root() -> None:
+    current, future, player, team = _fixtures()
+    with pytest.raises(SnapshotComparisonError, match="trust root is required"):
+        build_snapshot_comparison_report(
+            current_receipt=current,
+            future_receipt=future,
+            player_rank_diff_artifact=player,
+            team_rank_diff_artifact=team,
+            current_receipt_file_sha256="d" * 64,
+            expected_source_receipt_sha256="a" * 64,
         )

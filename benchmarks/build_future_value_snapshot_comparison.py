@@ -5,10 +5,17 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
+import sys
 from typing import Any
 
+if __package__ in (None, ""):  # pragma: no cover - direct script execution
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from benchmarks.build_future_value_snapshots import _verify_current_rating_inputs
 from lol_kills.research.future_value_snapshot_comparison import (
+    CURRENT_RATING_INPUT_BINDING_SCHEMA,
     SnapshotComparisonError,
     build_snapshot_comparison_report,
 )
@@ -66,6 +73,77 @@ def _write(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _identity_digest(identity: str, values: list[str]) -> str:
+    payload = {"identity": identity, "ids": sorted(values)}
+    canonical = json.dumps(
+        payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _verify_current_snapshot_trust_root(
+    *,
+    current_receipt_path: Path,
+    current_receipt: dict[str, Any],
+    current_receipt_file_sha256: str,
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    """Verify current snapshot files and retain their finite ID sets in memory."""
+
+    try:
+        player_frame, team_frame, binding = _verify_current_rating_inputs(
+            current_receipt_path.parent,
+            current_receipt_path,
+            current_receipt,
+            source_receipt={
+                "receipt_sha256": source["source_receipt_sha256"],
+                "source_identity_sha256": source["source_identity_sha256"],
+                "source_as_of": source["source_as_of"],
+                "source_game_count": source["source_game_count"],
+            },
+            expected_current_receipt_sha256=current_receipt_file_sha256,
+        )
+    except Exception as error:
+        raise SnapshotComparisonError(
+            "current snapshot trust root verification failed"
+        ) from error
+
+    for scope, frame, identity, prefix in (
+        ("player", player_frame, "player_id", "oe:player:"),
+        ("team", team_frame, "team_id", "oe:team:"),
+    ):
+        ids = frame[identity].astype("string")
+        values = frame["mu_effective"]
+        finite = values.map(lambda value: _finite_number(value))
+        valid = ids.notna() & ids.str.strip().ne("") & finite
+        verified_ids = [str(value) for value in ids[valid].tolist()]
+        if len(verified_ids) != len(set(verified_ids)):
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust IDs are ambiguous"
+            )
+        if any(not value.startswith(prefix) for value in verified_ids):
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust IDs are not stable"
+            )
+        record = binding["snapshots"].get(scope)
+        if not isinstance(record, dict):
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust binding is missing"
+            )
+        record["identity_ids"] = sorted(verified_ids)
+        record["identity_sha256"] = _identity_digest(identity, verified_ids)
+        record["finite_rows"] = len(verified_ids)
+    binding["schema_version"] = CURRENT_RATING_INPUT_BINDING_SCHEMA
+    return binding
+
+
+def _finite_number(value: Any) -> bool:
+    try:
+        return bool(math.isfinite(float(value)))
+    except (TypeError, ValueError):
+        return False
+
+
 def build_report(
     *,
     current_receipt_path: Path,
@@ -87,6 +165,15 @@ def build_report(
     future = _load(future_receipt_path, "future snapshot receipt")
     player = _load(player_rank_diff_path, "player rank diff artifact")
     team = _load(team_rank_diff_path, "team rank diff artifact")
+    future_source = future.get("source")
+    if not isinstance(future_source, dict):
+        raise SnapshotComparisonError("future snapshot source binding is missing")
+    current_trust_root = _verify_current_snapshot_trust_root(
+        current_receipt_path=current_receipt_path,
+        current_receipt=current,
+        current_receipt_file_sha256=_sha256_path(current_receipt_path),
+        source=future_source,
+    )
     return build_snapshot_comparison_report(
         current_receipt=current,
         future_receipt=future,
@@ -97,6 +184,7 @@ def build_report(
         player_rank_diff_file_sha256=_sha256_path(player_rank_diff_path),
         team_rank_diff_file_sha256=_sha256_path(team_rank_diff_path),
         expected_source_receipt_sha256=TRUSTED_V13_SOURCE_RECEIPT_SHA256,
+        current_snapshot_trust_root=current_trust_root,
     )
 
 

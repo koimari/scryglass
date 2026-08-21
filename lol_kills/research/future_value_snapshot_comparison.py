@@ -19,6 +19,9 @@ RANK_UNIVERSE = "common_verified_finite_ids"
 RANK_DIRECTION = "descending_value_rank_1_highest"
 FULL_RANK_STATUS = "incomparable"
 IDENTITY_BLOCKER = "current_rating_player_team_identity_missing_for_rank_diffs"
+CURRENT_RATING_INPUT_BINDING_SCHEMA = (
+    "scryglass:future-value-current-rating-input-binding:v1"
+)
 
 
 class SnapshotComparisonError(ValueError):
@@ -121,6 +124,158 @@ def _authority_payload(authority: Mapping[str, Any] | None) -> dict[str, bool]:
         "research_only": True,
         **{field: False for field in expected_false},
     }
+
+
+def _validate_current_snapshot_trust_root(
+    trust_root: Mapping[str, Any] | None,
+    *,
+    current_payload: Mapping[str, Any],
+    current_receipt_sha256: str,
+    current_receipt_file_sha256: str | None,
+    source_receipt_sha256: str,
+    player: Mapping[str, Any],
+    team: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Bind common IDs to the independently verified current snapshots.
+
+    Rank artifacts carry their own future-source receipt binding.  Their
+    common-ID digest alone does not prove that the current side used the
+    pinned rating snapshots.  The comparison therefore requires the binding
+    emitted after those snapshots were verified.  It keeps the full ID lists
+    in the verification input and emits only their digests.
+    """
+
+    if not isinstance(trust_root, Mapping):
+        raise SnapshotComparisonError("current snapshot trust root is required")
+    if trust_root.get("schema_version") != CURRENT_RATING_INPUT_BINDING_SCHEMA:
+        raise SnapshotComparisonError("current snapshot trust root schema changed")
+    receipt = trust_root.get("receipt")
+    if not isinstance(receipt, Mapping):
+        raise SnapshotComparisonError("current snapshot trust root receipt is missing")
+    if receipt.get("receipt_sha256") != current_receipt_sha256:
+        raise SnapshotComparisonError("current snapshot trust root receipt changed")
+    if current_receipt_file_sha256 is None:
+        raise SnapshotComparisonError("current snapshot receipt file binding is required")
+    expected_file_sha256 = _hash_text(
+        current_receipt_file_sha256, label="current receipt file"
+    )
+    if receipt.get("sha256") != expected_file_sha256:
+        raise SnapshotComparisonError("current snapshot trust root file binding changed")
+    if receipt.get("schema_version") != current_payload.get("schema_version"):
+        raise SnapshotComparisonError("current snapshot trust root receipt schema changed")
+    if trust_root.get("source_receipt_sha256") != source_receipt_sha256:
+        raise SnapshotComparisonError("current snapshot trust root source receipt changed")
+    if trust_root.get("source_identity_sha256") != current_payload.get(
+        "source_identity_sha256"
+    ):
+        raise SnapshotComparisonError("current snapshot trust root source identity changed")
+    if trust_root.get("source_as_of") != current_payload.get("source_as_of"):
+        raise SnapshotComparisonError("current snapshot trust root source timestamp changed")
+    if int(trust_root.get("source_game_count") or -1) != int(
+        current_payload.get("source_game_count") or -2
+    ):
+        raise SnapshotComparisonError("current snapshot trust root source game count changed")
+
+    snapshots = trust_root.get("snapshots")
+    current_snapshots = current_payload.get("snapshots")
+    if not isinstance(snapshots, Mapping) or not isinstance(current_snapshots, Mapping):
+        raise SnapshotComparisonError("current snapshot trust root snapshots are missing")
+    if set(snapshots) != {"player", "team"}:
+        raise SnapshotComparisonError("current snapshot trust root snapshots changed")
+
+    validated: dict[str, Any] = {
+        "schema_version": CURRENT_RATING_INPUT_BINDING_SCHEMA,
+        "receipt_sha256": current_receipt_sha256,
+        "file_sha256": expected_file_sha256,
+        "source_receipt_sha256": source_receipt_sha256,
+        "source_identity_sha256": str(
+            current_payload.get("source_identity_sha256") or ""
+        ),
+        "snapshots": {},
+    }
+    for scope, identity, comparison in (
+        ("player", "player_id", player),
+        ("team", "team_id", team),
+    ):
+        root_record = snapshots.get(scope)
+        current_record = current_snapshots.get(scope)
+        if not isinstance(root_record, Mapping) or not isinstance(
+            current_record, Mapping
+        ):
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust binding is missing"
+            )
+        if root_record.get("identity_column") != identity:
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust identity changed"
+            )
+        if root_record.get("value_column") != comparison["current_value_field"]:
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust value field changed"
+            )
+        raw_ids = root_record.get("identity_ids")
+        if not isinstance(raw_ids, list):
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust IDs are missing"
+            )
+        ids = [str(value) for value in raw_ids if str(value).strip()]
+        if len(ids) != len(raw_ids) or len(set(ids)) != len(ids):
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust IDs are ambiguous"
+            )
+        identity_sha256 = _identity_digest(identity, ids)
+        if root_record.get("identity_sha256") != identity_sha256:
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust identity digest changed"
+            )
+        if int(root_record.get("verified_rows") or -1) != len(ids):
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust count changed"
+            )
+        if int(root_record.get("finite_rows") or -1) != len(ids):
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot trust finite count changed"
+            )
+        if int(current_record.get("verified_rows") or -1) != len(ids):
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot receipt count changed"
+            )
+        if current_record.get("identity_column") not in (None, identity):
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot receipt identity changed"
+            )
+        if current_record.get("value_column") != comparison["current_value_field"]:
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot receipt value field changed"
+            )
+        common_ids = comparison.get("common_ids")
+        if not isinstance(common_ids, list) or not set(common_ids).issubset(set(ids)):
+            raise SnapshotComparisonError(
+                f"{scope} rank IDs are not bound to current snapshot trust root"
+            )
+        if int(comparison["current_finite_rows"]) != len(ids):
+            raise SnapshotComparisonError(
+                f"{scope} current finite count is not source-bound"
+            )
+        snapshot_file_sha256 = _hash_text(
+            root_record.get("sha256"), label=f"current {scope} snapshot file"
+        )
+        current_file_sha256 = _hash_text(
+            current_record.get("sha256"), label=f"current {scope} receipt file"
+        )
+        if current_file_sha256 != snapshot_file_sha256:
+            raise SnapshotComparisonError(
+                f"current {scope} snapshot file binding changed"
+            )
+        validated["snapshots"][scope] = {
+            "identity_column": identity,
+            "value_column": comparison["current_value_field"],
+            "verified_rows": len(ids),
+            "finite_rows": len(ids),
+            "identity_sha256": identity_sha256,
+            "file_sha256": snapshot_file_sha256,
+        }
+    return validated
 
 
 def _validate_rank_artifact(
@@ -243,6 +398,7 @@ def build_snapshot_comparison_report(
     player_rank_diff_file_sha256: str | None = None,
     team_rank_diff_file_sha256: str | None = None,
     expected_source_receipt_sha256: str | None = None,
+    current_snapshot_trust_root: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Verify and summarize one current-versus-future snapshot comparison."""
 
@@ -308,13 +464,91 @@ def build_snapshot_comparison_report(
         current_snapshot_rows=int(team_record.get("verified_rows") or -1),
         future_source_receipt_sha256=source_hash,
     )
+    current_trust = _validate_current_snapshot_trust_root(
+        current_snapshot_trust_root,
+        current_payload=current_payload,
+        current_receipt_sha256=current_hash,
+        current_receipt_file_sha256=current_receipt_file_sha256,
+        source_receipt_sha256=source_hash,
+        player=player,
+        team=team,
+    )
+    raw_blockers: list[str] = []
+    for candidate in (
+        future_payload.get("blockers"),
+        future_payload.get("fit", {}).get("blockers")
+        if isinstance(future_payload.get("fit"), Mapping)
+        else None,
+    ):
+        if isinstance(candidate, list):
+            raw_blockers.extend(str(value) for value in candidate)
     inherited = sorted(
         {
             str(value)
-            for value in future_payload.get("blockers", [])
+            for value in raw_blockers
             if str(value) in {IDENTITY_BLOCKER, "current_player_team_rating_comparison_missing"}
         }
     )
+    model_authorization_blockers = [
+        value for value in inherited if value == IDENTITY_BLOCKER
+    ]
+    independent_join = {
+        "status": "verified",
+        "source_bound": True,
+        "rank_universe": RANK_UNIVERSE,
+        "rank_direction": RANK_DIRECTION,
+        "player_rows": int(player["matched_rows"]),
+        "team_rows": int(team["matched_rows"]),
+        "rank_pairs": {
+            "player": int(player["matched_rows"]),
+            "team": int(team["matched_rows"]),
+        },
+        "player_rank_pairs": int(player["matched_rows"]),
+        "team_rank_pairs": int(team["matched_rows"]),
+        "common_verified_finite_ids": {
+            "player": int(player["common_universe_size"]),
+            "team": int(team["common_universe_size"]),
+        },
+        "join_rates": {
+            "player": player["join_rate"],
+            "team": team["join_rate"],
+        },
+        "full_snapshot_rank_status": {
+            "player": player["full_snapshot_rank_status"],
+            "team": team["full_snapshot_rank_status"],
+        },
+        "current_value_fields": {
+            "player": player["current_value_field"],
+            "team": team["current_value_field"],
+        },
+        "future_value_fields": {
+            "player": player["future_value_field"],
+            "team": team["future_value_field"],
+        },
+        "player": {
+            "rank_pairs": int(player["matched_rows"]),
+            "common_verified_finite_ids": int(player["common_universe_size"]),
+            "common_identity_sha256": player["common_identity_sha256"],
+            "join_rate": player["join_rate"],
+            "full_snapshot_rank_status": player["full_snapshot_rank_status"],
+            "current_finite_rows": player["current_finite_rows"],
+            "future_finite_rows": player["future_finite_rows"],
+            "future_rows": player["future_snapshot_rows"],
+            "unmatched_rows": player["unmatched_rows"],
+        },
+        "team": {
+            "rank_pairs": int(team["matched_rows"]),
+            "common_verified_finite_ids": int(team["common_universe_size"]),
+            "common_identity_sha256": team["common_identity_sha256"],
+            "join_rate": team["join_rate"],
+            "full_snapshot_rank_status": team["full_snapshot_rank_status"],
+            "current_finite_rows": team["current_finite_rows"],
+            "future_finite_rows": team["future_finite_rows"],
+            "future_rows": team["future_snapshot_rows"],
+            "unmatched_rows": team["unmatched_rows"],
+        },
+        "current_snapshot_trust_root": current_trust,
+    }
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": "research_only_partial",
@@ -346,33 +580,37 @@ def build_snapshot_comparison_report(
         },
         "snapshot_comparisons": {"player": player, "team": team},
         "full_snapshot_rank_status": FULL_RANK_STATUS,
-        "independent_join": {
-            "status": "verified",
-            "player_rows": int(player["matched_rows"]),
-            "team_rows": int(team["matched_rows"]),
-            "current_value_fields": {
-                "player": player["current_value_field"],
-                "team": team["current_value_field"],
-            },
-            "future_value_fields": {
-                "player": player["future_value_field"],
-                "team": team["future_value_field"],
-            },
-        },
+        "independent_join": independent_join,
         "inherited_authorization_blockers": inherited,
+        "model_authorization_blocker": {
+            "status": "stale_inherited" if model_authorization_blockers else "none",
+            "label": (
+                "stale_inherited_for_model_authorization"
+                if model_authorization_blockers
+                else "none"
+            ),
+            "stale": bool(model_authorization_blockers),
+            "inherited": bool(model_authorization_blockers),
+            "scope": "model_authorization",
+            "blockers": model_authorization_blockers,
+        },
         "blocker_context": {
-            "status": "inherited_blocker_present" if inherited else "none",
+            "status": "stale_inherited" if model_authorization_blockers else "none",
             "independent_join_status": "verified",
             "full_snapshot_rank_status": FULL_RANK_STATUS,
             "identity_blocker_is_join_failure": False,
+            "model_authorization_status": (
+                "stale_inherited" if model_authorization_blockers else "none"
+            ),
         },
-        "blockers": sorted(str(value) for value in future_payload.get("blockers", [])),
+        "blockers": sorted(set(raw_blockers)),
     }
     report["report_sha256"] = _sha256_bytes(_canonical_json_bytes(report))
     return report
 
 
 __all__ = [
+    "CURRENT_RATING_INPUT_BINDING_SCHEMA",
     "FULL_RANK_STATUS",
     "IDENTITY_BLOCKER",
     "RANK_DIRECTION",
