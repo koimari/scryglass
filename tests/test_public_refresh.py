@@ -243,6 +243,53 @@ def test_tier_failure_keeps_a_smoke_verified_ratings_release(tmp_path: Path) -> 
     assert result["status"] == "partial"
 
 
+def test_future_value_shadow_runs_after_ratings_and_stays_out_of_public_pack(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)
+    game_ids = ["game-1"]
+    config.sync.state_path.write_text(
+        json.dumps({"published_game_ids": game_ids}),
+        encoding="utf-8",
+    )
+    config.state_path.write_text(
+        json.dumps({"tier": {"status": "available"}}),
+        encoding="utf-8",
+    )
+    ratings = {
+        "status": "no_change",
+        "pack_id": "old",
+        "source_observed_through": "2026-08-09T17:00:00Z",
+        "source_identity_sha256": source_identity_sha256(game_ids),
+    }
+    with patch.object(public_refresh, "_preflight"), patch.object(
+        public_refresh, "_run_with_source_retries", return_value=ratings
+    ), patch.object(
+        public_refresh,
+        "verify_public_release",
+        return_value={"pack_id": "old", "files": 1, "tier_status": "available"},
+    ):
+        result = public_refresh.run_once(config, now=NOW)
+
+    shadow = result["future_value_shadow"]
+    assert shadow["status"] == "research_only_blocked"
+    assert shadow["source"]["accepted_game_ids"] == game_ids
+    assert shadow["writes_public_artifacts"] is False
+    assert Path(str(shadow["receipt_path"])).is_file()
+    assert not (config.public_root / "future-value-shadow").exists()
+
+
+def test_future_value_shadow_promotion_request_fails_before_ratings_stage(
+    tmp_path: Path,
+) -> None:
+    config = replace(_config(tmp_path), future_value_shadow_promote_variant="both")
+    with patch.object(public_refresh, "_run_with_source_retries") as ratings:
+        with pytest.raises(public_refresh.PublicRefreshError, match="independent authorization"):
+            public_refresh.run_once(config, now=NOW)
+    ratings.assert_not_called()
+
+
 def test_failed_public_smoke_restores_the_previous_pack(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)

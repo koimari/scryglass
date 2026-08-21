@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+from lol_kills.research.future_value_refresh_shadow import (
+    FutureValueShadowPromotionError,
+    run_future_value_refresh_shadow,
+    reject_unauthorized_promotion,
+)
+from lol_kills.v2.tierlists.accepted_census import identity_sha256
+
+
+NOW = datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc)
+
+
+def _inputs(tmp_path: Path) -> dict[str, object]:
+    ids = ["game-2", "game-1"]
+    receipt = tmp_path / "accepted-source.json"
+    receipt.write_text("accepted\n", encoding="utf-8")
+    artifacts: dict[str, str] = {}
+    for name in ("model", "snapshot", "tier", "draft"):
+        path = tmp_path / f"{name}.json"
+        path.write_text(name, encoding="utf-8")
+        artifacts[name] = str(path)
+    return {
+        "source_as_of": "2026-08-20T14:51:29Z",
+        "source_game_ids": ids,
+        "source_game_count": 2,
+        "source_identity_sha256": identity_sha256(ids),
+        "source_receipt_sha256": "a" * 64,
+        "accepted_source_receipt_path": receipt,
+        "current_ratings": {
+            "status": "published",
+            "pack_id": "v2026.08.21.120000",
+            "source_identity_sha256": identity_sha256(ids),
+        },
+        "artifacts": artifacts,
+        "checked_at": NOW,
+    }
+
+
+def test_shadow_receipt_binds_source_and_artifacts_without_public_writes(tmp_path: Path) -> None:
+    public_root = tmp_path / "public"
+    public_root.mkdir()
+    before = hashlib.sha256(b"public").hexdigest()
+    public_file = public_root / "manifest.json"
+    public_file.write_text("public", encoding="utf-8")
+
+    result = run_future_value_refresh_shadow(runtime_root=tmp_path, **_inputs(tmp_path))
+
+    assert result["status"] == "research_only_available"
+    assert result["authority"]["research_only"] is True
+    assert all(value is False for key, value in result["authority"].items() if key != "research_only")
+    assert result["writes_public_artifacts"] is False
+    assert result["stage_or_activation"] is False
+    assert result["source"]["accepted_game_ids"] == ["game-1", "game-2"]
+    assert result["coverage"]["accepted_game_count"] == 2
+    assert result["coverage"]["artifact_count"] == 4
+    receipt_path = Path(str(result["receipt_path"]))
+    assert receipt_path.is_file()
+    assert receipt_path.is_relative_to(tmp_path)
+    assert hashlib.sha256(public_file.read_bytes()).hexdigest() == before
+    saved = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert saved["receipt_sha256"] == result["receipt_sha256"]
+    unsigned = dict(saved)
+    claimed = unsigned.pop("receipt_sha256")
+    assert claimed == hashlib.sha256(
+        json.dumps(unsigned, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def test_missing_artifacts_write_a_durable_blocked_receipt(tmp_path: Path) -> None:
+    values = _inputs(tmp_path)
+    values["artifacts"] = {}
+    result = run_future_value_refresh_shadow(runtime_root=tmp_path, **values)
+
+    assert result["status"] == "research_only_blocked"
+    assert set(result["blockers"]) == {
+        "draft_artifact_missing",
+        "model_artifact_missing",
+        "snapshot_artifact_missing",
+        "tier_artifact_missing",
+    }
+    assert Path(str(result["receipt_path"])).is_file()
+
+
+def test_source_identity_and_hash_drift_stays_blocked(tmp_path: Path) -> None:
+    values = _inputs(tmp_path)
+    values["source_identity_sha256"] = "b" * 64
+    values["current_ratings"] = {"status": "published", "source_identity_sha256": "c" * 64}
+    result = run_future_value_refresh_shadow(runtime_root=tmp_path, **values)
+
+    assert result["status"] == "research_only_blocked"
+    assert "accepted_source_identity_mismatch" in result["blockers"]
+    assert "current_ratings_source_identity_mismatch" in result["blockers"]
+
+
+def test_artifact_hash_mismatch_stays_blocked_and_does_not_copy(tmp_path: Path) -> None:
+    values = _inputs(tmp_path)
+    artifact = tmp_path / "model.json"
+    values["artifacts"] = {
+        **values["artifacts"],  # type: ignore[dict-item]
+        "model": {"path": str(artifact), "sha256": "f" * 64},
+    }
+    result = run_future_value_refresh_shadow(runtime_root=tmp_path, **values)
+
+    assert result["status"] == "research_only_blocked"
+    assert "model_artifact_hash_mismatch" in result["blockers"]
+    assert artifact.read_text(encoding="utf-8") == "model"
+
+
+def test_explicit_promotion_is_rejected_before_any_shadow_work() -> None:
+    with pytest.raises(FutureValueShadowPromotionError, match="independent authorization"):
+        reject_unauthorized_promotion("future_player_form")
