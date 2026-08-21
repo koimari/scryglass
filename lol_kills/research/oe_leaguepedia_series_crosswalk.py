@@ -1,11 +1,11 @@
 """Build a fail-closed Oracle's Elixir to Leaguepedia series crosswalk.
 
 This module joins frozen OE game rows to already captured Leaguepedia
-``ScoreboardGames`` and ``MatchSchedule`` rows.  It does not fetch data and
-it does not use match outcomes.  A row is assigned only when the team set,
-competition mapping, patch evidence, and bounded timestamp identify one
-ScoreboardGames row.  The ScoreboardGames game prefix must then identify one
-MatchSchedule row.
+``ScoreboardGames``, ``MatchSchedule``, and ``Tournaments`` rows.  It does not
+fetch data and it does not use match outcomes.  A row is assigned only when
+the team set, competition mapping, patch evidence, bounded timestamp, and
+independent tournament record identify one ScoreboardGames row.  The
+ScoreboardGames game prefix must then identify one MatchSchedule row.
 
 The result is research-only.  A partial result can describe authoritative
 coverage for the mapped rows, but it never claims complete census coverage.
@@ -29,11 +29,27 @@ from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_
 
 
 SCHEMA_VERSION = "scryglass:oe-leaguepedia-series-crosswalk:v1"
-SOURCE_RECORD_LABELS = ("oe", "scoreboardgames", "matchschedule")
+SOURCE_RECORD_LABELS = ("oe", "scoreboardgames", "matchschedule", "tournaments")
 DEFAULT_MAX_GAME_TIME_DELTA_SECONDS = 300
 DEFAULT_MAX_FIRST_GAME_SCHEDULE_DELTA_SECONDS = 6 * 60 * 60
 DEFAULT_MAX_LATER_GAME_SCHEDULE_AGE_SECONDS = 6 * 60 * 60
 _HEX64 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+_TOURNAMENT_BINDING = {
+    "source": "ScoreboardGames.Tournament",
+    "assignment_field": "scoreboard_tournament",
+    "source_record": "tournaments",
+    "source_table": "Tournaments",
+    "identity_fields": ["Name", "OverviewPage", "League"],
+    "competition_policy": "overview_page_and_league_match_scoreboard_and_explicit_mapping",
+    "series_policy": "one_non_empty_value_per_series",
+    "conflict_policy": "reject_series",
+}
+_LEGACY_TOURNAMENT_BINDING = {
+    "source": "ScoreboardGames.Tournament",
+    "assignment_field": "scoreboard_tournament",
+    "series_policy": "one_non_empty_value_per_series",
+    "conflict_policy": "reject_series",
+}
 
 
 class CrosswalkError(ValueError):
@@ -459,7 +475,9 @@ def _validate_source_records(
     raw_source_bytes: Mapping[str, bytes] | None,
 ) -> dict[str, Any]:
     if set(source_records) != set(SOURCE_RECORD_LABELS):
-        raise CrosswalkError("source records must cover OE, ScoreboardGames, and MatchSchedule")
+        raise CrosswalkError(
+            "source records must cover OE, ScoreboardGames, MatchSchedule, and Tournaments"
+        )
     return {
         label: _read_and_verify_source_record(
             label, source_records[label], payloads[label], raw_source_bytes
@@ -506,10 +524,95 @@ def _prepared_schedule_rows(rows: Sequence[Mapping[str, Any]], issues: list[dict
     return prepared
 
 
+def _prepared_tournament_rows(
+    rows: Sequence[Mapping[str, Any]], issues: list[dict[str, Any]]
+) -> dict[str, list[dict[str, Any]]]:
+    prepared: dict[str, list[dict[str, Any]]] = {}
+    for index, raw in enumerate(rows):
+        row = dict(raw)
+        name = _first(row, ("Name", "name"))
+        overview_page = _first(row, ("OverviewPage", "overview_page"))
+        league = _first(row, ("League", "league"))
+        if not name or not overview_page or not league:
+            issues.append(
+                {
+                    "kind": "invalid_tournament_row",
+                    "index": index,
+                    "reason": "Name, OverviewPage, and League are required",
+                }
+            )
+            continue
+        prepared.setdefault(_norm(name), []).append(
+            {
+                **row,
+                "_name": name,
+                "_overview_page": overview_page,
+                "_league": league,
+            }
+        )
+    return prepared
+
+
+def _tournament_matches_competition(
+    tournament: Mapping[str, Any],
+    scoreboard: Mapping[str, Any],
+    scoreboard_section: Mapping[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    tournament_name = str(tournament.get("_name") or "").strip()
+    tournament_overview = _norm(tournament.get("_overview_page"))
+    scoreboard_overview = _norm(
+        _first(scoreboard, ("OverviewPage", "overview_page"))
+    )
+    tournament_league = _norm(tournament.get("_league"))
+    scoreboard_league = _norm(_first(scoreboard, ("League", "league")))
+    if not tournament_name or not tournament_overview or not tournament_league:
+        return False, {"reason": "tournament_identity_fields_missing"}
+    if not scoreboard_overview or tournament_overview != scoreboard_overview:
+        return False, {
+            "reason": "tournament_overview_page_mismatch",
+            "tournament_overview_page": tournament_overview,
+            "scoreboard_overview_page": scoreboard_overview,
+        }
+    if scoreboard_league and tournament_league != scoreboard_league:
+        return False, {
+            "reason": "tournament_league_mismatch",
+            "tournament_league": tournament_league,
+            "scoreboard_league": scoreboard_league,
+        }
+    allowed_leagues = _mapping_values(scoreboard_section, "league", "leagues")
+    allowed_overviews = _mapping_values(
+        scoreboard_section, "overview_page", "overview_pages", "pages"
+    )
+    allowed_tournaments = _mapping_values(
+        scoreboard_section, "tournament", "tournaments"
+    )
+    if allowed_leagues and tournament_league not in allowed_leagues:
+        return False, {
+            "reason": "tournament_league_not_in_explicit_mapping",
+            "tournament_league": tournament_league,
+        }
+    if allowed_overviews and tournament_overview not in allowed_overviews:
+        return False, {
+            "reason": "tournament_overview_page_not_in_explicit_mapping",
+            "tournament_overview_page": tournament_overview,
+        }
+    if allowed_tournaments and _norm(tournament_name) not in allowed_tournaments:
+        return False, {
+            "reason": "tournament_name_not_in_explicit_mapping",
+            "tournament_name": _norm(tournament_name),
+        }
+    return True, {
+        "name": tournament_name,
+        "overview_page": tournament_overview,
+        "league": tournament_league,
+    }
+
+
 def build_oe_leaguepedia_series_crosswalk(
     oe_rows: Sequence[Mapping[str, Any]],
     scoreboard_rows: Sequence[Mapping[str, Any]],
     schedule_rows: Sequence[Mapping[str, Any]],
+    tournaments_rows: Sequence[Mapping[str, Any]] | None = None,
     *,
     source_receipt: Mapping[str, Any],
     source_records: Mapping[str, Mapping[str, Any]],
@@ -539,6 +642,7 @@ def build_oe_leaguepedia_series_crosswalk(
         ("oe_rows", oe_rows),
         ("scoreboard_rows", scoreboard_rows),
         ("schedule_rows", schedule_rows),
+        ("tournaments_rows", tournaments_rows),
     ):
         if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
             raise CrosswalkError(f"{name} must be an array")
@@ -583,11 +687,17 @@ def build_oe_leaguepedia_series_crosswalk(
     source_binding = _validate_source_receipt(source_receipt, [row["_game_id"] for row in oe_prepared])
     normalized_source_records = _validate_source_records(
         source_records,
-        {"oe": oe_rows, "scoreboardgames": scoreboard_rows, "matchschedule": schedule_rows},
+        {
+            "oe": oe_rows,
+            "scoreboardgames": scoreboard_rows,
+            "matchschedule": schedule_rows,
+            "tournaments": tournaments_rows or (),
+        },
         raw_source_bytes,
     )
     scoreboard = _prepared_scoreboard_rows(scoreboard_rows, issues)
     schedule = _prepared_schedule_rows(schedule_rows, issues)
+    tournaments = _prepared_tournament_rows(tournaments_rows or (), issues)
     schedules_by_match: dict[str, list[dict[str, Any]]] = {}
     for row in schedule:
         schedules_by_match.setdefault(row["_match_id"], []).append(row)
@@ -642,6 +752,54 @@ def build_oe_leaguepedia_series_crosswalk(
         if scoreboard_id in used_scoreboard_ids:
             issues.append({"kind": "duplicate_source_assignment", "oe_game_id": oe["_game_id"], "scoreboard_game_id": scoreboard_id})
             continue
+        scoreboard_tournament = str(selected.get("_tournament") or "").strip()
+        if not scoreboard_tournament:
+            issues.append(
+                {
+                    "kind": "scoreboard_tournament_missing",
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                    "series_id": selected["_prefix"],
+                }
+            )
+            continue
+        tournament_candidates = tournaments.get(_norm(scoreboard_tournament), [])
+        if not tournament_candidates:
+            issues.append(
+                {
+                    "kind": "tournament_identity_missing",
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                    "scoreboard_tournament": scoreboard_tournament,
+                }
+            )
+            continue
+        if len(tournament_candidates) != 1:
+            issues.append(
+                {
+                    "kind": "tournament_identity_ambiguous",
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                    "scoreboard_tournament": scoreboard_tournament,
+                    "candidate_count": len(tournament_candidates),
+                }
+            )
+            continue
+        tournament_row = tournament_candidates[0]
+        tournament_ok, tournament_evidence = _tournament_matches_competition(
+            tournament_row, selected, scoreboard_section
+        )
+        if not tournament_ok:
+            issues.append(
+                {
+                    "kind": "tournament_competition_mismatch",
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                    "scoreboard_tournament": scoreboard_tournament,
+                    "evidence": tournament_evidence,
+                }
+            )
+            continue
         match_id = selected["_prefix"]
         match_candidates = schedules_by_match.get(match_id, [])
         schedule_candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -680,17 +838,6 @@ def build_oe_leaguepedia_series_crosswalk(
             })
             continue
         schedule_row, schedule_evidence = schedule_candidates[0]
-        scoreboard_tournament = str(selected.get("_tournament") or "").strip()
-        if not scoreboard_tournament:
-            issues.append(
-                {
-                    "kind": "scoreboard_tournament_missing",
-                    "oe_game_id": oe["_game_id"],
-                    "scoreboard_game_id": scoreboard_id,
-                    "series_id": match_id,
-                }
-            )
-            continue
         used_scoreboard_ids.add(scoreboard_id)
         assignments.append({
             "oe_game_id": oe["_game_id"],
@@ -706,7 +853,11 @@ def build_oe_leaguepedia_series_crosswalk(
             "source_patch": oe["_patch"] or None,
             "scoreboard_tournament": scoreboard_tournament,
             "scoreboard_game_id_prefix": selected["_prefix"],
-            "evidence": {**evidence, "schedule": schedule_evidence},
+            "evidence": {
+                **evidence,
+                "schedule": schedule_evidence,
+                "tournament": tournament_evidence,
+            },
             "outcome_used": False,
             "assignment_method": "exact_team_set_competition_patch_bounded_timestamp_then_exact_game_id_prefix",
         })
@@ -822,6 +973,7 @@ def build_oe_leaguepedia_series_crosswalk(
             "oe": [dict(row) for row in oe_rows],
             "scoreboardgames": [dict(row) for row in scoreboard_rows],
             "matchschedule": [dict(row) for row in schedule_rows],
+            "tournaments": [dict(row) for row in tournaments_rows or ()],
         },
         "join_contract": {
             "team_identity": "verified_alias_normalized_unordered_two_team_set_for_join; original_OE_team_set_for_assignment_binding",
@@ -840,12 +992,7 @@ def build_oe_leaguepedia_series_crosswalk(
             "unmatched_policy": "reject_assignment_and_record_issue",
             "outcome_used": False,
             "outcome_policy": "ignored_and_never_used_for_matching",
-            "tournament_binding": {
-                "source": "ScoreboardGames.Tournament",
-                "assignment_field": "scoreboard_tournament",
-                "series_policy": "one_non_empty_value_per_series",
-                "conflict_policy": "reject_series",
-            },
+            "tournament_binding": dict(_TOURNAMENT_BINDING),
         },
         "coverage": coverage,
         "assignments": assignments,
@@ -888,12 +1035,16 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
         else None
     )
     if tournament_binding is not None:
-        if not isinstance(tournament_binding, Mapping) or dict(tournament_binding) != {
-            "source": "ScoreboardGames.Tournament",
-            "assignment_field": "scoreboard_tournament",
-            "series_policy": "one_non_empty_value_per_series",
-            "conflict_policy": "reject_series",
-        }:
+        is_current_binding = (
+            isinstance(tournament_binding, Mapping)
+            and dict(tournament_binding) == _TOURNAMENT_BINDING
+        )
+        is_legacy_partial_binding = (
+            payload.get("status") == "partial_authoritative_coverage"
+            and isinstance(tournament_binding, Mapping)
+            and dict(tournament_binding) == _LEGACY_TOURNAMENT_BINDING
+        )
+        if not is_current_binding and not is_legacy_partial_binding:
             raise CrosswalkError("crosswalk tournament binding is invalid")
         assignments_by_series: dict[str, set[str]] = {}
         for row in assignments:
@@ -926,6 +1077,26 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
         }:
             raise CrosswalkError("crosswalk series tournament summary does not match assignments")
     coverage = payload.get("coverage")
+    if payload.get("status") == "complete_authoritative_coverage":
+        if not isinstance(tournament_binding, Mapping):
+            raise CrosswalkError("complete crosswalk tournament binding is missing")
+        if dict(tournament_binding) != _TOURNAMENT_BINDING:
+            raise CrosswalkError("complete crosswalk tournament binding is invalid")
+        source_records = payload.get("source_records")
+        tournament_record = (
+            source_records.get("tournaments")
+            if isinstance(source_records, Mapping)
+            else None
+        )
+        if not isinstance(tournament_record, Mapping) or tournament_record.get(
+            "integrity_verified"
+        ) is not True:
+            raise CrosswalkError("complete crosswalk tournament source record is missing")
+        raw_sources = payload.get("raw_sources")
+        if not isinstance(raw_sources, Mapping) or not isinstance(
+            raw_sources.get("tournaments"), list
+        ):
+            raise CrosswalkError("complete crosswalk tournament source rows are missing")
     if not isinstance(coverage, Mapping) or coverage.get("complete") is not True:
         if payload.get("status") != "partial_authoritative_coverage":
             raise CrosswalkError("incomplete crosswalk does not declare partial coverage")

@@ -32,7 +32,7 @@ def _receipt(ids: list[str]) -> dict[str, object]:
     return payload
 
 
-def _fixture() -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], dict[str, object], dict[str, dict[str, object]], dict[str, bytes]]:
+def _fixture() -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], dict[str, object], dict[str, dict[str, object]], dict[str, bytes]]:
     oe = [
         {"gameid": "oe-1", "date": "2026-08-14T15:07:55Z", "league": "LEC", "patch": "16.16", "teams": ["G2", "Fnatic"], "result": "blue"},
         {"gameid": "oe-2", "date": "2026-08-14T15:54:54Z", "league": "LEC", "patch": "16.16", "teams": ["Fnatic", "G2 Esports"], "result": "red"},
@@ -44,6 +44,9 @@ def _fixture() -> tuple[list[dict[str, object]], list[dict[str, object]], list[d
     schedule = [
         {"MatchId": "match-1", "DateTime UTC": "2026-08-14 15:00:00", "Team1": "G2 Esports", "Team2": "Fnatic", "Patch": "26.16", "OverviewPage": "LEC/2026 Summer", "Winner": "G2"},
     ]
+    tournaments = [
+        {"Name": "LEC 2026 Summer", "OverviewPage": "LEC/2026 Summer", "League": "LEC"},
+    ]
     receipt = _receipt(["oe-1", "oe-2"])
     mapping = {
         "LEC": {
@@ -52,7 +55,12 @@ def _fixture() -> tuple[list[dict[str, object]], list[dict[str, object]], list[d
             "patches": {"16.16": ["26.16"]},
         }
     }
-    payloads = {"oe": oe, "scoreboardgames": scoreboard, "matchschedule": schedule}
+    payloads = {
+        "oe": oe,
+        "scoreboardgames": scoreboard,
+        "matchschedule": schedule,
+        "tournaments": tournaments,
+    }
     records: dict[str, dict[str, object]] = {}
     raw: dict[str, bytes] = {}
     for label, rows in payloads.items():
@@ -67,15 +75,16 @@ def _fixture() -> tuple[list[dict[str, object]], list[dict[str, object]], list[d
             "payload_sha256": hashlib.sha256(content).hexdigest(),
             "payload_bytes": len(content),
         }
-    return oe, scoreboard, schedule, receipt, mapping, records, raw
+    return oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw
 
 
 def _build(**kwargs):
-    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     return build_oe_leaguepedia_series_crosswalk(
         oe,
         scoreboard,
         schedule,
+        tournaments,
         source_receipt=receipt,
         source_records=records,
         competition_mapping=mapping,
@@ -121,7 +130,7 @@ def test_complete_crosswalk_binds_exact_prefix_and_keeps_outcomes_out() -> None:
 
 
 def test_missing_scoreboard_tournament_is_unmapped_and_fail_closed() -> None:
-    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     del scoreboard[0]["Tournament"]
     records, raw = _refresh_records(
         records, raw, {"scoreboardgames": scoreboard}
@@ -130,6 +139,7 @@ def test_missing_scoreboard_tournament_is_unmapped_and_fail_closed() -> None:
         oe,
         scoreboard,
         schedule,
+        tournaments,
         source_receipt=receipt,
         source_records=records,
         competition_mapping=mapping,
@@ -144,6 +154,7 @@ def test_missing_scoreboard_tournament_is_unmapped_and_fail_closed() -> None:
         oe,
         scoreboard,
         schedule,
+        tournaments,
         source_receipt=receipt,
         source_records=records,
         competition_mapping=mapping,
@@ -156,15 +167,23 @@ def test_missing_scoreboard_tournament_is_unmapped_and_fail_closed() -> None:
 
 
 def test_conflicting_scoreboard_tournaments_reject_the_series() -> None:
-    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     scoreboard[1]["Tournament"] = "LEC 2026 Playoffs"
+    tournaments.append(
+        {
+            "Name": "LEC 2026 Playoffs",
+            "OverviewPage": "LEC/2026 Summer",
+            "League": "LEC",
+        }
+    )
     records, raw = _refresh_records(
-        records, raw, {"scoreboardgames": scoreboard}
+        records, raw, {"scoreboardgames": scoreboard, "tournaments": tournaments}
     )
     result = build_oe_leaguepedia_series_crosswalk(
         oe,
         scoreboard,
         schedule,
+        tournaments,
         source_receipt=receipt,
         source_records=records,
         competition_mapping=mapping,
@@ -182,6 +201,78 @@ def test_conflicting_scoreboard_tournaments_reject_the_series() -> None:
         "LEC 2026 Playoffs",
         "LEC 2026 Summer",
     ]
+
+
+def test_resealed_wrong_scoreboard_tournament_stays_unmapped() -> None:
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
+    scoreboard[0]["Tournament"] = "Forged Tournament"
+    records, raw = _refresh_records(records, raw, {"scoreboardgames": scoreboard})
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+        raw_source_bytes=raw,
+        allow_partial=True,
+    )
+    assert [row["oe_game_id"] for row in result["assignments"]] == ["oe-2"]
+    assert any(
+        issue["kind"] == "tournament_identity_missing"
+        and issue["scoreboard_tournament"] == "Forged Tournament"
+        for issue in result["issues"]
+    )
+
+
+def test_tampered_tournament_overview_fails_competition_binding() -> None:
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
+    tournaments[0]["OverviewPage"] = "Forged/Overview"
+    records, raw = _refresh_records(records, raw, {"tournaments": tournaments})
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+        raw_source_bytes=raw,
+        allow_partial=True,
+    )
+    assert result["assignments"] == []
+    assert all(
+        issue["kind"] == "tournament_competition_mismatch"
+        for issue in result["issues"]
+        if issue["kind"].startswith("tournament_")
+    )
+
+
+def test_complete_crosswalk_requires_tournament_binding() -> None:
+    result = _build()
+    result["join_contract"].pop("tournament_binding")
+    result.pop("crosswalk_sha256")
+    result["crosswalk_sha256"] = hashlib.sha256(_canonical(result)).hexdigest()
+    with pytest.raises(CrosswalkError, match="tournament binding"):
+        verify_crosswalk(result)
+
+
+def test_legacy_partial_tournament_binding_remains_research_readable() -> None:
+    result = _build()
+    result["status"] = "partial_authoritative_coverage"
+    result["coverage"]["complete"] = False
+    result["join_contract"]["tournament_binding"] = {
+        "source": "ScoreboardGames.Tournament",
+        "assignment_field": "scoreboard_tournament",
+        "series_policy": "one_non_empty_value_per_series",
+        "conflict_policy": "reject_series",
+    }
+    result.pop("crosswalk_sha256")
+    result["crosswalk_sha256"] = hashlib.sha256(_canonical(result)).hexdigest()
+    verify_crosswalk(result)
 
 
 def test_tournament_assignment_tamper_changes_hash_and_fails_verification() -> None:
@@ -205,13 +296,13 @@ def test_tournament_assignment_tamper_changes_hash_and_fails_verification() -> N
 
 def test_outcome_mutations_do_not_change_assignments() -> None:
     baseline = _build()
-    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     for row in oe + scoreboard + schedule:
         row["Winner"] = "forged-outcome"
         row["result"] = "forged-outcome"
     records, raw = _refresh_records(records, raw, {"oe": oe, "scoreboardgames": scoreboard, "matchschedule": schedule})
     mutated = build_oe_leaguepedia_series_crosswalk(
-        oe, scoreboard, schedule,
+        oe, scoreboard, schedule, tournaments,
         source_receipt=receipt, source_records=records,
         competition_mapping=mapping, captured_at="2026-08-15T00:00:00Z",
         raw_source_bytes=raw,
@@ -221,11 +312,11 @@ def test_outcome_mutations_do_not_change_assignments() -> None:
 
 
 def test_ambiguous_game_identity_is_rejected() -> None:
-    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     scoreboard.append(dict(scoreboard[0], **{"GameId": "match-other_1"}))
     records, raw = _refresh_records(records, raw, {"oe": oe, "scoreboardgames": scoreboard, "matchschedule": schedule})
     result = build_oe_leaguepedia_series_crosswalk(
-        oe, scoreboard, schedule,
+        oe, scoreboard, schedule, tournaments,
         source_receipt=receipt, source_records=records,
         competition_mapping=mapping, captured_at="2026-08-15T00:00:00Z",
         raw_source_bytes=raw, allow_partial=True,
@@ -236,12 +327,12 @@ def test_ambiguous_game_identity_is_rejected() -> None:
 
 
 def test_duplicate_ids_and_missing_prefix_are_not_assigned() -> None:
-    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     scoreboard[1]["GameId"] = scoreboard[0]["GameId"]
     schedule[0]["MatchId"] = "wrong-prefix"
     records, raw = _refresh_records(records, raw, {"oe": oe, "scoreboardgames": scoreboard, "matchschedule": schedule})
     result = build_oe_leaguepedia_series_crosswalk(
-        oe, scoreboard, schedule,
+        oe, scoreboard, schedule, tournaments,
         source_receipt=receipt, source_records=records,
         competition_mapping=mapping, captured_at="2026-08-15T00:00:00Z",
         raw_source_bytes=raw, allow_partial=True,
@@ -252,11 +343,11 @@ def test_duplicate_ids_and_missing_prefix_are_not_assigned() -> None:
 
 
 def test_patch_mismatch_is_unmatched() -> None:
-    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     scoreboard[0]["Patch"] = "26.15"
     records, raw = _refresh_records(records, raw, {"oe": oe, "scoreboardgames": scoreboard, "matchschedule": schedule})
     result = build_oe_leaguepedia_series_crosswalk(
-        oe, scoreboard, schedule,
+        oe, scoreboard, schedule, tournaments,
         source_receipt=receipt, source_records=records,
         competition_mapping=mapping, captured_at="2026-08-15T00:00:00Z",
         raw_source_bytes=raw, allow_partial=True,
@@ -266,14 +357,14 @@ def test_patch_mismatch_is_unmatched() -> None:
 
 
 def test_partial_coverage_is_explicit_and_never_full_census() -> None:
-    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     oe.append({"gameid": "oe-unmatched", "date": "2026-08-14T16:40:00Z", "league": "LEC", "patch": "16.16", "teams": ["G2", "Fnatic"]})
     # The selected row remains within the accepted receipt only after the
     # receipt is rebuilt.  This models a selected subset of a larger census.
     receipt = _receipt(["oe-1", "oe-2", "oe-unmatched"])
     records, raw = _refresh_records(records, raw, {"oe": oe, "scoreboardgames": scoreboard, "matchschedule": schedule})
     result = build_oe_leaguepedia_series_crosswalk(
-        oe, scoreboard, schedule,
+        oe, scoreboard, schedule, tournaments,
         source_receipt=receipt, source_records=records,
         competition_mapping=mapping, captured_at="2026-08-15T00:00:00Z",
         raw_source_bytes=raw, allow_partial=True,
@@ -284,11 +375,11 @@ def test_partial_coverage_is_explicit_and_never_full_census() -> None:
 
 
 def test_hash_and_receipt_tampering_fails_closed() -> None:
-    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     records["oe"]["sha256"] = "0" * 64
     with pytest.raises(CrosswalkError, match="source file hash"):
         build_oe_leaguepedia_series_crosswalk(
-            oe, scoreboard, schedule,
+            oe, scoreboard, schedule, tournaments,
             source_receipt=receipt, source_records=records,
             competition_mapping=mapping, captured_at="2026-08-15T00:00:00Z",
             raw_source_bytes=raw,
@@ -296,7 +387,7 @@ def test_hash_and_receipt_tampering_fails_closed() -> None:
     receipt["source_game_count"] = 999
     with pytest.raises(CrosswalkError, match="source receipt hash"):
         build_oe_leaguepedia_series_crosswalk(
-            oe, scoreboard, schedule,
+            oe, scoreboard, schedule, tournaments,
             source_receipt=receipt, source_records=records,
             competition_mapping=mapping, captured_at="2026-08-15T00:00:00Z",
             raw_source_bytes=raw,
@@ -304,11 +395,11 @@ def test_hash_and_receipt_tampering_fails_closed() -> None:
 
 
 def test_unmatched_rows_fail_closed_without_partial_opt_in() -> None:
-    oe, scoreboard, schedule, receipt, mapping, records, raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
     scoreboard[0]["Team1"] = "Unknown Team"
     records, raw = _refresh_records(records, raw, {"oe": oe, "scoreboardgames": scoreboard, "matchschedule": schedule})
     result = build_oe_leaguepedia_series_crosswalk(
-        oe, scoreboard, schedule,
+        oe, scoreboard, schedule, tournaments,
         source_receipt=receipt, source_records=records,
         competition_mapping=mapping, captured_at="2026-08-15T00:00:00Z",
         raw_source_bytes=raw,
@@ -318,9 +409,9 @@ def test_unmatched_rows_fail_closed_without_partial_opt_in() -> None:
 
 
 def test_source_path_can_verify_downloaded_file(tmp_path: Path) -> None:
-    oe, scoreboard, schedule, receipt, mapping, records, _raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, _raw = _fixture()
     paths: dict[str, Path] = {}
-    for label, rows in (("oe", oe), ("scoreboardgames", scoreboard), ("matchschedule", schedule)):
+    for label, rows in (("oe", oe), ("scoreboardgames", scoreboard), ("matchschedule", schedule), ("tournaments", tournaments)):
         path = tmp_path / f"{label}.json"
         raw = _canonical(rows)
         path.write_bytes(raw)
@@ -330,7 +421,7 @@ def test_source_path_can_verify_downloaded_file(tmp_path: Path) -> None:
         records[label]["bytes"] = len(raw)
         paths[label] = path
     result = build_oe_leaguepedia_series_crosswalk(
-        oe, scoreboard, schedule,
+        oe, scoreboard, schedule, tournaments,
         source_receipt=receipt, source_records=records,
         competition_mapping=mapping, captured_at="2026-08-15T00:00:00Z",
     )
@@ -338,9 +429,9 @@ def test_source_path_can_verify_downloaded_file(tmp_path: Path) -> None:
 
 
 def test_cli_reads_downloaded_json_and_never_needs_network(tmp_path: Path) -> None:
-    oe, scoreboard, schedule, receipt, mapping, _records, _raw = _fixture()
+    oe, scoreboard, schedule, tournaments, receipt, mapping, _records, _raw = _fixture()
     paths: dict[str, Path] = {}
-    for label, rows in (("oe", oe), ("scoreboardgames", scoreboard), ("matchschedule", schedule)):
+    for label, rows in (("oe", oe), ("scoreboardgames", scoreboard), ("matchschedule", schedule), ("tournaments", tournaments)):
         path = tmp_path / f"{label}.json"
         path.write_bytes(_canonical(rows))
         paths[label] = path
@@ -355,7 +446,7 @@ def test_cli_reads_downloaded_json_and_never_needs_network(tmp_path: Path) -> No
                 "captured_at": "2026-08-15T00:00:00Z",
                 "sources": {
                     label: {"url": f"https://example.test/{label}.json", "retrieved_at": "2026-08-15T00:00:00Z"}
-                    for label in ("oe", "scoreboardgames", "matchschedule")
+                    for label in ("oe", "scoreboardgames", "matchschedule", "tournaments")
                 },
             },
             sort_keys=True,
@@ -367,6 +458,7 @@ def test_cli_reads_downloaded_json_and_never_needs_network(tmp_path: Path) -> No
             "--oe", str(paths["oe"]),
             "--scoreboardgames", str(paths["scoreboardgames"]),
             "--matchschedule", str(paths["matchschedule"]),
+            "--tournaments", str(paths["tournaments"]),
             "--capture-manifest", str(manifest_path),
             "--source-receipt", str(receipt_path),
             "--competition-map", str(map_path),

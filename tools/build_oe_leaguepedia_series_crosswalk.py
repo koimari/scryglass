@@ -139,7 +139,7 @@ def _capture_binding(path: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(assembled, Mapping):
         raise CrosswalkError("capture manifest assembled records are missing")
     verified_assembled: dict[str, dict[str, Any]] = {}
-    for label in ("ScoreboardGames", "MatchSchedule"):
+    for label in ("ScoreboardGames", "MatchSchedule", "Tournaments"):
         record = assembled.get(label)
         if not isinstance(record, Mapping):
             raise CrosswalkError(f"capture manifest assembled record is missing: {label}")
@@ -231,6 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--oe", type=Path, required=True, help="downloaded OE game-row JSON")
     parser.add_argument("--scoreboardgames", type=Path, required=True, help="downloaded ScoreboardGames JSON")
     parser.add_argument("--matchschedule", type=Path, required=True, help="downloaded MatchSchedule JSON")
+    parser.add_argument("--tournaments", type=Path, required=True, help="downloaded Tournaments JSON")
     parser.add_argument("--capture-manifest", type=Path, required=True, help="capture metadata JSON")
     parser.add_argument("--source-records", type=Path, help="exact OE and assembled source records JSON")
     parser.add_argument("--source-receipt", type=Path, required=True, help="canonical OE source receipt JSON")
@@ -257,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
             "oe": args.oe,
             "scoreboardgames": args.scoreboardgames,
             "matchschedule": args.matchschedule,
+            "tournaments": args.tournaments,
         }
         loaded = {label: _rows(_load_json(path), label=label) for label, path in paths.items()}
         records: dict[str, dict[str, Any]] = {}
@@ -310,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
             loaded["oe"],
             loaded["scoreboardgames"],
             loaded["matchschedule"],
+            loaded["tournaments"],
             source_receipt=source_receipt,
             source_records=records,
             competition_mapping=competition_mapping,
