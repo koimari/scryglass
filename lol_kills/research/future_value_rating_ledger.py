@@ -473,6 +473,13 @@ def _mask_nontraining(
         if column not in _STRUCTURAL_PLAYER_COLUMNS and column != "__game_id":
             player_work[column] = player_work[column].astype(object)
             player_work.loc[player_mask, column] = np.nan
+    # Source provenance is already bound in the receipt. Pandas propagates
+    # DataFrame.attrs through column selection and copies it for each batch.
+    # A verified crosswalk receipt can contain thousands of source records, so
+    # keeping it here makes the exact replay spend most of its time copying
+    # metadata that the rating equations never read.
+    map_work.attrs = {}
+    player_work.attrs = {}
     return map_work, player_work
 
 

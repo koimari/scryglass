@@ -144,6 +144,27 @@ def test_fold_replay_batches_equal_timestamp_rows_and_emits_four_features() -> N
     assert artifact["authority"]["public_team_rating"] is False
 
 
+def test_large_source_attrs_do_not_change_replay_values() -> None:
+    maps, players, teams, receipt = _source()
+    expected, _ = _build(maps, players, teams, receipt)
+    large_binding = {
+        "source_records": [
+            {"locator": f"fixture/{index}", "sha256": "a" * 64}
+            for index in range(250)
+        ]
+    }
+    maps.attrs["verified_crosswalk_binding"] = large_binding
+    players.attrs["verified_crosswalk_binding"] = large_binding
+
+    actual, _ = _build(maps, players, teams, receipt)
+
+    pd.testing.assert_frame_equal(
+        actual.reset_index(drop=True),
+        expected.reset_index(drop=True),
+        check_exact=True,
+    )
+
+
 def test_validation_outcomes_and_final_metrics_cannot_change_validation_features() -> None:
     maps, players, teams, receipt = _source()
     original, _ = _build(maps, players, teams, receipt)
