@@ -1049,6 +1049,8 @@ def test_evaluation_accepts_source_bound_calibration_prelude() -> None:
     prior_folds = [
         {
             "fold": 0,
+            "source_receipt_sha256": source["receipt_sha256"],
+            "variant": "legacy",
             "train_end": (
                 prior["date"].min() - pd.Timedelta(seconds=1)
             ).isoformat().replace("+00:00", "Z"),
@@ -1060,6 +1062,31 @@ def test_evaluation_accepts_source_bound_calibration_prelude() -> None:
             ),
             "out_of_sample": True,
             "whole_series": True,
+            "model_binding": {
+                "source_receipt_sha256": source["receipt_sha256"],
+                "variant": "legacy",
+                "fit_window_end": prior["date"].min().isoformat(),
+                "fit_game_identity_sha256": "a" * 64,
+                "validation_game_identity_sha256": "b" * 64,
+                "parameter_sha256": "c" * 64,
+                "prediction_ledger_row_count": len(prior_rows),
+                "prediction_ledger_rows_sha256": hashlib.sha256(
+                    json.dumps(
+                        prior_rows,
+                        allow_nan=False,
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ).encode()
+                ).hexdigest(),
+                "model_receipt": {"path": "/tmp/model-receipt.json", "bytes": 1, "sha256": "d" * 64},
+                "model_artifact": {"path": "/tmp/model-artifact.json", "bytes": 1, "sha256": "e" * 64},
+                "prediction_ledger": {"path": "/tmp/prediction-ledger.json", "bytes": 1, "sha256": "f" * 64},
+                "code": {
+                    "commit": "1" * 40,
+                    "files": [{"path": "/tmp/future-value-rating.py", "bytes": 1, "sha256": "0" * 64}],
+                },
+            },
             "rows": prior_rows,
         }
     ]
@@ -1668,6 +1695,74 @@ def test_model_runtime_receipt_binds_code_source_environment_and_output(
 
 def test_calibration_prior_receipt_binds_payload_and_file(tmp_path) -> None:
     source_hash = "a" * 64
+    rows = [
+        {
+            "game_id": "prior-game",
+            "series_id": "prior-series",
+            "date": "2025-12-01T00:00:00Z",
+            "raw_logit": 0.5,
+            "raw_probability": 0.6224593312018546,
+            "target": 1,
+        }
+    ]
+
+    def write_bound(name: str, payload: dict[str, object], hash_key: str) -> dict[str, object]:
+        payload[hash_key] = hashlib.sha256(
+            json.dumps(
+                {key: value for key, value in payload.items() if key != hash_key},
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        path = tmp_path / name
+        path.write_text(
+            json.dumps(payload, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True),
+            encoding="utf-8",
+        )
+        return {"path": str(path), "bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+    code_path = tmp_path / "future_value_rating.py"
+    code_path.write_text("trusted calibration producer\n", encoding="utf-8")
+    code_record = {
+        "path": str(code_path),
+        "bytes": code_path.stat().st_size,
+        "sha256": hashlib.sha256(code_path.read_bytes()).hexdigest(),
+    }
+    code_binding = {"commit": "f" * 40, "files": [code_record]}
+    parameter_hash = "c" * 64
+    model_payload = {
+        "source_receipt_sha256": source_hash,
+        "variant": "future_player_form",
+        "parameter_sha256": parameter_hash,
+        "code": code_binding,
+    }
+    model_receipt_record = write_bound("model-receipt.json", dict(model_payload), "receipt_sha256")
+    model_artifact_record = write_bound("model-artifact.json", dict(model_payload), "artifact_sha256")
+    ledger_payload = {
+        "source_receipt_sha256": source_hash,
+        "variant": "future_player_form",
+        "fold": 0,
+        "rows": rows,
+        "row_count": len(rows),
+        "rows_sha256": hashlib.sha256(
+            json.dumps(rows, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest(),
+    }
+    ledger_record = write_bound("prediction-ledger.json", ledger_payload, "ledger_sha256")
+    model_binding = {
+        "source_receipt_sha256": source_hash,
+        "variant": "future_player_form",
+        "fit_window_end": "2025-12-01T00:00:00Z",
+        "fit_game_identity_sha256": "d" * 64,
+        "validation_game_identity_sha256": "e" * 64,
+        "parameter_sha256": parameter_hash,
+        "model_receipt": model_receipt_record,
+        "model_artifact": model_artifact_record,
+        "prediction_ledger": ledger_record,
+        "code": code_binding,
+    }
     payload = {
         "schema_version": training_module.CALIBRATION_PRIOR_SCHEMA_VERSION,
         "source_receipt_sha256": source_hash,
@@ -1676,9 +1771,12 @@ def test_calibration_prior_receipt_binds_payload_and_file(tmp_path) -> None:
                 "folds": [
                     {
                         "fold": 0,
+                        "source_receipt_sha256": source_hash,
+                        "variant": "future_player_form",
                         "out_of_sample": True,
                         "whole_series": True,
-                        "rows": [],
+                        "rows": rows,
+                        "model_binding": model_binding,
                     }
                 ]
             }
@@ -1704,6 +1802,32 @@ def test_calibration_prior_receipt_binds_payload_and_file(tmp_path) -> None:
     assert folds["future_player_form"][0]["fold"] == 0
     assert binding["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
     assert binding["payload_receipt_sha256"] == payload["receipt_sha256"]
+
+    unbound_payload = json.loads(path.read_text(encoding="utf-8"))
+    unbound_payload["variants"]["future_player_form"]["folds"][0].pop(
+        "model_binding"
+    )
+    unbound_payload["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            {
+                key: value
+                for key, value in unbound_payload.items()
+                if key != "receipt_sha256"
+            },
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    unbound_path = tmp_path / "calibration-prior-unbound.json"
+    unbound_path.write_text(json.dumps(unbound_payload, sort_keys=True), encoding="utf-8")
+    with pytest.raises(FutureValueTrainingError, match="model binding is missing"):
+        training_module._load_calibration_prior_folds(
+            unbound_path,
+            source_receipt_sha256=source_hash,
+            variant_keys=("future_player_form",),
+        )
 
     payload["source_receipt_sha256"] = "b" * 64
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")

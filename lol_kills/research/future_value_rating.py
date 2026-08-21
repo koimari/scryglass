@@ -6169,11 +6169,52 @@ def _normalise_strict_prior_calibration_folds(
                 "calibration prior fold is not whole-series safe"
             )
         fold_source = raw_fold.get("source_receipt_sha256")
-        if fold_source is not None and str(fold_source).lower() != source_hash:
+        if fold_source is None or str(fold_source).lower() != source_hash:
             raise FutureValueSourceError("calibration prior fold source drift")
         fold_variant = raw_fold.get("variant")
-        if fold_variant is not None and str(fold_variant) != variant:
+        if fold_variant is None or str(fold_variant) != variant:
             raise FutureValueSourceError("calibration prior fold variant drift")
+        model_binding = raw_fold.get("model_binding")
+        if not isinstance(model_binding, Mapping):
+            raise FutureValueSourceError("calibration prior model binding is missing")
+        if model_binding.get("source_receipt_sha256") != source_hash:
+            raise FutureValueSourceError("calibration prior model source binding changed")
+        if model_binding.get("variant") != variant:
+            raise FutureValueSourceError("calibration prior model variant binding changed")
+        for field in (
+            "fit_window_end",
+            "fit_game_identity_sha256",
+            "validation_game_identity_sha256",
+            "parameter_sha256",
+            "prediction_ledger_row_count",
+            "prediction_ledger_rows_sha256",
+            "model_receipt",
+            "model_artifact",
+            "prediction_ledger",
+            "code",
+        ):
+            if field not in model_binding:
+                raise FutureValueSourceError(
+                    f"calibration prior model binding is missing: {field}"
+                )
+        code_binding = model_binding.get("code")
+        if not isinstance(code_binding, Mapping) or not str(code_binding.get("commit") or ""):
+            raise FutureValueSourceError("calibration prior code binding is invalid")
+        code_files = code_binding.get("files")
+        if not isinstance(code_files, list) or not code_files:
+            raise FutureValueSourceError("calibration prior code files are missing")
+        for file_record in (
+            model_binding.get("model_receipt"),
+            model_binding.get("model_artifact"),
+            model_binding.get("prediction_ledger"),
+            *code_files,
+        ):
+            if not isinstance(file_record, Mapping) or set(file_record) != {
+                "path",
+                "bytes",
+                "sha256",
+            }:
+                raise FutureValueSourceError("calibration prior model file binding is invalid")
         try:
             train_end = _utc_timestamp(
                 str(raw_fold["train_end"]), "calibration prior train end"
@@ -6329,6 +6370,11 @@ def _normalise_strict_prior_calibration_folds(
                     "calibration prior series crosses its validation fold"
                 )
         fold_rows.sort(key=lambda row: (str(row["date"]), str(row["game_id"])))
+        fold_rows_hash = hashlib.sha256(_canonical_json_bytes(raw_rows)).hexdigest()
+        if model_binding.get("prediction_ledger_row_count") != len(fold_rows):
+            raise FutureValueSourceError("calibration prior prediction ledger row count changed")
+        if model_binding.get("prediction_ledger_rows_sha256") != fold_rows_hash:
+            raise FutureValueSourceError("calibration prior prediction ledger rows changed")
         row_identity = [str(row["game_id"]) for row in fold_rows]
         normalized.append(
             {
@@ -7914,6 +7960,8 @@ def evaluate_future_value(
                     "game_id": str(validation.loc[row_index, "game_id"]),
                     "series_id": str(validation.loc[row_index, "series_id"]),
                     "date": _utc_text(validation.loc[row_index, "date"]),
+                    "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
+                    "variant": calibration_prior_variant,
                     "support": _ledger_value(support_value),
                     "prediction_logit": _ledger_value(raw_logit.loc[row_index]),
                     "prediction_probability": _ledger_value(
@@ -8388,11 +8436,13 @@ def evaluate_future_value(
                 support_calibration_folds,
                 calibration_prior_folds=support_calibration_prior_folds,
                 source_receipt=source_receipt,
+                source_frame=map_frame,
                 variant=calibration_prior_variant,
                 support_column="support",
             )
             verify_support_calibration_artifact(
                 support_calibration_artifact,
+                source_frame=map_frame,
                 expected_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
                 expected_variant=calibration_prior_variant,
             )

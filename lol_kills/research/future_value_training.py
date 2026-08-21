@@ -421,6 +421,151 @@ def _load_json_mapping(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
+def _calibration_file_record(value: Any, label: str) -> dict[str, Any]:
+    """Verify one file binding carried by a calibration prelude."""
+
+    if not isinstance(value, Mapping) or set(value) != {"path", "bytes", "sha256"}:
+        raise FutureValueTrainingError(f"{label} file binding is invalid")
+    raw_path = value.get("path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise FutureValueTrainingError(f"{label} path is invalid")
+    path = Path(raw_path)
+    if not path.is_absolute() or ".." in path.parts or path.is_symlink() or not path.is_file():
+        raise FutureValueTrainingError(f"{label} path is missing or unsafe")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise FutureValueTrainingError(f"{label} path contains a symlink")
+    try:
+        expected_bytes = int(value["bytes"])
+    except (TypeError, ValueError) as error:
+        raise FutureValueTrainingError(f"{label} byte count is invalid") from error
+    expected_hash = str(value.get("sha256") or "").lower()
+    if re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None:
+        raise FutureValueTrainingError(f"{label} hash is invalid")
+    actual_bytes = path.stat().st_size
+    actual_hash = _sha256(path)
+    if expected_bytes != actual_bytes or expected_hash != actual_hash:
+        raise FutureValueTrainingError(f"{label} bytes or hash changed")
+    return {"path": str(path), "bytes": actual_bytes, "sha256": actual_hash}
+
+
+def _load_bound_calibration_json(record: Mapping[str, Any], label: str) -> dict[str, Any]:
+    path = Path(str(record["path"]))
+    value = _load_json_mapping(path, label)
+    return value
+
+
+def _verify_calibration_model_binding(
+    fold: Mapping[str, Any],
+    *,
+    source_receipt_sha256: str,
+    variant: str,
+) -> dict[str, Any]:
+    """Verify the model, code, and prediction files behind prior logits."""
+
+    binding = fold.get("model_binding")
+    if not isinstance(binding, Mapping):
+        raise FutureValueTrainingError("calibration prior model binding is missing")
+    if binding.get("source_receipt_sha256") != source_receipt_sha256:
+        raise FutureValueTrainingError("calibration prior model source binding changed")
+    if binding.get("variant") != variant:
+        raise FutureValueTrainingError("calibration prior model variant binding changed")
+    for field in (
+        "fit_window_end",
+        "fit_game_identity_sha256",
+        "validation_game_identity_sha256",
+        "parameter_sha256",
+        "model_receipt",
+        "model_artifact",
+        "prediction_ledger",
+        "code",
+    ):
+        if field not in binding:
+            raise FutureValueTrainingError(
+                f"calibration prior model binding is missing: {field}"
+            )
+    model_receipt_record = _calibration_file_record(
+        binding["model_receipt"], "calibration prior model receipt"
+    )
+    model_artifact_record = _calibration_file_record(
+        binding["model_artifact"], "calibration prior model artifact"
+    )
+    ledger_record = _calibration_file_record(
+        binding["prediction_ledger"], "calibration prior prediction ledger"
+    )
+    code = binding.get("code")
+    if not isinstance(code, Mapping):
+        raise FutureValueTrainingError("calibration prior code binding is invalid")
+    commit = str(code.get("commit") or "")
+    if re.fullmatch(r"[0-9a-f]{40,64}", commit, re.I) is None:
+        raise FutureValueTrainingError("calibration prior code commit is invalid")
+    code_files = code.get("files")
+    if not isinstance(code_files, list) or not code_files:
+        raise FutureValueTrainingError("calibration prior code files are missing")
+    verified_code_files = [
+        _calibration_file_record(value, "calibration prior code file")
+        for value in code_files
+    ]
+    model_receipt = _load_bound_calibration_json(
+        model_receipt_record, "calibration prior model receipt"
+    )
+    model_artifact = _load_bound_calibration_json(
+        model_artifact_record, "calibration prior model artifact"
+    )
+    ledger = _load_bound_calibration_json(
+        ledger_record, "calibration prior prediction ledger"
+    )
+    for payload, label in ((model_receipt, "model receipt"), (model_artifact, "model artifact")):
+        claimed = payload.get("receipt_sha256", payload.get("artifact_sha256"))
+        if not isinstance(claimed, str) or re.fullmatch(r"[0-9a-f]{64}", claimed, re.I) is None:
+            raise FutureValueTrainingError(f"calibration prior {label} self hash is missing")
+        payload_without_hash = dict(payload)
+        payload_without_hash.pop("receipt_sha256", None)
+        payload_without_hash.pop("artifact_sha256", None)
+        if hashlib.sha256(_canonical_bytes(payload_without_hash)).hexdigest() != claimed.lower():
+            raise FutureValueTrainingError(f"calibration prior {label} self hash changed")
+    ledger_hash = ledger.get("ledger_sha256", ledger.get("receipt_sha256"))
+    if not isinstance(ledger_hash, str) or re.fullmatch(r"[0-9a-f]{64}", ledger_hash, re.I) is None:
+        raise FutureValueTrainingError("calibration prior prediction ledger hash is missing")
+    ledger_without_hash = dict(ledger)
+    ledger_without_hash.pop("ledger_sha256", None)
+    ledger_without_hash.pop("receipt_sha256", None)
+    if hashlib.sha256(_canonical_bytes(ledger_without_hash)).hexdigest() != ledger_hash.lower():
+        raise FutureValueTrainingError("calibration prior prediction ledger hash changed")
+    for payload, label in ((model_receipt, "model receipt"), (model_artifact, "model artifact"), (ledger, "prediction ledger")):
+        if payload.get("source_receipt_sha256") != source_receipt_sha256:
+            raise FutureValueTrainingError(f"calibration prior {label} source binding changed")
+        if payload.get("variant") != variant:
+            raise FutureValueTrainingError(f"calibration prior {label} variant binding changed")
+    for payload, label in ((model_receipt, "model receipt"), (model_artifact, "model artifact")):
+        if payload.get("code") != dict(code):
+            raise FutureValueTrainingError(f"calibration prior {label} code binding changed")
+    if model_receipt.get("parameter_sha256") != binding["parameter_sha256"]:
+        raise FutureValueTrainingError("calibration prior model parameter binding changed")
+    if model_artifact.get("parameter_sha256") != binding["parameter_sha256"]:
+        raise FutureValueTrainingError("calibration prior model artifact binding changed")
+    if model_receipt.get("parameter_sha256") != model_artifact.get("parameter_sha256"):
+        raise FutureValueTrainingError("calibration prior model receipt and artifact differ")
+    if model_receipt_record["sha256"] != str(binding["model_receipt"].get("sha256")).lower():
+        raise FutureValueTrainingError("calibration prior model receipt file binding changed")
+    if ledger.get("rows_sha256") is None or ledger.get("row_count") is None:
+        raise FutureValueTrainingError("calibration prior prediction ledger metadata is missing")
+    return {
+        "binding": dict(binding),
+        "model_receipt": model_receipt,
+        "model_artifact": model_artifact,
+        "prediction_ledger": ledger,
+        "code": {"commit": commit, "files": verified_code_files},
+        "files": {
+            "model_receipt": model_receipt_record,
+            "model_artifact": model_artifact_record,
+            "prediction_ledger": ledger_record,
+        },
+    }
+
+
 def _load_calibration_prior_folds(
     path: Path,
     *,
@@ -454,6 +599,29 @@ def _load_calibration_prior_folds(
                 )
             if any(not isinstance(fold, Mapping) for fold in selected):
                 raise FutureValueTrainingError("calibration prior fold rows are invalid")
+            for fold in selected:
+                if fold.get("source_receipt_sha256") != str(source_receipt_sha256):
+                    raise FutureValueTrainingError("calibration prior fold source binding changed")
+                if fold.get("variant") != variant_key:
+                    raise FutureValueTrainingError("calibration prior fold variant binding changed")
+                verified_model = _verify_calibration_model_binding(
+                    fold,
+                    source_receipt_sha256=str(source_receipt_sha256),
+                    variant=variant_key,
+                )
+                ledger = verified_model["prediction_ledger"]
+                rows = fold.get("rows")
+                ledger_rows = ledger.get("rows")
+                if not isinstance(rows, list) or not isinstance(ledger_rows, list) or rows != ledger_rows:
+                    raise FutureValueTrainingError(
+                        "calibration prior prediction ledger rows do not match fold"
+                    )
+                if ledger.get("row_count") != len(rows) or ledger.get("rows_sha256") != hashlib.sha256(
+                    _canonical_bytes(rows)
+                ).hexdigest():
+                    raise FutureValueTrainingError(
+                        "calibration prior prediction ledger row binding changed"
+                    )
             folds_by_variant[variant_key] = list(selected)
     else:
         folds = payload.get("folds")
@@ -462,6 +630,23 @@ def _load_calibration_prior_folds(
         if any(not isinstance(fold, Mapping) for fold in folds):
             raise FutureValueTrainingError("calibration prior fold rows are invalid")
         for variant_key in variant_keys:
+            for fold in folds:
+                if fold.get("source_receipt_sha256") != str(source_receipt_sha256):
+                    raise FutureValueTrainingError("calibration prior fold source binding changed")
+                if fold.get("variant") != variant_key:
+                    raise FutureValueTrainingError("calibration prior fold variant binding changed")
+                verified_model = _verify_calibration_model_binding(
+                    fold,
+                    source_receipt_sha256=str(source_receipt_sha256),
+                    variant=variant_key,
+                )
+                ledger = verified_model["prediction_ledger"]
+                rows = fold.get("rows")
+                ledger_rows = ledger.get("rows")
+                if not isinstance(rows, list) or not isinstance(ledger_rows, list) or rows != ledger_rows:
+                    raise FutureValueTrainingError(
+                        "calibration prior prediction ledger rows do not match fold"
+                    )
             folds_by_variant[variant_key] = list(folds)
     binding = {
         "schema_version": CALIBRATION_PRIOR_SCHEMA_VERSION,

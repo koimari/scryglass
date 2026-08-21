@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -110,14 +113,42 @@ def test_first_outer_fold_fits_from_explicit_prior_calibration_fold() -> None:
 
 def test_prior_calibration_rows_bind_source_and_complete_series() -> None:
     frame, prior_rows, evaluation_folds = _prior_frame()
+    model_binding = {
+        "source_receipt_sha256": SOURCE_HASH,
+        "variant": "future_player_form",
+        "fit_window_end": "2025-11-30T00:00:00Z",
+        "fit_game_identity_sha256": "b" * 64,
+        "validation_game_identity_sha256": "c" * 64,
+        "parameter_sha256": "d" * 64,
+        "prediction_ledger_row_count": len(prior_rows),
+        "prediction_ledger_rows_sha256": hashlib.sha256(
+            json.dumps(
+                prior_rows,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest(),
+        "model_receipt": {"path": "/tmp/model-receipt.json", "bytes": 1, "sha256": "e" * 64},
+        "model_artifact": {"path": "/tmp/model-artifact.json", "bytes": 1, "sha256": "f" * 64},
+        "prediction_ledger": {"path": "/tmp/prediction-ledger.json", "bytes": 1, "sha256": "0" * 64},
+        "code": {
+            "commit": "1" * 40,
+            "files": [{"path": "/tmp/future-value-rating.py", "bytes": 1, "sha256": "2" * 64}],
+        },
+    }
     folds = [
         {
             "fold": 0,
+            "source_receipt_sha256": SOURCE_HASH,
+            "variant": "future_player_form",
             "train_end": "2025-11-30T00:00:00Z",
             "validation_start": "2025-12-01T00:00:00Z",
             "validation_end": "2025-12-01T01:00:00Z",
             "out_of_sample": True,
             "whole_series": True,
+            "model_binding": model_binding,
             "rows": prior_rows,
         }
     ]

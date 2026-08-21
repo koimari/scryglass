@@ -1258,6 +1258,133 @@ def _support_date(row: Mapping[str, Any], label: str) -> pd.Timestamp:
     return pd.Timestamp(timestamp)
 
 
+def _support_source_rows(
+    source_frame: pd.DataFrame | None,
+    source_receipt: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Build the accepted source-row lookup used by support verification.
+
+    A source receipt carries the accepted identity, while the map frame carries
+    the row facts.  Both are required.  A support row cannot self-declare its
+    date, result, or series membership.
+    """
+
+    if not isinstance(source_frame, pd.DataFrame):
+        raise FutureValueUncertaintyError(
+            "support calibration accepted source frame is required"
+        )
+    required = {"game_id", "date", "target", "series_id"}
+    missing = sorted(required - set(source_frame.columns))
+    if missing:
+        raise FutureValueUncertaintyError(
+            "support calibration accepted source frame is missing: "
+            + ", ".join(missing)
+        )
+    frame = source_frame[["game_id", "date", "target", "series_id"]].copy()
+    frame["game_id"] = frame["game_id"].astype("string").str.strip()
+    frame["series_id"] = frame["series_id"].astype("string").str.strip()
+    frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+    frame["target"] = pd.to_numeric(frame["target"], errors="coerce")
+    if (
+        frame["game_id"].isna().any()
+        or frame["game_id"].eq("").any()
+        or frame["game_id"].duplicated().any()
+        or frame["series_id"].isna().any()
+        or frame["series_id"].eq("").any()
+        or frame["date"].isna().any()
+        or frame["target"].isna().any()
+        or ~frame["target"].isin({0, 1}).all()
+    ):
+        raise FutureValueUncertaintyError(
+            "support calibration accepted source frame identity is invalid"
+        )
+    eligible_values = source_receipt.get("model_eligible_game_ids")
+    if eligible_values is None:
+        eligible_values = source_receipt.get("accepted_game_ids")
+    if eligible_values is not None:
+        eligible = {str(value) for value in eligible_values}
+        if set(frame["game_id"].astype(str)) != eligible:
+            raise FutureValueUncertaintyError(
+                "support calibration accepted source frame does not match receipt census"
+            )
+    return {
+        str(row.game_id): {
+            "game_id": str(row.game_id),
+            "date": pd.Timestamp(row.date),
+            "target": int(row.target),
+            "series_id": str(row.series_id),
+        }
+        for row in frame.itertuples(index=False)
+    }
+
+
+def _verify_support_source_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    source_rows: Mapping[str, Mapping[str, Any]],
+    validation_start: pd.Timestamp,
+    validation_end: pd.Timestamp,
+    fold_id: str,
+) -> None:
+    """Check support input rows against the accepted map facts."""
+
+    seen_games: set[str] = set()
+    seen_series: set[str] = set()
+    for raw in rows:
+        if not isinstance(raw, Mapping):
+            raise FutureValueUncertaintyError("support calibration source row is invalid")
+        game_id = str(raw.get("game_id", "")).strip()
+        source = source_rows.get(game_id)
+        if source is None:
+            raise FutureValueUncertaintyError(
+                "support calibration source row is outside the accepted census"
+            )
+        if game_id in seen_games:
+            raise FutureValueUncertaintyError("support calibration source rows are not unique")
+        series_id = str(raw.get("series_id", "")).strip()
+        if series_id != str(source["series_id"]):
+            raise FutureValueUncertaintyError(
+                "support calibration source series does not match accepted source"
+            )
+        date = _support_date(raw, f"support calibration source row {game_id}")
+        if date != source["date"]:
+            raise FutureValueUncertaintyError(
+                "support calibration source date does not match accepted source"
+            )
+        if not validation_start <= date <= validation_end:
+            raise FutureValueUncertaintyError(
+                "support calibration source row is outside its validation window"
+            )
+        target_value = raw.get("target")
+        try:
+            target = float(target_value)
+        except (TypeError, ValueError) as error:
+            raise FutureValueUncertaintyError(
+                "support calibration source target is missing"
+            ) from error
+        if not math.isfinite(target) or target not in (0.0, 1.0) or int(target) != int(source["target"]):
+            raise FutureValueUncertaintyError(
+                "support calibration source target does not match accepted source"
+            )
+        seen_games.add(game_id)
+        seen_series.add(series_id)
+    for series_id in seen_series:
+        source_series_games = {
+            game_id
+            for game_id, row in source_rows.items()
+            if str(row["series_id"]) == series_id
+        }
+        row_series_games = {
+            str(row.get("game_id"))
+            for row in rows
+            if isinstance(row, Mapping) and str(row.get("series_id")) == series_id
+        }
+        if source_series_games != row_series_games:
+            raise FutureValueUncertaintyError(
+                f"support calibration source rows do not cover complete series: {fold_id}"
+            )
+
+
 def _support_fold_rows(
     fold: Mapping[str, Any],
     *,
@@ -1265,6 +1392,7 @@ def _support_fold_rows(
     variant: str,
     target_kind: str,
     support_column: str,
+    source_rows: Mapping[str, Mapping[str, Any]],
     require_out_of_sample: bool = False,
 ) -> dict[str, Any]:
     fold_id = fold.get("fold_id", fold.get("fold"))
@@ -1286,10 +1414,10 @@ def _support_fold_rows(
     if not train_end < validation_start <= validation_end:
         raise FutureValueUncertaintyError("support calibration fold cutoffs are not strictly chronological")
     fold_source = fold.get("source_receipt_sha256")
-    if fold_source is not None and str(fold_source).lower() != source_hash:
+    if fold_source is None or str(fold_source).lower() != source_hash:
         raise FutureValueUncertaintyError("support calibration source drift across folds")
     fold_variant = fold.get("variant")
-    if fold_variant is not None and str(fold_variant) != variant:
+    if fold_variant is None or str(fold_variant) != variant:
         raise FutureValueUncertaintyError("support calibration variant drift across folds")
     if require_out_of_sample:
         if fold.get("out_of_sample") is not True:
@@ -1352,6 +1480,7 @@ def _support_fold_rows(
                 "support": support,
                 "prediction_logit": logit,
                 "prediction_probability": probability,
+                "target": target,
                 "residual_target": residual,
             }
         )
@@ -1469,6 +1598,7 @@ def build_strict_prior_support_calibration(
     folds: Sequence[Mapping[str, Any]],
     *,
     source_receipt: Mapping[str, Any],
+    source_frame: pd.DataFrame,
     variant: str,
     calibration_prior_folds: Sequence[Mapping[str, Any]] | None = None,
     target_kind: str = "log_loss",
@@ -1507,6 +1637,7 @@ def build_strict_prior_support_calibration(
         raise FutureValueUncertaintyError("support calibration source receipt hash does not match payload")
     if SHA256_RE.fullmatch(source_hash) is None:
         raise FutureValueUncertaintyError("support calibration source receipt hash is invalid")
+    source_rows = _support_source_rows(source_frame, source_receipt)
     coverage_threshold = float(minimum_coverage)
     if not math.isfinite(coverage_threshold) or not 0.0 <= coverage_threshold <= 1.0:
         raise FutureValueUncertaintyError("support calibration coverage threshold is invalid")
@@ -1517,6 +1648,7 @@ def build_strict_prior_support_calibration(
             variant=variant,
             target_kind=target_kind,
             support_column=support_column,
+            source_rows=source_rows,
             require_out_of_sample=True,
         )
         for fold in (calibration_prior_folds or ())
@@ -1528,6 +1660,7 @@ def build_strict_prior_support_calibration(
             variant=variant,
             target_kind=target_kind,
             support_column=support_column,
+            source_rows=source_rows,
         )
         for fold in folds
     ]
@@ -1557,6 +1690,15 @@ def build_strict_prior_support_calibration(
         seen_games.update(row_games)
         seen_series.update(row_series)
         previous_end = end
+
+    for fold in all_normalized_folds:
+        _verify_support_source_rows(
+            fold["rows"],
+            source_rows=source_rows,
+            validation_start=pd.Timestamp(fold["validation_start"]),
+            validation_end=pd.Timestamp(fold["validation_end"]),
+            fold_id=str(fold["fold_id"]),
+        )
 
     output_prior_folds: list[dict[str, Any]] = [
         {
@@ -1768,6 +1910,7 @@ def build_strict_prior_support_calibration(
 def verify_support_calibration_artifact(
     artifact: Mapping[str, Any],
     *,
+    source_frame: pd.DataFrame,
     expected_source_receipt_sha256: str | None = None,
     expected_variant: str | None = None,
 ) -> bool:
@@ -1800,7 +1943,7 @@ def verify_support_calibration_artifact(
         raise FutureValueUncertaintyError("support calibration receipt does not bind artifact")
     source = artifact.get("source")
     source_hash = artifact.get("source", {}).get("source_receipt_sha256") if isinstance(source, Mapping) else None
-    if not isinstance(source_hash, str) or SHA256_RE.fullmatch(source_hash) is None:
+    if not isinstance(source, Mapping) or not isinstance(source_hash, str) or SHA256_RE.fullmatch(source_hash) is None:
         raise FutureValueUncertaintyError("support calibration source binding is invalid")
     if expected_source_receipt_sha256 is not None and source_hash != str(expected_source_receipt_sha256).lower():
         raise FutureValueUncertaintyError("support calibration source receipt does not match expected source")
@@ -1808,6 +1951,13 @@ def verify_support_calibration_artifact(
         raise FutureValueUncertaintyError("support calibration variant does not match expected variant")
     if artifact.get("variant") != receipt.get("variant") or receipt.get("source_receipt_sha256") != source_hash:
         raise FutureValueUncertaintyError("support calibration receipt binding is inconsistent")
+    source_rows = _support_source_rows(
+        source_frame,
+        {
+            "receipt_sha256": source_hash,
+            **dict(source),
+        },
+    )
     for value in (artifact.get("authority"), receipt.get("authority")):
         if not isinstance(value, Mapping) or dict(value) != SUPPORT_CALIBRATION_AUTHORITY:
             raise FutureValueUncertaintyError("support calibration authority grants access")
@@ -1860,6 +2010,21 @@ def verify_support_calibration_artifact(
             raise FutureValueUncertaintyError("support calibration prior binding is inconsistent")
         if prior_fold.get("out_of_sample") is not True or prior_fold.get("whole_series") is not True:
             raise FutureValueUncertaintyError("support calibration prior fold authority is invalid")
+        prior_start = pd.to_datetime(
+            prior_fold.get("validation_start"), utc=True, errors="coerce"
+        )
+        prior_end = pd.to_datetime(
+            prior_fold.get("validation_end"), utc=True, errors="coerce"
+        )
+        if pd.isna(prior_start) or pd.isna(prior_end):
+            raise FutureValueUncertaintyError("support calibration prior chronology is invalid")
+        _verify_support_source_rows(
+            input_rows,
+            source_rows=source_rows,
+            validation_start=pd.Timestamp(prior_start),
+            validation_end=pd.Timestamp(prior_end),
+            fold_id=str(prior_fold["fold"]),
+        )
         prior_row_by_fold[str(prior_fold["fold"])] = input_rows
     if receipt.get("calibration_prior_rows_sha256") is not None:
         expected_prior_rows = [
@@ -1965,40 +2130,48 @@ def verify_support_calibration_artifact(
         if calibration_hash != _identity_sha256(calibration_ids):
             raise FutureValueUncertaintyError("support calibration training ID hash is invalid")
         input_rows = fold.get("calibration_input_rows")
-        if isinstance(input_rows, list):
-            if fold.get("input_rows_sha256") != _sha256_json(input_rows):
-                raise FutureValueUncertaintyError("support calibration input rows are not bound")
-            if len(input_rows) != len(fold_rows):
-                raise FutureValueUncertaintyError("support calibration input row count is invalid")
-            input_by_game = {
-                str(row.get("game_id")): row
-                for row in input_rows
-                if isinstance(row, Mapping)
-            }
-            if len(input_by_game) != len(input_rows):
-                raise FutureValueUncertaintyError("support calibration input game IDs are invalid")
-            for output_row in fold_rows:
-                input_row = input_by_game.get(str(output_row.get("game_id")))
-                if input_row is None:
+        if not isinstance(input_rows, list):
+            raise FutureValueUncertaintyError("support calibration input rows are missing")
+        if fold.get("input_rows_sha256") != _sha256_json(input_rows):
+            raise FutureValueUncertaintyError("support calibration input rows are not bound")
+        _verify_support_source_rows(
+            input_rows,
+            source_rows=source_rows,
+            validation_start=start,
+            validation_end=end,
+            fold_id=str(fold["fold"]),
+        )
+        if len(input_rows) != len(fold_rows):
+            raise FutureValueUncertaintyError("support calibration input row count is invalid")
+        input_by_game = {
+            str(row.get("game_id")): row
+            for row in input_rows
+            if isinstance(row, Mapping)
+        }
+        if len(input_by_game) != len(input_rows):
+            raise FutureValueUncertaintyError("support calibration input game IDs are invalid")
+        for output_row in fold_rows:
+            input_row = input_by_game.get(str(output_row.get("game_id")))
+            if input_row is None:
+                raise FutureValueUncertaintyError(
+                    "support calibration input IDs do not match output rows"
+                )
+            for field in ("fold", "game_id", "series_id", "date"):
+                if str(input_row.get(field)) != str(output_row.get(field)):
                     raise FutureValueUncertaintyError(
-                        "support calibration input IDs do not match output rows"
+                        "support calibration input identity does not match output rows"
                     )
-                for field in ("fold", "game_id", "series_id", "date"):
-                    if str(input_row.get(field)) != str(output_row.get(field)):
-                        raise FutureValueUncertaintyError(
-                            "support calibration input identity does not match output rows"
-                        )
-                try:
-                    input_support = float(input_row.get("support"))
-                    output_support = float(output_row.get("support"))
-                except (TypeError, ValueError) as error:
-                    raise FutureValueUncertaintyError(
-                        "support calibration input support is invalid"
-                    ) from error
-                if not math.isclose(input_support, output_support, rel_tol=0.0, abs_tol=1e-12):
-                    raise FutureValueUncertaintyError(
-                        "support calibration input support does not match output rows"
-                    )
+            try:
+                input_support = float(input_row.get("support"))
+                output_support = float(output_row.get("support"))
+            except (TypeError, ValueError) as error:
+                raise FutureValueUncertaintyError(
+                    "support calibration input support is invalid"
+                ) from error
+            if not math.isclose(input_support, output_support, rel_tol=0.0, abs_tol=1e-12):
+                raise FutureValueUncertaintyError(
+                    "support calibration input support does not match output rows"
+                )
         expected_prior = sorted(
             [
                 str(row["game_id"])
@@ -2045,6 +2218,7 @@ def apply_strict_prior_support_calibration(
     support: Sequence[float] | pd.Series,
     *,
     fold_id: Any,
+    source_frame: pd.DataFrame,
     expected_source_receipt_sha256: str | None = None,
     expected_variant: str | None = None,
 ) -> pd.Series:
@@ -2052,6 +2226,7 @@ def apply_strict_prior_support_calibration(
 
     verify_support_calibration_artifact(
         artifact,
+        source_frame=source_frame,
         expected_source_receipt_sha256=expected_source_receipt_sha256,
         expected_variant=expected_variant,
     )

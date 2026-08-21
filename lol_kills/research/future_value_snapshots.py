@@ -861,6 +861,7 @@ def _player_contributions(
     model: Any,
     form: pd.DataFrame,
     *,
+    support_source_frame: pd.DataFrame | None = None,
     support_calibration: Mapping[str, Any] | None = None,
     support_calibration_fold_id: Any | None = None,
 ) -> pd.DataFrame:
@@ -967,6 +968,11 @@ def _player_contributions(
                 support_calibration,
                 output["minimum_effective_support"],
                 fold_id=support_calibration_fold_id,
+                source_frame=(
+                    support_source_frame
+                    if support_source_frame is not None
+                    else pd.DataFrame()
+                ),
             )
         except FutureValueUncertaintyError as error:
             raise FutureValueSnapshotError(
@@ -1319,6 +1325,7 @@ def build_future_value_snapshots(
             )
             verify_support_calibration_artifact(
                 support_calibration,
+                source_frame=map_frame,
                 expected_source_receipt_sha256=str(source["source_receipt_sha256"]),
                 expected_variant=expected_variant,
             )
@@ -1351,12 +1358,14 @@ def build_future_value_snapshots(
     contributions = _player_contributions(
         model,
         latest,
+        support_source_frame=map_frame,
         support_calibration=support_calibration if support_calibration_applied else None,
         support_calibration_fold_id=support_calibration_fold_id,
     )
     roster_contributions = _player_contributions(
         model,
         latest_roster,
+        support_source_frame=map_frame,
         support_calibration=support_calibration if support_calibration_applied else None,
         support_calibration_fold_id=support_calibration_fold_id,
     )

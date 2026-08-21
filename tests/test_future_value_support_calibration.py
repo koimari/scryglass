@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 
+import pandas as pd
 import pytest
 
 from lol_kills.research.future_value_uncertainty import (
@@ -51,6 +52,8 @@ def _folds(rows_per_fold: int = 20) -> list[dict[str, object]]:
         folds.append(
             {
                 "fold": fold_number + 1,
+                "source_receipt_sha256": SOURCE["receipt_sha256"],
+                "variant": "future_player_form",
                 "train_end": (start - timedelta(days=1)).isoformat().replace("+00:00", "Z"),
                 "validation_start": start.isoformat().replace("+00:00", "Z"),
                 "validation_end": (start + timedelta(days=rows_per_fold - 1)).isoformat().replace(
@@ -60,6 +63,24 @@ def _folds(rows_per_fold: int = 20) -> list[dict[str, object]]:
             }
         )
     return folds
+
+
+def _source_frame(*fold_sets: list[dict[str, object]]) -> pd.DataFrame:
+    rows = [
+        {
+            "game_id": str(row["game_id"]),
+            "series_id": str(row["series_id"]),
+            "date": row["date"],
+            "target": int(row["target"]),
+        }
+        for folds in fold_sets
+        for fold in folds
+        for row in fold["rows"]  # type: ignore[index]
+    ]
+    return pd.DataFrame(rows)
+
+
+SOURCE_FRAME = _source_frame(_folds())
 
 
 def _artifact(**kwargs: object) -> dict[str, object]:
@@ -73,6 +94,7 @@ def _artifact(**kwargs: object) -> dict[str, object]:
     return build_strict_prior_support_calibration(
         _folds(),
         source_receipt=SOURCE,
+        source_frame=SOURCE_FRAME,
         variant="future_player_form",
         **options,
     )
@@ -96,6 +118,8 @@ def _calibration_prior_folds() -> list[dict[str, object]]:
     return [
         {
             "fold": 0,
+            "source_receipt_sha256": SOURCE["receipt_sha256"],
+            "variant": "future_player_form",
             "train_end": "2025-11-30T00:00:00Z",
             "validation_start": "2025-12-01T00:00:00Z",
             "validation_end": "2025-12-20T00:00:00Z",
@@ -113,7 +137,7 @@ def test_support_calibration_is_strict_prior_monotonic_and_receipted() -> None:
     assert artifact["coverage"]["complete_enough"] is True  # type: ignore[index]
     assert artifact["folds"][0]["status"] == "blocked"  # type: ignore[index]
     assert "calibration_prior_validation_folds_missing" in artifact["blockers"]  # type: ignore[operator]
-    assert verify_support_calibration_artifact(artifact)
+    assert verify_support_calibration_artifact(artifact, source_frame=SOURCE_FRAME)
 
     mapping = artifact["folds"][1]["mapping"]  # type: ignore[index]
     fitted = [float(row["fitted_residual"]) for row in mapping["bins"]]  # type: ignore[index]
@@ -122,6 +146,7 @@ def test_support_calibration_is_strict_prior_monotonic_and_receipted() -> None:
         artifact,
         [0.0, 4.0, 9.0],
         fold_id=2,
+        source_frame=SOURCE_FRAME,
         expected_source_receipt_sha256=artifact["source"]["source_receipt_sha256"],  # type: ignore[index]
         expected_variant="future_player_form",
     )
@@ -130,10 +155,13 @@ def test_support_calibration_is_strict_prior_monotonic_and_receipted() -> None:
 
 
 def test_calibration_prelude_closes_first_fold_with_oos_whole_series_rows() -> None:
+    prior = _calibration_prior_folds()
+    prelude_source_frame = _source_frame(_folds(), prior)
     artifact = build_strict_prior_support_calibration(
         _folds(),
-        calibration_prior_folds=_calibration_prior_folds(),
+        calibration_prior_folds=prior,
         source_receipt=SOURCE,
+        source_frame=prelude_source_frame,
         variant="future_player_form",
         minimum_training_rows=10,
         minimum_bin_rows=2,
@@ -148,12 +176,13 @@ def test_calibration_prelude_closes_first_fold_with_oos_whole_series_rows() -> N
     assert artifact["coverage"]["calibration_prior_row_count"] == 20  # type: ignore[index]
     assert all(fold["status"] == "available" for fold in artifact["folds"])  # type: ignore[index]
     assert artifact["folds"][0]["calibration_training_game_count"] == 20  # type: ignore[index]
-    assert verify_support_calibration_artifact(artifact)
+    assert verify_support_calibration_artifact(artifact, source_frame=prelude_source_frame)
 
     values = apply_strict_prior_support_calibration(
         artifact,
         [0.0, 4.0, 9.0],
         fold_id=1,
+        source_frame=prelude_source_frame,
         expected_source_receipt_sha256=SOURCE["receipt_sha256"],
         expected_variant="future_player_form",
     )
@@ -168,6 +197,7 @@ def test_calibration_prelude_requires_explicit_oos_and_whole_series_flags() -> N
             _folds(),
             calibration_prior_folds=prior,
             source_receipt=SOURCE,
+            source_frame=_source_frame(_folds(), prior),
             variant="future_player_form",
             minimum_training_rows=10,
             minimum_bin_rows=2,
@@ -183,7 +213,9 @@ def test_first_fold_and_insufficient_prior_support_fail_closed() -> None:
         fold["status"] == "blocked" for fold in artifact["folds"]  # type: ignore[index]
     )
     with pytest.raises(FutureValueUncertaintyError, match="no verified prior mapping"):
-        apply_strict_prior_support_calibration(artifact, [1.0], fold_id=2)
+        apply_strict_prior_support_calibration(
+            artifact, [1.0], fold_id=2, source_frame=SOURCE_FRAME
+        )
 
 
 @pytest.mark.parametrize(
@@ -209,6 +241,7 @@ def test_source_date_and_overlap_mutations_fail_closed(mutation: str, message: s
         build_strict_prior_support_calibration(
             folds,
             source_receipt=SOURCE,
+            source_frame=SOURCE_FRAME,
             variant="future_player_form",
             minimum_training_rows=10,
             minimum_bin_rows=2,
@@ -222,14 +255,30 @@ def test_mutated_artifact_rows_and_receipt_source_are_rejected() -> None:
     mutated = copy.deepcopy(artifact)
     mutated["rows"][0]["support"] = 999.0  # type: ignore[index]
     with pytest.raises(FutureValueUncertaintyError, match="artifact hash"):
-        verify_support_calibration_artifact(mutated)
+        verify_support_calibration_artifact(mutated, source_frame=SOURCE_FRAME)
 
     with pytest.raises(FutureValueUncertaintyError, match="expected source"):
-        verify_support_calibration_artifact(artifact, expected_source_receipt_sha256="b" * 64)
+        verify_support_calibration_artifact(
+            artifact,
+            source_frame=SOURCE_FRAME,
+            expected_source_receipt_sha256="b" * 64,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["missing_game", "target_drift"])
+def test_standalone_verifier_checks_accepted_source_rows(mutation: str) -> None:
+    artifact = _artifact()
+    source_frame = SOURCE_FRAME.copy()
+    if mutation == "missing_game":
+        source_frame = source_frame.iloc[1:].reset_index(drop=True)
+    else:
+        source_frame.loc[0, "target"] = 1 - int(source_frame.loc[0, "target"])
+    with pytest.raises(FutureValueUncertaintyError, match="accepted source|census"):
+        verify_support_calibration_artifact(artifact, source_frame=source_frame)
 
 
 def test_absolute_logit_residual_target_is_explicit() -> None:
     artifact = _artifact(target_kind="absolute_logit_residual")
     assert artifact["target"]["kind"] == "absolute_logit_residual"  # type: ignore[index]
     assert "proper scoring residual" not in artifact["target"]["description"]  # type: ignore[index]
-    assert verify_support_calibration_artifact(artifact)
+    assert verify_support_calibration_artifact(artifact, source_frame=SOURCE_FRAME)
