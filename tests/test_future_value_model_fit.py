@@ -733,6 +733,8 @@ def _phase_partition_fixture(tmp_path, game_ids: list[str]):
         "eligible_game_count": len(game_ids),
         "eligible_identity_sha256": identity_sha256(game_ids),
         "eligible_assignment_sha256": assignment_sha256,
+        "reference_game_count": len(game_ids),
+        "reference_identity_sha256": identity_sha256(game_ids),
         "reference_assignment_sha256": assignment_sha256,
         "reference_assignment_match": True,
         "proxy_authority_blocker": True,
@@ -743,6 +745,9 @@ def _phase_partition_fixture(tmp_path, game_ids: list[str]):
             {
                 "source_receipt_sha256": source["receipt_sha256"],
                 "cross_model_series_partition": partition,
+                "series_partition_reference_game_count": len(game_ids),
+                "series_partition_reference_identity_sha256": identity_sha256(game_ids),
+                "series_partition_reference_assignment_sha256": assignment_sha256,
             },
             sort_keys=True,
         ),
@@ -775,14 +780,36 @@ def _phase_partition_fixture(tmp_path, game_ids: list[str]):
         "eligible_game_count": len(game_ids),
         "eligible_identity_sha256": identity_sha256(game_ids),
         "eligible_assignment_sha256": assignment_sha256,
+        "reference_game_count": len(game_ids),
+        "reference_identity_sha256": identity_sha256(game_ids),
+        "reference_assignment_sha256": assignment_sha256,
         "source_receipt_sha256": source["receipt_sha256"],
     }
-    return frame, source, binding, artifact_record["sha256"], receipt_record["sha256"]
+    source_path = tmp_path / "source-receipt.json"
+    source_path.write_text(json.dumps(source, sort_keys=True), encoding="utf-8")
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    return (
+        frame,
+        source,
+        binding,
+        artifact_record["sha256"],
+        receipt_record["sha256"],
+        source_path,
+        source_hash,
+    )
 
 
 def test_phase_partition_binding_requires_byte_bound_receipt_and_matches_rating_frame(tmp_path) -> None:
     game_ids = ["1", "2", "3", "4"]
-    frame, source, binding, artifact_hash, receipt_hash = _phase_partition_fixture(
+    (
+        frame,
+        source,
+        binding,
+        artifact_hash,
+        receipt_hash,
+        source_path,
+        source_file_hash,
+    ) = _phase_partition_fixture(
         tmp_path, game_ids
     )
     verified = verify_phase_series_partition_binding(
@@ -791,6 +818,8 @@ def test_phase_partition_binding_requires_byte_bound_receipt_and_matches_rating_
         binding,
         expected_phase_artifact_sha256=artifact_hash,
         expected_phase_receipt_file_sha256=receipt_hash,
+        source_receipt_path=source_path,
+        source_receipt_file_sha256=source_file_hash,
     )
     assert verified["status"] == "verified"
     assert verified["cross_model_partition_status"] == "comparable"
@@ -799,7 +828,15 @@ def test_phase_partition_binding_requires_byte_bound_receipt_and_matches_rating_
 
 def test_phase_partition_binding_fails_closed_on_artifact_mutation(tmp_path) -> None:
     game_ids = ["1", "2", "3", "4"]
-    frame, source, binding, artifact_hash, receipt_hash = _phase_partition_fixture(
+    (
+        frame,
+        source,
+        binding,
+        artifact_hash,
+        receipt_hash,
+        source_path,
+        source_file_hash,
+    ) = _phase_partition_fixture(
         tmp_path, game_ids
     )
     artifact_path = binding["phase_artifact"]["path"]
@@ -808,6 +845,72 @@ def test_phase_partition_binding_fails_closed_on_artifact_mutation(tmp_path) -> 
         encoding="utf-8",
     )
     with pytest.raises(FutureValueSourceError, match="phase partition artifact"):
+        verify_phase_series_partition_binding(
+            frame,
+            source,
+            binding,
+            expected_phase_artifact_sha256=artifact_hash,
+            expected_phase_receipt_file_sha256=receipt_hash,
+            source_receipt_path=source_path,
+            source_receipt_file_sha256=source_file_hash,
+        )
+
+
+def test_phase_partition_binding_rejects_nested_flattened_conflict(tmp_path) -> None:
+    frame, source, binding, _artifact_hash, receipt_hash, source_path, source_file_hash = (
+        _phase_partition_fixture(tmp_path, ["1", "2", "3", "4"])
+    )
+    artifact_path = Path(binding["phase_artifact"]["path"])
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    payload["series_partition_eligible_game_count"] = 999
+    artifact_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    artifact_hash = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+    binding["phase_artifact"]["bytes"] = artifact_path.stat().st_size
+    binding["phase_artifact"]["sha256"] = artifact_hash
+    binding["phase_artifact_sha256"] = artifact_hash
+    with pytest.raises(FutureValueSourceError, match="conflicting eligible_game_count"):
+        verify_phase_series_partition_binding(
+            frame,
+            source,
+            binding,
+            expected_phase_artifact_sha256=artifact_hash,
+            expected_phase_receipt_file_sha256=receipt_hash,
+            source_receipt_path=source_path,
+            source_receipt_file_sha256=source_file_hash,
+        )
+
+
+def test_phase_partition_binding_requires_full_reference_identity(tmp_path) -> None:
+    frame, source, binding, _artifact_hash, receipt_hash, source_path, source_file_hash = (
+        _phase_partition_fixture(tmp_path, ["1", "2", "3", "4"])
+    )
+    artifact_path = Path(binding["phase_artifact"]["path"])
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    partition = payload["cross_model_series_partition"]
+    partition.pop("reference_identity_sha256")
+    payload.pop("series_partition_reference_identity_sha256")
+    artifact_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    artifact_hash = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+    binding["phase_artifact"]["bytes"] = artifact_path.stat().st_size
+    binding["phase_artifact"]["sha256"] = artifact_hash
+    binding["phase_artifact_sha256"] = artifact_hash
+    with pytest.raises(FutureValueSourceError, match="reference_identity_sha256"):
+        verify_phase_series_partition_binding(
+            frame,
+            source,
+            binding,
+            expected_phase_artifact_sha256=artifact_hash,
+            expected_phase_receipt_file_sha256=receipt_hash,
+            source_receipt_path=source_path,
+            source_receipt_file_sha256=source_file_hash,
+        )
+
+
+def test_phase_partition_binding_requires_durable_source_receipt(tmp_path) -> None:
+    frame, source, binding, artifact_hash, receipt_hash, _source_path, _source_file_hash = (
+        _phase_partition_fixture(tmp_path, ["1", "2", "3", "4"])
+    )
+    with pytest.raises(FutureValueSourceError, match="durable source receipt"):
         verify_phase_series_partition_binding(
             frame,
             source,
@@ -1425,12 +1528,21 @@ def _phase_training_fixture(tmp_path, source: dict[str, object]):
         ).encode()
     ).hexdigest()
     partition = {
+        "mapping_sha256": "a" * 64,
+        "crosswalk_sha256": "b" * 64,
+        "artifact_sha256": "c" * 64,
+        "receipt_sha256": "d" * 64,
+        "receipt_file_sha256": "e" * 64,
+        "source_receipt_sha256": source["receipt_sha256"],
         "status": "comparable",
         "eligible_game_count": len(game_ids),
         "eligible_identity_sha256": identity_sha256(game_ids),
         "eligible_assignment_sha256": assignment,
+        "reference_game_count": len(game_ids),
+        "reference_identity_sha256": identity_sha256(game_ids),
         "reference_assignment_sha256": assignment,
         "reference_assignment_match": True,
+        "proxy_authority_blocker": True,
     }
     artifact_path = tmp_path / "phase-candidate.json"
     artifact_path.write_text(
@@ -1438,6 +1550,9 @@ def _phase_training_fixture(tmp_path, source: dict[str, object]):
             {
                 "source_receipt_sha256": source["receipt_sha256"],
                 "cross_model_series_partition": partition,
+                "series_partition_reference_game_count": len(game_ids),
+                "series_partition_reference_identity_sha256": identity_sha256(game_ids),
+                "series_partition_reference_assignment_sha256": assignment,
             },
             sort_keys=True,
         ),
@@ -1460,6 +1575,8 @@ def _phase_training_fixture(tmp_path, source: dict[str, object]):
         ),
         encoding="utf-8",
     )
+    source_path = tmp_path / "source-receipt.json"
+    source_path.write_text(json.dumps(source, sort_keys=True), encoding="utf-8")
     return artifact_path, receipt_path
 
 
@@ -1472,6 +1589,10 @@ def test_training_phase_binding_verifies_files_and_receipt_output(tmp_path) -> N
         artifact_sha256=hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
         receipt_file_sha256=hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
         source_receipt=source,
+        source_receipt_path=tmp_path / "source-receipt.json",
+        source_receipt_file_sha256=hashlib.sha256(
+            (tmp_path / "source-receipt.json").read_bytes()
+        ).hexdigest(),
         artifact_kind="candidate",
     )
     assert binding["eligible_game_count"] == 2
