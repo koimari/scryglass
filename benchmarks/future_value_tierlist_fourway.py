@@ -32,10 +32,10 @@ from lol_kills.research.future_value_tierlist import (
 from lol_kills.v2.tierlists.pooled_candidate import build_pooled_candidate
 
 
-# This benchmark has its own external freeze for the v11 evaluation files.
+# This benchmark has its own external freeze for the v10 evaluation files.
 # The shared Tier module keeps the earlier freeze for other consumers.
 PINNED_TRUST_MANIFEST_RAW_SHA256 = (
-    "ec8af376148c49e62587cd0144daf40e1c3215d7fb50cb725e58c8dc980af853"
+    "48116804b6b43fc89855ef207c39fefb21eebfb262fb1db5836c39498739612e"
 )
 
 

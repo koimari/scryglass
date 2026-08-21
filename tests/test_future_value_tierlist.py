@@ -76,10 +76,10 @@ def test_trust_manifest_requires_external_file_hash(tmp_path: Path) -> None:
         load_trust_manifest(path, expected_raw_sha256=raw_hash)
 
 
-def test_v7_calibrated_shadow_freeze_binds_the_completed_evaluation_files() -> None:
-    path = REPO_ROOT / "data/lol/v2/evaluation/future-value-tierlist-shadow-freeze-v7-calibrated.json"
+def test_v10_calibrated_shadow_freeze_binds_the_completed_evaluation_files() -> None:
+    path = REPO_ROOT / "data/lol/v2/evaluation/future-value-tierlist-shadow-freeze-v10-calibrated.json"
     expected_hash = (
-        "ec8af376148c49e62587cd0144daf40e1c3215d7fb50cb725e58c8dc980af853"
+        "48116804b6b43fc89855ef207c39fefb21eebfb262fb1db5836c39498739612e"
     )
     assert sha256_path(path) == expected_hash
     trust = load_trust_manifest(path, expected_raw_sha256=expected_hash)
@@ -94,19 +94,19 @@ def test_v7_calibrated_shadow_freeze_binds_the_completed_evaluation_files() -> N
     assert trust["evaluations"] == {
         "both": {
             "locator": "both/model.json",
-            "raw_sha256": "79098de4541d11625eb485e87d2b0d3a875934de65d8ab1dbb2213436c3eff15",
+            "raw_sha256": "e3f794e557bb5cc355f79694b1414fd94aeb22c81cdf866330c4a6eeb9ec98b4",
         },
         "current_only": {
             "locator": "current_only/model.json",
-            "raw_sha256": "29ad1dfa90d3b7abb2ac712b053df517e39890c4db33b2ab9d2473da552aad47",
+            "raw_sha256": "153ed7cc711a77a8113e8267e635d7f4567ee176e8c92cb319b6f27ddc3c0569",
         },
         "future_player_form": {
             "locator": "future_player_form/model.json",
-            "raw_sha256": "b0883cdecf8c4c128d68e1a9f91f2cc1a2e64d6abf7c7045ddffff97157f5df0",
+            "raw_sha256": "4d90fe9f9b55956a7b24161e179ad715659397ae8d2a3b57ac2338e2c27c9aff",
         },
         "scaling_curve": {
             "locator": "scaling_curve/model.json",
-            "raw_sha256": "a785c6de67be87891161b4f4ddb012f699fe042ff3bf539b2a03aa34ce09980f",
+            "raw_sha256": "e84f33707228fc95277b5de5a500d3f96b6ce2d3c44272ea0bfa625e916e3a49",
         },
     }
     assert fourway_benchmark.PINNED_TRUST_MANIFEST_RAW_SHA256 == expected_hash
