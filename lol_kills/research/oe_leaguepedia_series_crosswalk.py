@@ -31,7 +31,7 @@ from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_
 SCHEMA_VERSION = "scryglass:oe-leaguepedia-series-crosswalk:v1"
 SOURCE_RECORD_LABELS = ("oe", "scoreboardgames", "matchschedule")
 DEFAULT_MAX_GAME_TIME_DELTA_SECONDS = 300
-DEFAULT_MAX_FIRST_GAME_SCHEDULE_DELTA_SECONDS = 1800
+DEFAULT_MAX_FIRST_GAME_SCHEDULE_DELTA_SECONDS = 6 * 60 * 60
 DEFAULT_MAX_LATER_GAME_SCHEDULE_AGE_SECONDS = 6 * 60 * 60
 _HEX64 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 
@@ -116,20 +116,39 @@ def _team_key(value: Any) -> str:
     return _norm(canonical)
 
 
-def _team_set(values: Iterable[Any]) -> frozenset[str]:
-    result = frozenset(_team_key(value) for value in values if _team_key(value))
+def _alias_name_key(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", _text(value)).casefold()
+    text = text.replace("’", "'").replace("`", "'")
+    text = re.sub(r"\s*\([^)]*\)\s*$", "", text)
+    text = re.sub(r"[^\w]+", " ", text, flags=re.UNICODE)
+    return " ".join(text.split())
+
+
+def _team_set(
+    values: Iterable[Any], *, aliases: Mapping[str, str] | None = None
+) -> frozenset[str]:
+    resolved = (
+        aliases.get(_alias_name_key(value), _text(value)) if aliases else value
+        for value in values
+    )
+    result = frozenset(_team_key(value) for value in resolved if _team_key(value))
     if len(result) != 2:
         raise CrosswalkError("team set must contain exactly two distinct teams")
     return result
 
 
-def _row_team_set(row: Mapping[str, Any], *, label: str) -> frozenset[str]:
+def _row_team_set(
+    row: Mapping[str, Any],
+    *,
+    label: str,
+    aliases: Mapping[str, str] | None = None,
+) -> frozenset[str]:
     list_fields = ("teams", "team_set")
     for field in list_fields:
         values = row.get(field)
         if isinstance(values, (list, tuple)):
             try:
-                return _team_set(values)
+                return _team_set(values, aliases=aliases)
             except CrosswalkError as error:
                 raise CrosswalkError(f"{label}.{field}: {error}") from error
     pairs = (
@@ -142,7 +161,7 @@ def _row_team_set(row: Mapping[str, Any], *, label: str) -> frozenset[str]:
     for left, right in pairs:
         if left in row or right in row:
             try:
-                return _team_set((row.get(left), row.get(right)))
+                return _team_set((row.get(left), row.get(right)), aliases=aliases)
             except CrosswalkError as error:
                 raise CrosswalkError(f"{label}.{left}/{right}: {error}") from error
     raise CrosswalkError(f"{label} has no supported team pair")
@@ -481,6 +500,8 @@ def build_oe_leaguepedia_series_crosswalk(
     competition_mapping: Mapping[str, Mapping[str, Any]],
     captured_at: str,
     raw_source_bytes: Mapping[str, bytes] | None = None,
+    oe_team_aliases: Mapping[str, str] | None = None,
+    alias_binding: Mapping[str, Any] | None = None,
     allow_partial: bool = False,
     max_game_time_delta_seconds: int = DEFAULT_MAX_GAME_TIME_DELTA_SECONDS,
     max_first_game_schedule_delta_seconds: int = DEFAULT_MAX_FIRST_GAME_SCHEDULE_DELTA_SECONDS,
@@ -519,7 +540,17 @@ def build_oe_leaguepedia_series_crosswalk(
             game_id = _oe_game_id(row)
             if game_id in seen_oe_ids:
                 raise CrosswalkError(f"duplicate OE game ID: {game_id}")
-            teams = _row_team_set(row, label=f"oe[{index}]")
+            stable_team_keys = row.get("team_keys")
+            source_teams = (
+                _team_set(stable_team_keys)
+                if isinstance(stable_team_keys, (list, tuple))
+                else _row_team_set(row, label=f"oe[{index}]")
+            )
+            teams = _row_team_set(
+                row,
+                label=f"oe[{index}]",
+                aliases=oe_team_aliases,
+            )
             stamp = _timestamp(row, label=f"oe[{index}]")
             league = _first(row, ("league", "League"))
             if not league:
@@ -529,7 +560,7 @@ def build_oe_leaguepedia_series_crosswalk(
             if _norm(league) not in {_norm(key) for key in competition_mapping}:
                 raise CrosswalkError(f"no explicit competition mapping for source league: {league}")
             seen_oe_ids.add(game_id)
-            oe_prepared.append({**row, "_game_id": game_id, "_teams": teams, "_stamp": stamp, "_league": league, "_patch": patch, "_tournament": tournament})
+            oe_prepared.append({**row, "_game_id": game_id, "_teams": teams, "_source_teams": source_teams, "_stamp": stamp, "_league": league, "_patch": patch, "_tournament": tournament})
         except CrosswalkError as error:
             issues.append({"kind": "invalid_oe_row", "index": index, "error": str(error)})
 
@@ -611,10 +642,12 @@ def build_oe_leaguepedia_series_crosswalk(
                 continue
             schedule_delta = (oe["_stamp"] - schedule_row["_stamp"]).total_seconds()
             order = int(selected["_order"])
-            if order == 1:
-                if abs(schedule_delta) > max_first_game_schedule_delta_seconds:
-                    continue
-            elif schedule_delta < 0 or schedule_delta > max_later_game_schedule_age_seconds:
+            schedule_bound = (
+                max_first_game_schedule_delta_seconds
+                if order == 1
+                else max_later_game_schedule_age_seconds
+            )
+            if abs(schedule_delta) > schedule_bound:
                 continue
             schedule_candidates.append((schedule_row, {
                 "series_timestamp_delta_seconds": schedule_delta,
@@ -637,7 +670,7 @@ def build_oe_leaguepedia_series_crosswalk(
             "scoreboard_game_id": scoreboard_id,
             "scoreboard_game_order": int(selected["_order"]),
             "series_id": match_id,
-            "normalized_team_set": sorted(oe["_teams"]),
+            "normalized_team_set": sorted(oe["_source_teams"]),
             "oe_timestamp": oe["_stamp"].isoformat().replace("+00:00", "Z"),
             "scoreboard_timestamp": selected["_stamp"].isoformat().replace("+00:00", "Z"),
             "series_timestamp": schedule_row["_stamp"].isoformat().replace("+00:00", "Z"),
@@ -709,6 +742,7 @@ def build_oe_leaguepedia_series_crosswalk(
         },
         "source_binding": source_binding,
         "source_records": normalized_source_records,
+        "alias_binding": dict(alias_binding or {}),
         "competition_mapping": {
             str(key): dict(value) if isinstance(value, Mapping) else value
             for key, value in competition_mapping.items()
@@ -719,13 +753,13 @@ def build_oe_leaguepedia_series_crosswalk(
             "matchschedule": [dict(row) for row in schedule_rows],
         },
         "join_contract": {
-            "team_identity": "exact_normalized_unordered_two_team_set",
+            "team_identity": "verified_alias_normalized_unordered_two_team_set_for_join; original_OE_team_set_for_assignment_binding",
             "competition_mapping": "explicit_source_league_to_scoreboard_and_schedule_values",
             "patch_identity": "match_when_both_source_and_target_patch_are_available",
             "timestamp_bounds": {
                 "game_seconds": max_game_time_delta_seconds,
-                "first_game_schedule_seconds": max_first_game_schedule_delta_seconds,
-                "later_game_schedule_age_seconds": max_later_game_schedule_age_seconds,
+                "first_game_schedule_absolute_seconds": max_first_game_schedule_delta_seconds,
+                "later_game_schedule_absolute_seconds": max_later_game_schedule_age_seconds,
             },
             "timestamp_timezone": "UTC; naive Leaguepedia Cargo values are interpreted as UTC",
             "game_id_prefix_to_match_id": "exact",
