@@ -17,6 +17,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 import hashlib
+import inspect
 import json
 import math
 import re
@@ -112,6 +113,8 @@ SOURCE_RECEIPT_SCHEMA = "scryglass:future-value-rating-source:v1"
 STATIC_ATOM_RECEIPT_SCHEMA = "scryglass:atomized-composition-producer:v1"
 COEFFICIENT_RECEIPT_SCHEMA = "scryglass:future-value-draft-score-coefficients:v1"
 MODEL_RECEIPT_SCHEMA = "scryglass:future-value-draft-score-model-receipt:v1"
+MODEL_ARTIFACT_SCHEMA = "scryglass:future-value-draft-score-linear-model:v1"
+MODEL_TRAINER_ID = "scryglass.future_value_draft_score.linear_logit.v1"
 PREDICTION_LEDGER_SCHEMA = "scryglass:future-value-draft-score-prediction-ledger:v2"
 _ALLOWED_PRODUCER_TIMINGS = frozenset(
     {"pregame_strict_prior", "cross_fitted_pregame", "strict_prior_pregame"}
@@ -162,7 +165,7 @@ _AUTHORITY_ALLOWED_FIELDS = frozenset(
         "deployment",
     }
 )
-_SOURCE_FILE_ALLOWED_FIELDS = frozenset({"locator", "path", "bytes", "sha256"})
+_SOURCE_FILE_ALLOWED_FIELDS = frozenset({"locator", "path", "bytes", "sha256", "year"})
 _TRUSTED_PRODUCER_NAMES = frozenset(
     {
         "public_descriptive_draft_records",
@@ -200,6 +203,9 @@ _STATIC_ATOM_ALLOWED_FIELDS = frozenset(
         "fit_through",
         "chronological_evaluation_suitable",
         "chronological_evaluation_reason",
+        "coverage_game_count",
+        "coverage_game_ids",
+        "coverage_identity_sha256",
     }
 )
 _PRODUCER_RECEIPT_REQUIRED_FIELDS = frozenset(
@@ -459,12 +465,87 @@ def _load_json_file(path: Path, field: str) -> tuple[dict[str, Any], bytes]:
     return value, raw
 
 
+def _linear_model_logits(
+    feature_names: Sequence[str],
+    coefficients: Mapping[str, float],
+    feature_matrix: np.ndarray,
+) -> np.ndarray:
+    """Apply the pinned linear-logit prediction contract."""
+
+    weights = np.asarray([float(coefficients[name]) for name in feature_names], dtype=float)
+    return np.asarray(feature_matrix, dtype=float) @ weights
+
+
+def draft_score_trainer_implementation_sha256() -> str:
+    """Return the pinned identity of the fitted linear-logit contract."""
+
+    source = inspect.getsource(_linear_model_logits).encode("utf-8")
+    return hashlib.sha256(MODEL_TRAINER_ID.encode("utf-8") + b"\n" + source).hexdigest()
+
+
+def _descriptive_artifact_components(
+    payload: Mapping[str, Any],
+) -> dict[str, dict[str, float]]:
+    games = payload.get("games")
+    if isinstance(games, Mapping):
+        raw_rows = [(str(game_id), value) for game_id, value in games.items()]
+    elif isinstance(games, list):
+        raw_rows = []
+        for value in games:
+            if not isinstance(value, Mapping):
+                continue
+            game_id = value.get("game_uid", value.get("game_id", value.get("id")))
+            if game_id is not None:
+                raw_rows.append((str(game_id), value))
+    else:
+        raise FutureValueDraftScoreError("descriptive producer artifact games are missing")
+    if not raw_rows or len({game_id for game_id, _value in raw_rows}) != len(raw_rows):
+        raise FutureValueDraftScoreError("descriptive producer artifact game IDs are invalid")
+    parsed: dict[str, dict[str, float]] = {}
+    required = {*STATIC_COMPOSITION_COMPONENTS, "total"}
+    for game_id, game in raw_rows:
+        if not isinstance(game, Mapping):
+            raise FutureValueDraftScoreError("descriptive producer artifact row is invalid")
+        edge = game.get("edge_components")
+        if not isinstance(edge, Mapping) or set(edge) != required:
+            raise FutureValueDraftScoreError(
+                f"descriptive producer artifact edge components are incomplete: {game_id}"
+            )
+        values: dict[str, float] = {}
+        for component in STATIC_COMPOSITION_COMPONENTS:
+            try:
+                value = float(edge[component])
+            except (TypeError, ValueError) as error:
+                raise FutureValueDraftScoreError(
+                    f"descriptive producer artifact component is invalid: {game_id}"
+                ) from error
+            if not math.isfinite(value):
+                raise FutureValueDraftScoreError(
+                    f"descriptive producer artifact component is invalid: {game_id}"
+                )
+            values[f"composition_{component}_logit"] = value
+        try:
+            total = float(edge["total"])
+        except (TypeError, ValueError) as error:
+            raise FutureValueDraftScoreError(
+                f"descriptive producer artifact total is invalid: {game_id}"
+            ) from error
+        if not math.isfinite(total) or abs(total - sum(values.values())) > 1e-5:
+            raise FutureValueDraftScoreError(
+                f"descriptive producer artifact total changed: {game_id}"
+            )
+        parsed[game_id] = values
+    return parsed
+
+
 def _validate_producer_artifact_shape(
     path: Path,
     *,
     producer_name: str,
     source_identity_sha256: str,
     expected_game_ids: Sequence[str],
+    expected_component_frame: pd.DataFrame | None = None,
+    allow_coverage_subset: bool = False,
 ) -> None:
     """Check that a trusted producer receipt names its real public artifact."""
 
@@ -479,20 +560,8 @@ def _validate_producer_artifact_shape(
             raise FutureValueDraftScoreError("descriptive producer artifact schema is invalid")
         if str(payload.get("source_identity_sha256") or "").lower() != expected_identity:
             raise FutureValueDraftScoreError("producer artifact source identity changed")
-        games = payload.get("games")
-        if isinstance(games, Mapping):
-            artifact_ids = tuple(sorted(str(value) for value in games))
-        elif isinstance(games, list):
-            artifact_ids = tuple(
-                sorted(
-                    str(value.get("game_uid", value.get("game_id", value.get("id"))))
-                    for value in games
-                    if isinstance(value, Mapping)
-                    and value.get("game_uid", value.get("game_id", value.get("id"))) is not None
-                )
-            )
-        else:
-            raise FutureValueDraftScoreError("descriptive producer artifact games are missing")
+        components = _descriptive_artifact_components(payload)
+        artifact_ids = tuple(sorted(components))
     elif producer_name == "public_crossfit_draft_score":
         rows = payload.get("rows", payload.get("predictions", payload.get("results")))
         if isinstance(rows, Mapping):
@@ -511,8 +580,37 @@ def _validate_producer_artifact_shape(
     else:
         raise FutureValueDraftScoreError("producer is not a trusted Draft Score adapter")
     expected = tuple(sorted(str(value) for value in expected_game_ids))
-    if not expected or not set(expected).issubset(set(artifact_ids)):
+    if not expected:
         raise FutureValueDraftScoreError("producer artifact game census changed")
+    if allow_coverage_subset:
+        if not set(artifact_ids).issubset(set(expected)):
+            raise FutureValueDraftScoreError("producer artifact game census changed")
+    elif not set(expected).issubset(set(artifact_ids)):
+        raise FutureValueDraftScoreError("producer artifact game census changed")
+    if expected_component_frame is not None:
+        if producer_name != "public_descriptive_draft_records":
+            raise FutureValueDraftScoreError("component parity requires descriptive artifacts")
+        required_columns = {"game_id", *STATIC_COMPOSITION_FEATURES}
+        if not required_columns.issubset(expected_component_frame.columns):
+            raise FutureValueDraftScoreError("caller atom frame is incomplete")
+        caller_ids = tuple(str(value) for value in expected_component_frame["game_id"])
+        if len(set(caller_ids)) != len(caller_ids) or set(caller_ids) != set(expected):
+            raise FutureValueDraftScoreError("caller atom frame game census changed")
+        for row in expected_component_frame.itertuples(index=False):
+            game_id = str(row.game_id)
+            artifact_row = components.get(game_id)
+            if artifact_row is None:
+                raise FutureValueDraftScoreError("producer artifact game census changed")
+            for feature in STATIC_COMPOSITION_FEATURES:
+                try:
+                    caller_value = float(getattr(row, feature))
+                except (TypeError, ValueError) as error:
+                    raise FutureValueDraftScoreError("caller atom value is invalid") from error
+                if not math.isfinite(caller_value) or caller_value != artifact_row[feature]:
+                    raise FutureValueDraftScoreError(
+                        "atomized composition value differs from producer artifact: "
+                        f"{game_id} {feature}"
+                    )
 
 
 def _validate_source_receipt_payload(
@@ -558,6 +656,35 @@ def _validate_source_receipt_payload(
     expected_identity = identity_sha256(accepted)
     if str(source_receipt["source_identity_sha256"]).lower() != expected_identity:
         raise FutureValueDraftScoreError("canonical source receipt census identity is invalid")
+    model_fields = {
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
+        "model_eligible_game_ids",
+    }
+    present_model_fields = model_fields & set(source_receipt)
+    if present_model_fields and present_model_fields != model_fields:
+        raise FutureValueDraftScoreError(
+            "canonical source receipt model-eligible census is incomplete"
+        )
+    if present_model_fields:
+        raw_model_ids = source_receipt["model_eligible_game_ids"]
+        if not isinstance(raw_model_ids, list) or not all(
+            isinstance(value, str) for value in raw_model_ids
+        ):
+            raise FutureValueDraftScoreError(
+                "canonical source receipt model-eligible IDs are invalid"
+            )
+        model_ids = tuple(raw_model_ids)
+        if (
+            model_ids != canonical_game_ids(model_ids)
+            or not set(model_ids).issubset(set(accepted))
+            or source_receipt["model_eligible_game_count"] != len(model_ids)
+            or str(source_receipt["model_eligible_identity_sha256"]).lower()
+            != identity_sha256(model_ids)
+        ):
+            raise FutureValueDraftScoreError(
+                "canonical source receipt model-eligible census is invalid"
+            )
     receipt_hash = _require_hash(source_receipt["receipt_sha256"], "source receipt_sha256")
     payload = dict(source_receipt)
     payload.pop("receipt_sha256", None)
@@ -603,6 +730,18 @@ def _validate_source_receipt_payload(
             raise FutureValueDraftScoreError(
                 f"source receipt source file has unknown fields: {label}"
             )
+        if "year" in raw_record:
+            year = raw_record["year"]
+            if (
+                isinstance(year, bool)
+                or not isinstance(year, int)
+                or not 2000 <= year <= 2100
+                or not label.startswith("annual_")
+                or label != f"annual_{year}"
+            ):
+                raise FutureValueDraftScoreError(
+                    f"source receipt source file year is invalid: {label}"
+                )
         locator_values = (
             raw_record.get("path"),
             raw_record.get("locator"),
@@ -827,6 +966,8 @@ class DraftScoreProducerBinding:
             producer_name=str(self.producer_name),
             source_identity_sha256=str(source["source_identity_sha256"]),
             expected_game_ids=accepted,
+            allow_coverage_subset=str(self.producer_name)
+            == "public_descriptive_draft_records",
         )
         payload = dict(self.producer_receipt)
         claimed = str(payload.pop("receipt_sha256", "")).lower()
@@ -1204,12 +1345,30 @@ def _validate_static_atom_receipt(
         != str(receipt["source_identity_sha256"]).lower()
     ):
         raise FutureValueDraftScoreError("atomized artifact source binding changed")
+    artifact_component_frame = (
+        side_swap_source_frame if side_swap_source_frame is not None else frame
+    )
     _validate_producer_artifact_shape(
         artifact_path,
         producer_name=str(receipt["producer_name"]),
         source_identity_sha256=str(receipt["source_identity_sha256"]),
-        expected_game_ids=tuple(str(value) for value in frame["game_id"]),
+        expected_game_ids=tuple(
+            str(value) for value in artifact_component_frame["game_id"]
+        ),
+        expected_component_frame=artifact_component_frame,
     )
+    coverage_ids = tuple(str(value) for value in receipt.get("coverage_game_ids", ()))
+    if coverage_ids:
+        canonical_coverage = _normalise_ids(coverage_ids, "atomized coverage game IDs")
+        frame_ids = _normalise_ids(frame["game_id"].astype(str), "atomized frame game IDs")
+        if canonical_coverage != frame_ids:
+            raise FutureValueDraftScoreError("atomized coverage census changed")
+        if receipt.get("coverage_game_count") != len(canonical_coverage):
+            raise FutureValueDraftScoreError("atomized coverage count changed")
+        if str(receipt.get("coverage_identity_sha256") or "").lower() != identity_sha256(
+            canonical_coverage
+        ):
+            raise FutureValueDraftScoreError("atomized coverage identity changed")
     if source_receipt_sha256 is not None and str(receipt["source_receipt_sha256"]).lower() != _require_hash(source_receipt_sha256, "source_receipt_sha256"):
         raise FutureValueDraftScoreError("atomized source receipt binding changed")
     if source_identity_sha256 is not None and str(receipt["source_identity_sha256"]).lower() != _require_hash(source_identity_sha256, "source_identity_sha256"):
@@ -1971,6 +2130,69 @@ def make_coefficient_receipt(
     return payload
 
 
+def write_fitted_prediction_model(
+    output_path: Path | str,
+    design: DraftScoreVariantDesign,
+    coefficients: Mapping[str, float],
+    *,
+    coefficient_receipt: Mapping[str, Any],
+    model_version: str,
+) -> tuple[Path, Path]:
+    """Write fitted parameters and a receipt for the pinned linear model."""
+
+    binding = _validate_coefficient_receipt(coefficient_receipt, design, coefficients)
+    if not str(model_version).strip():
+        raise FutureValueDraftScoreError("prediction model version is required")
+    config = draft_score_variant_config(design.variant)
+    implementation_hash = draft_score_trainer_implementation_sha256()
+    artifact_path = Path(output_path).expanduser()
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_payload: dict[str, Any] = {
+        "schema_version": MODEL_ARTIFACT_SCHEMA,
+        "trainer_id": MODEL_TRAINER_ID,
+        "implementation_sha256": implementation_hash,
+        "model_id": str(binding["model_id"]),
+        "model_version": str(model_version),
+        "variant": design.variant.value,
+        "source_receipt_sha256": design.source_binding.source_receipt_sha256,
+        "source_identity_sha256": design.source_binding.source_identity_sha256,
+        "fold_id": design.source_binding.fold_id,
+        "fit_game_ids": list(design.source_binding.fit_game_ids),
+        "fit_game_identity_sha256": identity_sha256(design.source_binding.fit_game_ids),
+        "fit_id": str(binding["fit_id"]),
+        "feature_names": list(config.feature_names),
+        "coefficients": {
+            name: float(coefficients[name]) for name in config.feature_names
+        },
+        "coefficient_sha256": str(binding["coefficient_sha256"]),
+    }
+    artifact_raw = _canonical_json_bytes(artifact_payload) + b"\n"
+    artifact_path.write_bytes(artifact_raw)
+    receipt_payload: dict[str, Any] = {
+        "schema_version": MODEL_RECEIPT_SCHEMA,
+        "model_id": str(binding["model_id"]),
+        "model_version": str(model_version),
+        "variant": design.variant.value,
+        "source_receipt_sha256": design.source_binding.source_receipt_sha256,
+        "source_identity_sha256": design.source_binding.source_identity_sha256,
+        "fold_id": design.source_binding.fold_id,
+        "fit_game_ids": list(design.source_binding.fit_game_ids),
+        "fit_game_identity_sha256": identity_sha256(design.source_binding.fit_game_ids),
+        "fit_id": str(binding["fit_id"]),
+        "coefficient_sha256": str(binding["coefficient_sha256"]),
+        "artifact_locator": artifact_path.name,
+        "artifact_bytes": len(artifact_raw),
+        "artifact_sha256": hashlib.sha256(artifact_raw).hexdigest(),
+        "implementation_sha256": implementation_hash,
+        "authority": {"research_only": True},
+    }
+    receipt_payload["receipt_sha256"] = _sha256(receipt_payload)
+    receipt_stem = artifact_path.stem.removesuffix("-artifact")
+    receipt_path = artifact_path.with_name(receipt_stem + "-receipt.json")
+    receipt_path.write_bytes(_canonical_json_bytes(receipt_payload) + b"\n")
+    return artifact_path, receipt_path
+
+
 def _validate_prediction_model_receipt(
     receipt_path: Path,
     *,
@@ -2038,7 +2260,11 @@ def _validate_prediction_model_receipt(
         raise FutureValueDraftScoreError("prediction model receipt variant changed")
     if not str(payload["model_version"]).strip():
         raise FutureValueDraftScoreError("prediction model receipt implementation identity is required")
-    _require_hash(payload["implementation_sha256"], "prediction model implementation_sha256")
+    implementation_hash = _require_hash(
+        payload["implementation_sha256"], "prediction model implementation_sha256"
+    )
+    if implementation_hash != draft_score_trainer_implementation_sha256():
+        raise FutureValueDraftScoreError("prediction model trainer implementation changed")
     artifact_path = _safe_locator(
         payload["artifact_locator"],
         base=receipt_path.parent,
@@ -2050,6 +2276,82 @@ def _validate_prediction_model_receipt(
         expected_sha256=payload["artifact_sha256"],
         field="prediction model artifact",
     )
+    artifact_payload, _artifact_raw = _load_json_file(
+        artifact_path, "prediction model artifact"
+    )
+    artifact_fields = {
+        "schema_version",
+        "trainer_id",
+        "implementation_sha256",
+        "model_id",
+        "model_version",
+        "variant",
+        "source_receipt_sha256",
+        "source_identity_sha256",
+        "fold_id",
+        "fit_game_ids",
+        "fit_game_identity_sha256",
+        "fit_id",
+        "feature_names",
+        "coefficients",
+        "coefficient_sha256",
+    }
+    if set(artifact_payload) != artifact_fields:
+        raise FutureValueDraftScoreError("prediction model artifact schema is invalid")
+    artifact_variant = _canonical_variant(str(payload["variant"]))
+    config = draft_score_variant_config(artifact_variant)
+    if artifact_payload.get("schema_version") != MODEL_ARTIFACT_SCHEMA:
+        raise FutureValueDraftScoreError("prediction model artifact schema is invalid")
+    if artifact_payload.get("trainer_id") != MODEL_TRAINER_ID:
+        raise FutureValueDraftScoreError("prediction model artifact trainer changed")
+    expected_artifact_bindings = {
+        "implementation_sha256": implementation_hash,
+        "model_id": str(payload["model_id"]),
+        "model_version": str(payload["model_version"]),
+        "variant": str(payload["variant"]),
+        "source_receipt_sha256": str(payload["source_receipt_sha256"]).lower(),
+        "source_identity_sha256": str(payload["source_identity_sha256"]).lower(),
+        "fold_id": str(payload["fold_id"]),
+        "fit_game_identity_sha256": identity_sha256(fit_ids),
+        "fit_id": str(payload["fit_id"]),
+        "coefficient_sha256": str(payload["coefficient_sha256"]).lower(),
+    }
+    for field, expected in expected_artifact_bindings.items():
+        value = artifact_payload.get(field)
+        actual = str(value).lower() if field.endswith("sha256") else str(value)
+        if actual != expected:
+            raise FutureValueDraftScoreError(
+                f"prediction model artifact {field} changed"
+            )
+    artifact_fit_ids = _normalise_ids(
+        artifact_payload["fit_game_ids"], "prediction model artifact fit game IDs"
+    )
+    if artifact_fit_ids != fit_ids:
+        raise FutureValueDraftScoreError("prediction model artifact fit IDs changed")
+    feature_names = tuple(str(value) for value in artifact_payload["feature_names"])
+    if feature_names != config.feature_names:
+        raise FutureValueDraftScoreError("prediction model artifact features changed")
+    artifact_coefficients = artifact_payload.get("coefficients")
+    if not isinstance(artifact_coefficients, Mapping) or set(artifact_coefficients) != set(
+        feature_names
+    ):
+        raise FutureValueDraftScoreError("prediction model artifact coefficients are invalid")
+    try:
+        coefficients = {
+            name: float(artifact_coefficients[name]) for name in feature_names
+        }
+    except (TypeError, ValueError) as error:
+        raise FutureValueDraftScoreError(
+            "prediction model artifact coefficients are invalid"
+        ) from error
+    if not all(math.isfinite(value) for value in coefficients.values()):
+        raise FutureValueDraftScoreError("prediction model artifact coefficients are invalid")
+    if _coefficient_values_sha256(feature_names, coefficients) != str(
+        payload["coefficient_sha256"]
+    ).lower():
+        raise FutureValueDraftScoreError(
+            "prediction model artifact parameters differ from coefficient receipt"
+        )
     return payload, hashlib.sha256(raw).hexdigest(), artifact_hash
 
 
@@ -2548,6 +2850,8 @@ __all__ = [
     "SCHEMA_VERSION",
     "PREDICTION_LEDGER_SCHEMA",
     "MODEL_RECEIPT_SCHEMA",
+    "MODEL_ARTIFACT_SCHEMA",
+    "MODEL_TRAINER_ID",
     "STATIC_COMPOSITION_COMPONENTS",
     "STATIC_COMPOSITION_FEATURES",
     "VARIANT_CONFIGS",
@@ -2555,10 +2859,12 @@ __all__ = [
     "build_curve_atom_interactions",
     "build_draft_score_variant_design",
     "draft_score_variant_config",
+    "draft_score_trainer_implementation_sha256",
     "score_draft_score_variant",
     "score_variant",
     "make_coefficient_receipt",
     "write_independent_prediction_ledger",
+    "write_fitted_prediction_model",
     "static_composition_parity_hash",
     "swap_variant_feature_frame",
     "swap_raw_blue_red_frame",

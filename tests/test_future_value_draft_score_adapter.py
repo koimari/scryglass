@@ -32,8 +32,13 @@ def _write_json(path: Path, value: object) -> bytes:
     return raw
 
 
-def _public_files(tmp_path: Path, *, fit_through: str = "2026-02-03T00:00:00Z") -> tuple[Path, Path, Path]:
-    ids = ["game-1", "game-2"]
+def _public_files(
+    tmp_path: Path,
+    *,
+    fit_through: str = "2026-02-03T00:00:00Z",
+    ids: list[str] | None = None,
+) -> tuple[Path, Path, Path]:
+    ids = ids or ["game-1", "game-2"]
     source_file = tmp_path / "accepted-census.csv"
     source_raw = b"game-1\ngame-2\n"
     source_file.write_bytes(source_raw)
@@ -161,6 +166,30 @@ def test_public_descriptive_adapter_rejects_symlinked_source_artifact(tmp_path: 
         adapt_public_descriptive_draft_records(draft_path, manifest_path, source_path)
 
 
+def test_frozen_public_pack_adapts_as_coverage_scoped_evidence(tmp_path: Path) -> None:
+    freeze = Path("/private/tmp/scryglass-four-variant-freeze-20260820T145129")
+    draft_path = freeze / "baseline/public-pack/features/draft_records.json"
+    manifest_path = freeze / "baseline/public-pack/manifest.json"
+    source_path = freeze / "future-value-source-receipt.json"
+    if not all(path.is_file() for path in (draft_path, manifest_path, source_path)):
+        pytest.skip("frozen public pack is unavailable")
+    repository_root = Path(__file__).resolve().parents[1]
+    result = adapt_verified_public_descriptive_draft_records(
+        draft_path,
+        manifest_path,
+        source_path,
+        authority_path=repository_root
+        / "data/lol/v2/evaluation/composition-descriptive-authority.json",
+        repository_root=repository_root,
+        output_dir=tmp_path / "adapter",
+        source_root=freeze,
+    )
+    assert 0 < len(result.frame) < result.source_receipt["source_game_count"]
+    assert result.static_atom_receipt["coverage_game_count"] == len(result.frame)
+    assert result.static_atom_receipt["coverage_game_ids"] == list(result.frame["game_id"])
+    assert result.chronological_evaluation_suitable is False
+
+
 def test_independent_descriptive_authority_binds_model_recipe_and_scorer() -> None:
     repository_root = Path(__file__).resolve().parents[1]
     authority_path = repository_root / "data/lol/v2/evaluation/composition-descriptive-authority.json"
@@ -242,8 +271,53 @@ def test_verified_adapter_writes_source_bound_atom_ledger(tmp_path: Path) -> Non
     assert list(loaded["game_id"]) == ["game-1", "game-2"]
 
 
+def test_verified_adapter_keeps_overlapping_static_fit_blocked(tmp_path: Path) -> None:
+    draft_path, manifest_path, source_path = _public_files(
+        tmp_path,
+        fit_through="2026-02-03T00:00:00Z",
+    )
+    repository_root = Path(__file__).resolve().parents[1]
+    authority_path = (
+        repository_root / "data/lol/v2/evaluation/composition-descriptive-authority.json"
+    )
+    authority = verify_public_descriptive_authority(
+        authority_path,
+        repository_root=repository_root,
+    )
+    draft = json.loads(draft_path.read_text())
+    draft["artifact_sha256"] = authority.model_sha256
+    draft_raw = _write_json(draft_path, draft)
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"][0]["bytes"] = len(draft_raw)
+    manifest["files"][0]["sha256"] = hashlib.sha256(draft_raw).hexdigest()
+    _write_json(manifest_path, manifest)
+    result = adapt_verified_public_descriptive_draft_records(
+        draft_path,
+        manifest_path,
+        source_path,
+        authority_path=authority_path,
+        repository_root=repository_root,
+        output_dir=tmp_path / "adapter",
+    )
+    assert result.chronological_evaluation_suitable is False
+    with pytest.raises(DraftScoreAdapterError, match="chronologically suitable"):
+        write_source_bound_atom_ledger(
+            result,
+            tmp_path / "blocked-atoms.json",
+            authority=authority,
+            fold_id="fold-blocked",
+            fit_game_ids=["game-1"],
+            fit_window_end="2026-02-01T00:00:00Z",
+            fit_game_dates={"game-1": "2026-01-31T00:00:00Z"},
+        )
+
+
 def test_crossfit_adapter_maps_public_component_rows(tmp_path: Path) -> None:
-    _draft_path, _manifest_path, source_path = _public_files(tmp_path, fit_through="2026-01-01T00:00:00Z")
+    _draft_path, _manifest_path, source_path = _public_files(
+        tmp_path,
+        fit_through="2026-01-01T00:00:00Z",
+        ids=["fit-0", "game-1", "game-2"],
+    )
     rows_path = tmp_path / "crossfit-rows.json"
     rows = {
         "rows": [
@@ -277,11 +351,11 @@ def test_crossfit_adapter_maps_public_component_rows(tmp_path: Path) -> None:
         "schema_version": "scryglass:public-crossfit-draft-receipt:v1",
         "source_receipt_sha256": source["receipt_sha256"],
         "source_identity_sha256": source["source_identity_sha256"],
-        "accepted_game_ids": ["game-1", "game-2"],
+        "accepted_game_ids": ["fit-0", "game-1", "game-2"],
         "fold_id": "fold-1",
         "model_id": "crossfit-v1",
-        "fit_game_ids": ["game-1"],
-        "fit_game_identity_sha256": identity_sha256(["game-1"]),
+        "fit_game_ids": ["fit-0"],
+        "fit_game_identity_sha256": identity_sha256(["fit-0"]),
         "producer_timing": "cross_fitted_pregame",
         "artifact_locator": str(rows_path),
         "artifact_bytes": len(rows_raw),
@@ -294,3 +368,66 @@ def test_crossfit_adapter_maps_public_component_rows(tmp_path: Path) -> None:
     assert result.frame.loc[0, "composition_base_logit"] == pytest.approx(0.3)
     assert result.frame.loc[0, "composition_archetype_interactions_logit"] == pytest.approx(1.0)
     assert result.frame.loc[0, "producer_timing"] == "cross_fitted_pregame"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ("missing_component", "components are incomplete"),
+        ("null_artifact_sha", "artifact_sha256"),
+        ("null_artifact_bytes", "byte count"),
+        ("fit_overlap", "fit and scored"),
+        ("fit_outside", "outside the model fold census"),
+    ),
+)
+def test_crossfit_adapter_rejects_incomplete_or_leaking_evidence(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    _draft_path, _manifest_path, source_path = _public_files(
+        tmp_path,
+        ids=["fit-0", "game-1"],
+    )
+    row = {
+        "game_uid": "game-1",
+        "date": "2026-02-02T00:00:00Z",
+        "crossfit_champion_main": 0.1,
+        "crossfit_role_champion": 0.2,
+        "crossfit_ally_synergy": 0.3,
+        "crossfit_archetype_synergy": 0.4,
+        "crossfit_enemy_counter": 0.5,
+        "crossfit_archetype_counter": 0.6,
+        "crossfit_same_role": 0.7,
+    }
+    if mutation == "missing_component":
+        row.pop("crossfit_enemy_counter")
+    rows_path = tmp_path / "crossfit-rows.json"
+    rows_raw = _write_json(rows_path, {"rows": [row]})
+    source = json.loads(source_path.read_text())
+    fit_ids = ["fit-0"]
+    if mutation == "fit_overlap":
+        fit_ids = ["game-1"]
+    elif mutation == "fit_outside":
+        fit_ids = ["outside"]
+    receipt = {
+        "schema_version": "scryglass:public-crossfit-draft-receipt:v1",
+        "source_receipt_sha256": source["receipt_sha256"],
+        "source_identity_sha256": source["source_identity_sha256"],
+        "accepted_game_ids": source["accepted_game_ids"],
+        "fold_id": "fold-1",
+        "model_id": "crossfit-v1",
+        "fit_game_ids": fit_ids,
+        "fit_game_identity_sha256": identity_sha256(fit_ids),
+        "producer_timing": "cross_fitted_pregame",
+        "artifact_locator": str(rows_path),
+        "artifact_bytes": None if mutation == "null_artifact_bytes" else len(rows_raw),
+        "artifact_sha256": None
+        if mutation == "null_artifact_sha"
+        else hashlib.sha256(rows_raw).hexdigest(),
+    }
+    receipt["receipt_sha256"] = _sha(receipt)
+    receipt_path = tmp_path / "crossfit-receipt.json"
+    _write_json(receipt_path, receipt)
+    with pytest.raises(DraftScoreAdapterError, match=message):
+        adapt_public_crossfit_draft_rows(rows_path, receipt_path, source_path)

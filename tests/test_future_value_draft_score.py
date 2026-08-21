@@ -29,6 +29,7 @@ from lol_kills.research.future_value_draft_score import (
     swap_raw_blue_red_frame,
     validate_feature_names,
     write_independent_prediction_ledger,
+    write_fitted_prediction_model,
     validate_side_swap,
     validate_raw_side_swap,
     variant_registry_receipt,
@@ -89,6 +90,20 @@ def _frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _artifact_games(frame: pd.DataFrame) -> dict[str, object]:
+    games: dict[str, object] = {}
+    for row in frame.itertuples(index=False):
+        edge = {
+            feature.removeprefix("composition_").removesuffix("_logit"): float(
+                getattr(row, feature)
+            )
+            for feature in STATIC_COMPOSITION_FEATURES
+        }
+        edge["total"] = sum(edge.values())
+        games[str(row.game_id)] = {"edge_components": edge}
+    return games
+
+
 def _binding() -> DraftScoreProducerBinding:
     accepted = ("fit1", "g1", "g2")
     _SOURCE_FILE.write_text("accepted census fixture\n", encoding="utf-8")
@@ -115,7 +130,7 @@ def _binding() -> DraftScoreProducerBinding:
         "authority": "descriptive",
         "estimand": "composition_only",
         "source_identity_sha256": source["source_identity_sha256"],
-        "games": {game_id: {} for game_id in accepted},
+        "games": _artifact_games(_frame()),
     }
     producer_artifact_raw = json.dumps(
         producer_artifact,
@@ -201,7 +216,7 @@ def _atom_receipt(frame: pd.DataFrame) -> dict[str, object]:
         "authority": "descriptive",
         "estimand": "composition_only",
         "source_identity_sha256": _binding().source_identity_sha256,
-        "games": {str(game_id): {} for game_id in frame["game_id"]},
+        "games": _artifact_games(frame),
     }
     artifact_path.write_bytes(
         json.dumps(artifact_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -255,42 +270,17 @@ def _atom_kwargs(frame: pd.DataFrame) -> dict[str, object]:
 def _coefficients_and_ledger(design: object) -> tuple[dict[str, float], dict[str, object], Path, Path]:
     coefficients = {feature: 1.0 for feature in design.feature_frame.columns}
     coefficient_receipt = make_coefficient_receipt(design, coefficients)
-    model_artifact_path = _FIXTURE_ROOT / "prediction-model-artifact.json"
-    model_artifact_raw = json.dumps(
-        {
-            "model_id": coefficient_receipt["model_id"],
-            "variant": design.variant.value,
-            "fit_id": coefficient_receipt["fit_id"],
-            "coefficient_sha256": coefficient_receipt["coefficient_sha256"],
-            "implementation": "independent-fixture-model",
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-    model_artifact_path.write_bytes(model_artifact_raw)
-    implementation_sha256 = "c" * 64
-    model_receipt = {
-        "schema_version": "scryglass:future-value-draft-score-model-receipt:v1",
-        "model_id": coefficient_receipt["model_id"],
-        "model_version": "independent-fixture-v1",
-        "variant": design.variant.value,
-        "source_receipt_sha256": design.source_binding.source_receipt_sha256,
-        "source_identity_sha256": design.source_binding.source_identity_sha256,
-        "fold_id": design.source_binding.fold_id,
-        "fit_game_ids": list(design.source_binding.fit_game_ids),
-        "fit_game_identity_sha256": identity_sha256(design.source_binding.fit_game_ids),
-        "fit_id": coefficient_receipt["fit_id"],
-        "coefficient_sha256": coefficient_receipt["coefficient_sha256"],
-        "artifact_locator": str(model_artifact_path),
-        "artifact_bytes": len(model_artifact_raw),
-        "artifact_sha256": hashlib.sha256(model_artifact_raw).hexdigest(),
-        "implementation_sha256": implementation_sha256,
-        "authority": {"research_only": True},
-    }
-    model_receipt["receipt_sha256"] = _sha(model_receipt)
-    model_receipt_path = _FIXTURE_ROOT / "prediction-model-receipt.json"
-    model_receipt_raw = json.dumps(model_receipt, sort_keys=True, separators=(",", ":")).encode()
-    model_receipt_path.write_bytes(model_receipt_raw)
+    model_artifact_path, model_receipt_path = write_fitted_prediction_model(
+        _FIXTURE_ROOT / "prediction-model-artifact.json",
+        design,
+        coefficients,
+        coefficient_receipt=coefficient_receipt,
+        model_version="independent-fixture-v1",
+    )
+    model_artifact_raw = model_artifact_path.read_bytes()
+    model_receipt_raw = model_receipt_path.read_bytes()
+    model_receipt = json.loads(model_receipt_raw)
+    implementation_sha256 = str(model_receipt["implementation_sha256"])
     rows = [
         {"game_id": game_id, "model_logit": float(value)}
         for game_id, value in zip(design.game_ids, design.feature_frame.sum(axis=1).to_numpy())
@@ -311,7 +301,7 @@ def _coefficients_and_ledger(design: object) -> tuple[dict[str, float], dict[str
         "model_receipt_locator": str(model_receipt_path),
         "model_receipt_bytes": len(model_receipt_raw),
         "model_receipt_sha256": hashlib.sha256(model_receipt_raw).hexdigest(),
-        "model_artifact_locator": str(model_artifact_path),
+        "model_artifact_locator": str(model_receipt["artifact_locator"]),
         "model_artifact_bytes": len(model_artifact_raw),
         "model_artifact_sha256": hashlib.sha256(model_artifact_raw).hexdigest(),
         "model_implementation_sha256": implementation_sha256,
@@ -439,6 +429,72 @@ def test_independent_prediction_writer_binds_model_receipt_and_artifact() -> Non
         )
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ("coefficient", "parameters differ"),
+        ("trainer", "trainer implementation changed"),
+    ),
+)
+def test_prediction_model_rejects_resealed_parameter_or_trainer_mutation(
+    mutation: str,
+    message: str,
+) -> None:
+    frame = _frame()
+    design = build_draft_score_variant_design(
+        frame,
+        DraftScoreVariant.CURRENT_ONLY,
+        _binding(),
+        **_atom_kwargs(frame),
+    )
+    coefficients, coefficient_receipt, _ledger_path, _ledger_receipt_path = (
+        _coefficients_and_ledger(design)
+    )
+    artifact_path = _FIXTURE_ROOT / "prediction-model-artifact.json"
+    receipt_path = _FIXTURE_ROOT / "prediction-model-receipt.json"
+    artifact = json.loads(artifact_path.read_text())
+    receipt = json.loads(receipt_path.read_text())
+    if mutation == "coefficient":
+        first_feature = artifact["feature_names"][0]
+        artifact["coefficients"][first_feature] += 0.25
+    else:
+        artifact["implementation_sha256"] = "f" * 64
+        receipt["implementation_sha256"] = "f" * 64
+    artifact_raw = json.dumps(
+        artifact,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode() + b"\n"
+    artifact_path.write_bytes(artifact_raw)
+    receipt["artifact_bytes"] = len(artifact_raw)
+    receipt["artifact_sha256"] = hashlib.sha256(artifact_raw).hexdigest()
+    receipt.pop("receipt_sha256")
+    receipt["receipt_sha256"] = _sha(receipt)
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        with pytest.raises(FutureValueDraftScoreError, match=message):
+            write_independent_prediction_ledger(
+                _FIXTURE_ROOT / f"mutated-{mutation}-predictions.json",
+                design.game_ids,
+                design.feature_frame.sum(axis=1).to_numpy(),
+                source_receipt_sha256=design.source_binding.source_receipt_sha256,
+                source_identity_sha256=design.source_binding.source_identity_sha256,
+                fold_id=design.source_binding.fold_id,
+                fit_game_ids=design.source_binding.fit_game_ids,
+                fit_id=coefficient_receipt["fit_id"],
+                model_id=coefficient_receipt["model_id"],
+                coefficient_sha256=coefficient_receipt["coefficient_sha256"],
+                model_receipt_path=receipt_path,
+                variant=design.variant,
+            )
+    finally:
+        _coefficients_and_ledger(design)
+
+
 @pytest.mark.parametrize("variant", tuple(DraftScoreVariant))
 def test_side_swap_negates_signed_features_and_preserves_phase_invariants(
     variant: DraftScoreVariant,
@@ -478,6 +534,31 @@ def test_static_parity_rejects_mutated_atom_value() -> None:
     changed.loc[0, "composition_enemy_counter_logit"] += 0.01
     with pytest.raises(FutureValueDraftScoreError, match="atomized composition"):
         build_draft_score_variant_design(changed, DraftScoreVariant.CURRENT_ONLY, binding, **_atom_kwargs(frame))
+
+
+def test_static_parity_rejects_resealed_caller_values_against_real_artifact() -> None:
+    frame = _frame()
+    binding = _binding()
+    receipt, _receipt_path = _write_atom(frame)
+    changed = frame.copy()
+    changed.loc[0, "composition_enemy_counter_logit"] += 0.01
+    resealed = dict(receipt)
+    resealed["component_values_sha256"] = static_composition_parity_hash(changed)
+    resealed.pop("receipt_sha256")
+    resealed["receipt_sha256"] = _sha(resealed)
+    resealed_path = _ATOM_ROOT / "resealed-mutated-atom-receipt.json"
+    resealed_path.write_text(
+        json.dumps(resealed, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    with pytest.raises(FutureValueDraftScoreError, match="producer artifact"):
+        build_draft_score_variant_design(
+            changed,
+            DraftScoreVariant.CURRENT_ONLY,
+            binding,
+            static_atom_receipt=resealed,
+            static_atom_receipt_path=resealed_path,
+        )
 
 
 def test_static_atom_receipt_rejects_resealed_path_and_producer_mutation() -> None:

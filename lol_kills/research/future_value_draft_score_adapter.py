@@ -388,8 +388,9 @@ def adapt_public_descriptive_draft_records(
         raise DraftScoreAdapterError("public draft records contract is invalid")
     game_rows = _game_rows(draft)
     draft_ids = tuple(game_id for game_id, _ in game_rows)
-    if draft_ids != tuple(source_receipt["accepted_game_ids"]):
-        raise DraftScoreAdapterError("public draft records do not match accepted census")
+    accepted_ids = tuple(source_receipt["accepted_game_ids"])
+    if not set(draft_ids).issubset(set(accepted_ids)):
+        raise DraftScoreAdapterError("public draft records contain games outside accepted census")
     manifest_identity = _find_source_identity(manifest)
     if manifest_identity is not None and manifest_identity != source_receipt["source_identity_sha256"]:
         raise DraftScoreAdapterError("public manifest source identity changed")
@@ -427,7 +428,7 @@ def adapt_public_descriptive_draft_records(
             fit_cutoff = fit_cutoff.tz_convert("UTC")
     else:
         fit_cutoff = None
-    suitable = fit_cutoff is None or all(date > fit_cutoff for date in dates)
+    suitable = fit_cutoff is not None and all(date > fit_cutoff for date in dates)
     static_receipt_payload: dict[str, Any] = {
         "schema_version": core.STATIC_ATOM_RECEIPT_SCHEMA,
         "producer_name": "public_descriptive_draft_records",
@@ -446,6 +447,9 @@ def adapt_public_descriptive_draft_records(
         "fit_through": fit_through,
         "chronological_evaluation_suitable": suitable,
         "chronological_evaluation_reason": None if suitable else "static artifact fit cutoff is later than scored rows",
+        "coverage_game_count": len(draft_ids),
+        "coverage_game_ids": list(draft_ids),
+        "coverage_identity_sha256": identity_sha256(draft_ids),
     }
     frame = _component_rows(
         draft,
@@ -462,8 +466,8 @@ def adapt_public_descriptive_draft_records(
         "schema_version": core.SCHEMA_VERSION,
         "source_receipt_sha256": source_receipt["receipt_sha256"],
         "source_identity_sha256": source_receipt["source_identity_sha256"],
-        "accepted_game_count": len(draft_ids),
-        "accepted_game_ids": list(draft_ids),
+        "accepted_game_count": len(accepted_ids),
+        "accepted_game_ids": list(accepted_ids),
         "producer_name": "public_descriptive_draft_records",
         "producer_family": "static_composition",
         "fit_game_count": 1,
@@ -547,8 +551,6 @@ def adapt_verified_public_descriptive_draft_records(
         raise DraftScoreAdapterError("public draft model version changed")
     if str(payload.get("artifact_sha256") or "").lower() != authority.model_sha256:
         raise DraftScoreAdapterError("public draft model artifact binding changed")
-    if not result.chronological_evaluation_suitable:
-        raise DraftScoreAdapterError("public descriptive artifact is not chronologically suitable")
     static_receipt = dict(result.static_atom_receipt)
     static_receipt.update(
         {
@@ -913,17 +915,33 @@ def adapt_public_crossfit_draft_rows(
         raise DraftScoreAdapterError("crossfit Draft receipt fit identity changed")
     if receipt["producer_timing"] not in core._ALLOWED_PRODUCER_TIMINGS:
         raise DraftScoreAdapterError("crossfit Draft receipt timing is not pregame")
-    claimed_artifact = receipt.get("artifact_sha256", receipt.get("candidate_artifact_sha256"))
-    if claimed_artifact is not None:
-        if str(receipt["artifact_locator"]) not in {rows_file.name, str(rows_file)}:
-            raise DraftScoreAdapterError("crossfit Draft artifact locator changed")
-        _verify_file(rows_file, expected_bytes=receipt.get("artifact_bytes", len(rows_raw)), expected_sha256=claimed_artifact, label="crossfit Draft rows")
+    claimed_artifact = _require_sha(receipt.get("artifact_sha256"), "crossfit artifact_sha256")
+    artifact_bytes = receipt.get("artifact_bytes")
+    if isinstance(artifact_bytes, bool) or not isinstance(artifact_bytes, int) or artifact_bytes <= 0:
+        raise DraftScoreAdapterError("crossfit Draft artifact byte count is invalid")
+    if str(receipt["artifact_locator"]) not in {rows_file.name, str(rows_file)}:
+        raise DraftScoreAdapterError("crossfit Draft artifact locator changed")
+    _verify_file(
+        rows_file,
+        expected_bytes=artifact_bytes,
+        expected_sha256=claimed_artifact,
+        label="crossfit Draft rows",
+    )
     raw_rows = rows_payload.get("rows", rows_payload.get("predictions", rows_payload.get("results")))
     if isinstance(raw_rows, Mapping):
         raw_rows = [dict(value, game_id=key) for key, value in raw_rows.items() if isinstance(value, Mapping)]
     if not isinstance(raw_rows, list) or not raw_rows:
         raise DraftScoreAdapterError("crossfit Draft rows are missing")
     converted: list[dict[str, Any]] = []
+    required_components = {
+        "crossfit_champion_main",
+        "crossfit_role_champion",
+        "crossfit_ally_synergy",
+        "crossfit_enemy_counter",
+        "crossfit_same_role",
+        "crossfit_archetype_synergy",
+        "crossfit_archetype_counter",
+    }
     for raw in raw_rows:
         if not isinstance(raw, Mapping):
             raise DraftScoreAdapterError("crossfit Draft row is invalid")
@@ -933,14 +951,20 @@ def adapt_public_crossfit_draft_rows(
         date = str(raw.get("date") or raw.get("game_date") or "").strip()
         if not date:
             raise DraftScoreAdapterError(f"crossfit Draft row date is missing: {game_id}")
+        missing_components = sorted(required_components - set(raw))
+        if missing_components:
+            raise DraftScoreAdapterError(
+                "crossfit Draft row components are incomplete: "
+                + ", ".join(missing_components)
+            )
         values = {
-            "composition_base_logit": _finite(raw.get("crossfit_champion_main", 0.0), "crossfit champion component")
-            + _finite(raw.get("crossfit_role_champion", 0.0), "crossfit role component"),
-            "composition_ally_synergy_logit": _finite(raw.get("crossfit_ally_synergy", 0.0), "crossfit ally component"),
-            "composition_enemy_counter_logit": _finite(raw.get("crossfit_enemy_counter", 0.0), "crossfit enemy component"),
-            "composition_same_role_logit": _finite(raw.get("crossfit_same_role", 0.0), "crossfit role-pair component"),
-            "composition_archetype_interactions_logit": _finite(raw.get("crossfit_archetype_synergy", 0.0), "crossfit archetype synergy")
-            + _finite(raw.get("crossfit_archetype_counter", 0.0), "crossfit archetype counter"),
+            "composition_base_logit": _finite(raw["crossfit_champion_main"], "crossfit champion component")
+            + _finite(raw["crossfit_role_champion"], "crossfit role component"),
+            "composition_ally_synergy_logit": _finite(raw["crossfit_ally_synergy"], "crossfit ally component"),
+            "composition_enemy_counter_logit": _finite(raw["crossfit_enemy_counter"], "crossfit enemy component"),
+            "composition_same_role_logit": _finite(raw["crossfit_same_role"], "crossfit role-pair component"),
+            "composition_archetype_interactions_logit": _finite(raw["crossfit_archetype_synergy"], "crossfit archetype synergy")
+            + _finite(raw["crossfit_archetype_counter"], "crossfit archetype counter"),
         }
         converted.append(
             {
@@ -956,8 +980,20 @@ def adapt_public_crossfit_draft_rows(
             }
         )
     frame = pd.DataFrame(converted).sort_values("game_id", kind="stable").reset_index(drop=True)
-    if tuple(frame["game_id"]) != tuple(verified_source["accepted_game_ids"]):
-        raise DraftScoreAdapterError("crossfit rows do not match accepted census")
+    scored_ids = tuple(str(value) for value in frame["game_id"])
+    if len(set(scored_ids)) != len(scored_ids):
+        raise DraftScoreAdapterError("crossfit rows contain duplicate game IDs")
+    accepted_set = set(verified_source["accepted_game_ids"])
+    if not set(scored_ids).issubset(accepted_set):
+        raise DraftScoreAdapterError("crossfit rows contain games outside accepted census")
+    model_census = set(
+        verified_source.get("model_eligible_game_ids", verified_source["accepted_game_ids"])
+    )
+    fit_set = set(str(value) for value in fit_ids)
+    if not fit_set.issubset(model_census):
+        raise DraftScoreAdapterError("crossfit fit IDs are outside the model fold census")
+    if fit_set & set(scored_ids):
+        raise DraftScoreAdapterError("crossfit fit and scored game IDs overlap")
     return PublicCrossfitAtomAdapterResult(
         frame=frame,
         receipt=receipt,
