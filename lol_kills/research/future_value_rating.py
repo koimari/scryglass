@@ -1288,6 +1288,10 @@ def _apply_verified_leaguepedia_partition(
     ):
         raise FutureValueSourceError("Leaguepedia crosswalk source receipt does not match maps")
     partition = _conservative_series_partition(frame)
+    proxy_audit = dict(partition.attrs.get("series_cluster_audit") or {})
+    # The verified binding contains every assignment. Pandas otherwise deep
+    # copies that large attribute on each column selection below.
+    partition.attrs.clear()
     assignments = binding.get("assignments")
     if not isinstance(assignments, Sequence) or isinstance(
         assignments, (str, bytes, bytearray)
@@ -1333,6 +1337,7 @@ def _apply_verified_leaguepedia_partition(
     proxy_ids = partition["series_id"].astype(str)
     game_ids = partition["game_id"].astype(str)
     promoted_ids: set[str] = set()
+    promoted_series_by_game: dict[str, str] = {}
     retained_proxy_ids: set[str] = set()
     for proxy_id, group_index in partition.groupby(proxy_ids, sort=False).groups.items():
         group_game_ids = {str(value) for value in game_ids.loc[group_index]}
@@ -1369,12 +1374,15 @@ def _apply_verified_leaguepedia_partition(
             continue
         for series_id, assigned_ids in assignments_by_series.items():
             promoted_ids.update(assigned_ids)
-            partition.loc[
-                partition["game_id"].astype(str).isin(assigned_ids), "series_id"
-            ] = "leaguepedia:" + series_id
+            for game_id in assigned_ids:
+                promoted_series_by_game[game_id] = "leaguepedia:" + series_id
+    if promoted_series_by_game:
+        promoted_mask = game_ids.isin(promoted_series_by_game)
+        partition.loc[promoted_mask, "series_id"] = game_ids.loc[promoted_mask].map(
+            promoted_series_by_game
+        )
     cluster_sizes = partition["series_id"].astype(str).value_counts(sort=False)
     colliding = cluster_sizes.gt(1)
-    proxy_audit = dict(partition.attrs.get("series_cluster_audit") or {})
     partition.attrs["series_cluster_source"] = LEAGUEPEDIA_CROSSWALK_SOURCE
     partition.attrs["series_cluster_audit"] = {
         **proxy_audit,
