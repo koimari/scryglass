@@ -115,6 +115,8 @@ def _atom_receipt(frame: pd.DataFrame) -> dict[str, object]:
         "producer_family": "static_composition",
         "artifact_locator": "research/atomized.parquet",
         "artifact_sha256": "c" * 64,
+        "artifact_receipt_sha256": "d" * 64,
+        "source_receipt_sha256": _binding().source_receipt_sha256,
         "feature_names": list(STATIC_COMPOSITION_FEATURES),
         "component_values_sha256": component_hash,
     }
@@ -236,7 +238,7 @@ def test_static_parity_rejects_mutated_atom_value() -> None:
     binding = _binding()
     first = build_draft_score_variant_design(frame, DraftScoreVariant.CURRENT_ONLY, binding, static_atom_receipt=_atom_receipt(frame))
     changed = frame.copy()
-    changed.loc[0, "composition_counter_logit"] += 0.01
+    changed.loc[0, "composition_enemy_counter_logit"] += 0.01
     with pytest.raises(FutureValueDraftScoreError, match="atomized composition"):
         build_draft_score_variant_design(changed, DraftScoreVariant.CURRENT_ONLY, binding, static_atom_receipt=_atom_receipt(frame))
 

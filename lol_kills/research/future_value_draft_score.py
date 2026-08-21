@@ -72,11 +72,9 @@ VARIANT_NAMES = tuple(value.value for value in DraftScoreVariant)
 # byte-equivalent after canonical numeric serialisation.
 STATIC_COMPOSITION_COMPONENTS = (
     "base",
-    "synergy",
-    "counter",
-    "same_role",
     "ally_synergy",
     "enemy_counter",
+    "same_role",
     "archetype_interactions",
 )
 STATIC_COMPOSITION_FEATURES = tuple(
@@ -647,6 +645,7 @@ def _validate_static_atom_receipt(
     receipt: Mapping[str, Any] | None,
     frame: pd.DataFrame,
     *,
+    source_receipt_sha256: str | None = None,
     expected_artifact_sha256: str | None = None,
     expected_receipt_sha256: str | None = None,
     side_swap_source_frame: pd.DataFrame | None = None,
@@ -665,6 +664,8 @@ def _validate_static_atom_receipt(
         "producer_family",
         "artifact_locator",
         "artifact_sha256",
+        "artifact_receipt_sha256",
+        "source_receipt_sha256",
         "feature_names",
         "component_values_sha256",
         "receipt_sha256",
@@ -681,6 +682,9 @@ def _validate_static_atom_receipt(
     if not str(receipt["artifact_locator"]).strip():
         raise FutureValueDraftScoreError("atomized composition artifact locator is required")
     artifact_hash = _require_hash(receipt["artifact_sha256"], "atomized artifact_sha256")
+    artifact_receipt_hash = _require_hash(receipt["artifact_receipt_sha256"], "atomized artifact_receipt_sha256")
+    if source_receipt_sha256 is not None and str(receipt["source_receipt_sha256"]).lower() != _require_hash(source_receipt_sha256, "source_receipt_sha256"):
+        raise FutureValueDraftScoreError("atomized source receipt binding changed")
     if expected_artifact_sha256 is not None and artifact_hash != _require_hash(expected_artifact_sha256, "expected atomized artifact_sha256"):
         raise FutureValueDraftScoreError("atomized artifact hash changed")
     feature_names = tuple(str(value) for value in receipt["feature_names"])
@@ -701,7 +705,12 @@ def _validate_static_atom_receipt(
         expected_values_hashes.add(static_composition_parity_hash(transformed))
     if actual_values_hash not in expected_values_hashes:
         raise FutureValueDraftScoreError("atomized composition values do not match producer receipt")
-    return {**dict(receipt), "artifact_sha256": artifact_hash, "receipt_sha256": receipt_hash}
+    return {
+        **dict(receipt),
+        "artifact_sha256": artifact_hash,
+        "artifact_receipt_sha256": artifact_receipt_hash,
+        "receipt_sha256": receipt_hash,
+    }
 
 
 def _feature_columns_for_variant(variant: DraftScoreVariant) -> tuple[str, ...]:
@@ -760,6 +769,7 @@ def assert_static_composition_parity(
     expected_hash = values[0].static_composition_sha256
     expected_receipt = str(values[0].static_atom_receipt["receipt_sha256"])
     expected_artifact = str(values[0].static_atom_receipt["artifact_sha256"])
+    expected_artifact_receipt = str(values[0].static_atom_receipt["artifact_receipt_sha256"])
     for design in values[1:]:
         if tuple(design.game_ids) != expected_ids:
             raise FutureValueDraftScoreError("variant game IDs differ")
@@ -769,6 +779,8 @@ def assert_static_composition_parity(
             raise FutureValueDraftScoreError("atomized producer receipt changed between variants")
         if str(design.static_atom_receipt["artifact_sha256"]) != expected_artifact:
             raise FutureValueDraftScoreError("atomized producer artifact changed between variants")
+        if str(design.static_atom_receipt["artifact_receipt_sha256"]) != expected_artifact_receipt:
+            raise FutureValueDraftScoreError("atomized producer artifact receipt changed between variants")
     return expected_hash
 
 
@@ -1110,6 +1122,7 @@ class DraftScoreVariantDesign:
             "static_composition_sha256": self.static_composition_sha256,
             "static_atom_receipt_sha256": str(self.static_atom_receipt["receipt_sha256"]),
             "static_atom_artifact_sha256": str(self.static_atom_receipt["artifact_sha256"]),
+            "static_atom_artifact_receipt_sha256": str(self.static_atom_receipt["artifact_receipt_sha256"]),
             "phase_diagnostics_sha256": (
                 _frame_rows_sha256(self.phase_diagnostics, PHASE_SHAPE_DIAGNOSTIC_FEATURES)
                 if self.phase_diagnostics is not None
@@ -1145,6 +1158,7 @@ def build_draft_score_variant_design(
     atom_verified = _validate_static_atom_receipt(
         atom_binding,
         frame,
+        source_receipt_sha256=bound.source_receipt_sha256,
         expected_artifact_sha256=static_atom_artifact_sha256,
         expected_receipt_sha256=static_atom_receipt_sha256,
         side_swap_source_frame=static_atom_side_swap_source_frame,
