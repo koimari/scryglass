@@ -35,7 +35,7 @@ from lol_kills.v2.tierlists.pooled_candidate import (
 SCHEMA_VERSION = "scryglass:future-value-tierlist-fourway:v1"
 TRUST_SCHEMA_VERSION = "scryglass:future-value-tierlist-freeze:v1"
 PINNED_TRUST_MANIFEST_RAW_SHA256 = (
-    "ca47236f4e750a3862612c17a25d3907e76667c0602ff523e032da417dfedf6a"
+    "95d2cd56cb33fa2105c65edbbb2a562f3e4b170bedf44e255373ed25bbb5919c"
 )
 VARIANTS = ("current_only", "future_player_form", "scaling_curve", "both")
 REFERENCE_VARIANT = "current_only"
@@ -162,6 +162,8 @@ def load_trust_manifest(path: Path, *, expected_raw_sha256: str) -> dict[str, An
         "player_source_sha256",
         "maps_source_sha256",
         "meta_source_sha256",
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
     ):
         if field not in source:
             raise FutureValueTierListError(f"trust manifest source field is missing: {field}")
@@ -172,8 +174,16 @@ def load_trust_manifest(path: Path, *, expected_raw_sha256: str) -> dict[str, An
         "player_source_sha256",
         "maps_source_sha256",
         "meta_source_sha256",
+        "model_eligible_identity_sha256",
     ):
         _require_hash(source.get(field), f"trust source {field}")
+    eligible_count = source.get("model_eligible_game_count")
+    if (
+        isinstance(eligible_count, bool)
+        or not isinstance(eligible_count, int)
+        or eligible_count <= 0
+    ):
+        raise FutureValueTierListError("trust source model-eligible count is invalid")
     assets = payload.get("tier_assets")
     if not isinstance(assets, Mapping) or not assets:
         raise FutureValueTierListError("trust manifest Tier assets are missing")
@@ -205,12 +215,177 @@ def _finite_probability(value: object, label: str) -> float:
     return number
 
 
+def _required_utc_timestamp(value: object, label: str) -> pd.Timestamp:
+    """Parse a required timezone-aware UTC timestamp."""
+
+    try:
+        stamp = pd.Timestamp(value)
+    except (TypeError, ValueError) as error:
+        raise FutureValueTierListError(f"{label} is not a timestamp") from error
+    if pd.isna(stamp) or stamp.tzinfo is None:
+        raise FutureValueTierListError(f"{label} must be timezone-aware")
+    return stamp.tz_convert("UTC")
+
+
+def _validate_fold_chronology(
+    result: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    variant: str,
+    maps_path: Path | None = None,
+    expected_maps_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Require fold receipts that prove strict-prior scoring.
+
+    The model artifact contains fold boundaries and validation game IDs.  The
+    optional frozen maps input completes the check by binding every scored
+    game date to its fold interval.  Production callers must provide it.
+    """
+
+    folds = result.get("folds")
+    if not isinstance(folds, list) or len(folds) != 3:
+        raise FutureValueTierListError(f"{variant} fold chronology is missing")
+    by_fold: dict[int, list[str]] = {1: [], 2: [], 3: []}
+    for row in rows:
+        try:
+            fold = int(row.get("fold"))
+        except (TypeError, ValueError) as error:
+            raise FutureValueTierListError(f"{variant} prediction fold is invalid") from error
+        if fold not in by_fold:
+            raise FutureValueTierListError(f"{variant} prediction fold is outside the fold receipt")
+        game_id = str(row.get("game_id") or "").strip()
+        if not game_id:
+            raise FutureValueTierListError(f"{variant} prediction game identity is missing")
+        by_fold[fold].append(game_id)
+
+    seen_folds: set[int] = set()
+    seen_games: set[str] = set()
+    fold_audit: list[dict[str, Any]] = []
+    for fold_record in folds:
+        if not isinstance(fold_record, Mapping):
+            raise FutureValueTierListError(f"{variant} fold receipt is invalid")
+        try:
+            fold = int(fold_record.get("fold"))
+        except (TypeError, ValueError) as error:
+            raise FutureValueTierListError(f"{variant} fold receipt number is invalid") from error
+        if fold not in by_fold or fold in seen_folds:
+            raise FutureValueTierListError(f"{variant} fold receipt set is invalid")
+        seen_folds.add(fold)
+        scored_ids = by_fold[fold]
+        if not scored_ids or len(scored_ids) != len(set(scored_ids)):
+            raise FutureValueTierListError(f"{variant} fold scored IDs are invalid")
+        paired_ids = fold_record.get("paired_game_ids")
+        if not isinstance(paired_ids, list) or [str(value) for value in paired_ids] != scored_ids:
+            raise FutureValueTierListError(f"{variant} fold scored IDs do not match the ledger")
+        expected_fold_identity = identity_sha256(scored_ids)
+        if fold_record.get("paired_game_id_count") != len(scored_ids):
+            raise FutureValueTierListError(f"{variant} fold scored count changed")
+        if fold_record.get("validation_game_id_count") != len(scored_ids):
+            raise FutureValueTierListError(f"{variant} fold validation count changed")
+        if fold_record.get("validation_game_identity_sha256") != expected_fold_identity:
+            raise FutureValueTierListError(f"{variant} fold validation identity changed")
+        if fold_record.get("paired_game_identity_sha256") not in (None, expected_fold_identity):
+            raise FutureValueTierListError(f"{variant} fold paired identity changed")
+        if seen_games.intersection(scored_ids):
+            raise FutureValueTierListError(f"{variant} fold validation IDs overlap")
+        seen_games.update(scored_ids)
+
+        train_end = _required_utc_timestamp(fold_record.get("train_end"), f"{variant} fold {fold} train_end")
+        validation_start = _required_utc_timestamp(
+            fold_record.get("validation_start"), f"{variant} fold {fold} validation_start"
+        )
+        validation_end = _required_utc_timestamp(
+            fold_record.get("validation_end"), f"{variant} fold {fold} validation_end"
+        )
+        interval_start = _required_utc_timestamp(
+            fold_record.get("validation_interval_start"),
+            f"{variant} fold {fold} validation_interval_start",
+        )
+        interval_end = _required_utc_timestamp(
+            fold_record.get("validation_interval_end"),
+            f"{variant} fold {fold} validation_interval_end",
+        )
+        if not (train_end < validation_start and interval_start <= validation_start <= validation_end <= interval_end):
+            raise FutureValueTierListError(f"{variant} fold {fold} chronology is not ordered")
+        ledger_binding = fold_record.get("feature_ledger_binding")
+        if not isinstance(ledger_binding, Mapping):
+            raise FutureValueTierListError(f"{variant} fold {fold} feature timing binding is missing")
+        fit_max = _required_utc_timestamp(
+            ledger_binding.get("fit_date_max"), f"{variant} fold {fold} fit_date_max"
+        )
+        fit_window_end = _required_utc_timestamp(
+            ledger_binding.get("fit_window_end"), f"{variant} fold {fold} fit_window_end"
+        )
+        if not fit_max < validation_start or fit_window_end > validation_start:
+            raise FutureValueTierListError(f"{variant} fold {fold} fit is not strictly prior")
+        if ledger_binding.get("strict_prior_timing") != "fit_rows_strictly_before_cutoff":
+            raise FutureValueTierListError(f"{variant} fold {fold} strict-prior contract is missing")
+        if ledger_binding.get("same_timestamp_policy") != "batch_exclude_same_timestamp":
+            raise FutureValueTierListError(f"{variant} fold {fold} timestamp policy is missing")
+        series_safety = ledger_binding.get("series_safety")
+        if not isinstance(series_safety, Mapping) or series_safety.get("policy") != "whole_series_disjoint":
+            raise FutureValueTierListError(f"{variant} fold {fold} series safety is missing")
+
+        fold_audit.append(
+            {
+                "fold": fold,
+                "game_count": len(scored_ids),
+                "game_identity_sha256": expected_fold_identity,
+                "fit_date_max": fit_max.isoformat().replace("+00:00", "Z"),
+                "validation_interval_start": interval_start.isoformat().replace("+00:00", "Z"),
+                "validation_interval_end": interval_end.isoformat().replace("+00:00", "Z"),
+            }
+        )
+
+    if seen_folds != {1, 2, 3} or seen_games != {str(row.get("game_id")) for row in rows}:
+        raise FutureValueTierListError(f"{variant} fold coverage does not match the ledger")
+
+    date_check = "deferred_to_frozen_maps"
+    if maps_path is not None:
+        if expected_maps_sha256 is None:
+            raise FutureValueTierListError("frozen maps hash is required for chronology")
+        expected_maps = _require_hash(expected_maps_sha256, "chronology maps hash")
+        if not maps_path.is_file() or maps_path.is_symlink() or sha256_path(maps_path) != expected_maps:
+            raise FutureValueTierListError("chronology maps bytes changed")
+        try:
+            frame = pd.read_parquet(maps_path, columns=["game_uid", "date"])
+        except (OSError, ValueError, KeyError) as error:
+            raise FutureValueTierListError("chronology maps cannot be read") from error
+        frame["game_uid"] = frame["game_uid"].astype(str)
+        if frame["game_uid"].duplicated().any():
+            raise FutureValueTierListError("chronology maps contain duplicate IDs")
+        frame["date"] = pd.to_datetime(frame["date"], errors="coerce", utc=True)
+        if frame["date"].isna().any():
+            raise FutureValueTierListError("chronology maps contain invalid dates")
+        dates = frame.set_index("game_uid")["date"]
+        for fold_record in folds:
+            fold = int(fold_record["fold"])
+            interval_start = _required_utc_timestamp(
+                fold_record["validation_interval_start"],
+                f"{variant} fold {fold} validation_interval_start",
+            )
+            interval_end = _required_utc_timestamp(
+                fold_record["validation_interval_end"],
+                f"{variant} fold {fold} validation_interval_end",
+            )
+            missing = sorted(set(by_fold[fold]) - set(dates.index))
+            if missing:
+                raise FutureValueTierListError(f"{variant} fold {fold} scored maps are missing")
+            fold_dates = dates.loc[by_fold[fold]]
+            if bool((fold_dates < interval_start).any()) or bool((fold_dates > interval_end).any()):
+                raise FutureValueTierListError(f"{variant} fold {fold} scored dates leave the validation interval")
+        date_check = "verified_against_frozen_maps"
+    return {"status": "verified", "date_check": date_check, "folds": sorted(fold_audit, key=lambda item: item["fold"])}
+
+
 def load_prediction_offsets(
     path: Path,
     *,
     variant: str,
     expected_raw_sha256: str,
     source: Mapping[str, Any],
+    maps_path: Path,
+    expected_maps_sha256: str,
 ) -> tuple[dict[str, float], dict[str, float], dict[str, Any]]:
     """Verify one fitted evaluation artifact and return strict-prior logits."""
 
@@ -252,9 +427,24 @@ def load_prediction_offsets(
     for field, expected_value in {
         **expected_source_fields,
         "source_receipt_file_sha256": source["source_receipt_file_sha256"],
+        **(
+            {
+                "model_eligible_game_count": source["model_eligible_game_count"],
+                "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+            }
+            if "model_eligible_game_count" in source
+            and "model_eligible_identity_sha256" in source
+            else {}
+        ),
     }.items():
         if result_source.get(field) != expected_value:
             raise FutureValueTierListError(f"{variant} result source changed: {field}")
+    expected_accepted_ids = source.get("accepted_game_ids")
+    expected_eligible_ids = source.get("model_eligible_game_ids")
+    if expected_accepted_ids is not None and result_source.get("accepted_game_ids") != expected_accepted_ids:
+        raise FutureValueTierListError(f"{variant} result accepted census changed")
+    if expected_eligible_ids is not None and result_source.get("model_eligible_game_ids") != expected_eligible_ids:
+        raise FutureValueTierListError(f"{variant} result eligible census changed")
     ledger = result.get("prediction_ledger")
     if not isinstance(ledger, Mapping) or ledger.get("schema_version") not in {
         "scryglass:future-value-prediction-ledger:v1",
@@ -270,6 +460,13 @@ def load_prediction_offsets(
         ledger.get("sha256"), f"{variant} prediction ledger hash"
     ):
         raise FutureValueTierListError(f"{variant} prediction ledger values changed")
+    chronology = _validate_fold_chronology(
+        result,
+        rows,
+        variant=variant,
+        maps_path=maps_path,
+        expected_maps_sha256=expected_maps_sha256,
+    )
     offsets: dict[str, float] = {}
     targets: dict[str, float] = {}
     ordered_ids: list[str] = []
@@ -299,6 +496,7 @@ def load_prediction_offsets(
         "prediction_ledger_sha256": str(ledger["sha256"]),
         "variant_receipt_sha256": str(result.get("variant_receipt", {}).get("receipt_sha256") or ""),
         "blockers": sorted(str(value) for value in result.get("blockers", [])),
+        "chronology": chronology,
     }
 
 
@@ -403,6 +601,97 @@ def _candidate_rows(candidate: Mapping[str, Any]) -> dict[tuple[str, str, str, s
     return output
 
 
+def validate_candidate(
+    candidate: Mapping[str, Any],
+    *,
+    variant: str,
+    universe: Mapping[str, Any],
+    expected_source_receipt_sha256: str,
+) -> dict[str, Any]:
+    """Validate one pooled candidate independently of the worker result.
+
+    The worker output is treated as untrusted data.  The self hash, source
+    universe, offset coverage, and offset provenance must agree with the
+    verified frozen inputs before a candidate enters the four-way diff.
+    """
+
+    if variant not in VARIANTS:
+        raise FutureValueTierListError("unknown candidate variant")
+    if not isinstance(candidate, Mapping):
+        raise FutureValueTierListError(f"{variant} candidate is not an object")
+    if candidate.get("schema_version") != "scryglass:champion-role-elo-candidate:v2":
+        raise FutureValueTierListError(f"{variant} candidate schema changed")
+    if candidate.get("status") != "development_only" or candidate.get("development_only") is not True:
+        raise FutureValueTierListError(f"{variant} candidate is not development-only")
+    if candidate.get("publication_eligible") is not False or candidate.get("production_eligible") is not False:
+        raise FutureValueTierListError(f"{variant} candidate authority changed")
+    claimed_artifact = _require_hash(candidate.get("artifact_sha256"), f"{variant} candidate artifact hash")
+    unsigned = {key: value for key, value in candidate.items() if key != "artifact_sha256"}
+    if sha256_bytes(canonical_json_bytes(unsigned)) != claimed_artifact:
+        raise FutureValueTierListError(f"{variant} candidate artifact bytes changed")
+    expected_game_count = universe.get("game_count")
+    expected_game_identity = universe.get("game_identity_sha256")
+    if (
+        isinstance(expected_game_count, bool)
+        or not isinstance(expected_game_count, int)
+        or expected_game_count <= 0
+        or _require_hash(expected_game_identity, f"{variant} universe identity") is None
+    ):
+        raise FutureValueTierListError("candidate universe binding is invalid")
+    candidate_source = candidate.get("source")
+    if not isinstance(candidate_source, Mapping):
+        raise FutureValueTierListError(f"{variant} candidate source is missing")
+    for field in ("maps_replayed", "maps_used_in_joint_likelihood"):
+        if candidate_source.get(field) != expected_game_count:
+            raise FutureValueTierListError(f"{variant} candidate {field} changed")
+    if candidate_source.get("source_identity_sha256") != expected_game_identity:
+        raise FutureValueTierListError(f"{variant} candidate source identity changed")
+    override = candidate.get("pre_map_offset_override")
+    if not isinstance(override, Mapping) or override.get("applied") is not True:
+        raise FutureValueTierListError(f"{variant} candidate offset override is missing")
+    if override.get("game_count") != expected_game_count or override.get("game_identity_sha256") != expected_game_identity:
+        raise FutureValueTierListError(f"{variant} candidate offset coverage changed")
+    offsets_hash = _require_hash(override.get("offsets_sha256"), f"{variant} candidate offsets hash")
+    provenance = override.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raise FutureValueTierListError(f"{variant} candidate offset provenance is missing")
+    if set(provenance) != {
+        "schema_version",
+        "status",
+        "authority",
+        "producer",
+        "timing",
+        "source_receipt_sha256",
+        "source_identity_sha256",
+        "source_game_count",
+        "offsets_sha256",
+        "receipt_sha256",
+    }:
+        raise FutureValueTierListError(f"{variant} candidate offset provenance schema changed")
+    if provenance.get("schema_version") != PRE_MAP_OFFSET_PROVENANCE_SCHEMA or provenance.get("status") != "research_only":
+        raise FutureValueTierListError(f"{variant} candidate offset provenance status changed")
+    if provenance.get("authority") is not False or provenance.get("timing") != "strict_prior_pre_map":
+        raise FutureValueTierListError(f"{variant} candidate offset timing changed")
+    if provenance.get("source_receipt_sha256") != _require_hash(
+        expected_source_receipt_sha256, f"{variant} expected source receipt"
+    ):
+        raise FutureValueTierListError(f"{variant} candidate offset source receipt changed")
+    if provenance.get("source_identity_sha256") != expected_game_identity or provenance.get("source_game_count") != expected_game_count:
+        raise FutureValueTierListError(f"{variant} candidate offset source census changed")
+    if provenance.get("offsets_sha256") != offsets_hash or override.get("offsets_sha256") != offsets_hash:
+        raise FutureValueTierListError(f"{variant} candidate offset values changed")
+    claimed_receipt = _require_hash(provenance.get("receipt_sha256"), f"{variant} offset receipt hash")
+    if sha256_bytes(canonical_json_bytes({key: value for key, value in provenance.items() if key != "receipt_sha256"})) != claimed_receipt:
+        raise FutureValueTierListError(f"{variant} candidate offset receipt bytes changed")
+    return {
+        "variant": variant,
+        "artifact_sha256": claimed_artifact,
+        "source_identity_sha256": str(expected_game_identity),
+        "game_count": expected_game_count,
+        "offsets_sha256": offsets_hash,
+    }
+
+
 def _numeric_delta(candidate: object, reference: object) -> float | None:
     if candidate is None or reference is None:
         return None
@@ -503,6 +792,15 @@ def build_fourway_diff(
 
     if set(candidates) != set(VARIANTS):
         raise FutureValueTierListError("four Tier candidates are required")
+    if "source_identity_sha256" not in source or "source_receipt_sha256" not in source:
+        raise FutureValueTierListError("four-way source binding is incomplete")
+    for variant in VARIANTS:
+        validate_candidate(
+            candidates[variant],
+            variant=variant,
+            universe=universe,
+            expected_source_receipt_sha256=str(source["source_receipt_sha256"]),
+        )
     rows_by_variant = {variant: _candidate_rows(candidates[variant]) for variant in VARIANTS}
     reference_keys = set(rows_by_variant[REFERENCE_VARIANT])
     if any(set(rows_by_variant[variant]) != reference_keys for variant in VARIANTS):
@@ -688,5 +986,6 @@ __all__ = [
     "make_offset_provenance",
     "sha256_bytes",
     "sha256_path",
+    "validate_candidate",
     "validate_common_prediction_universe",
 ]

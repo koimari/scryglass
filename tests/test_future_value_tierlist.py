@@ -31,6 +31,8 @@ SOURCE = {
     "player_source_sha256": "d" * 64,
     "maps_source_sha256": "e" * 64,
     "meta_source_sha256": "f" * 64,
+    "model_eligible_game_count": 2,
+    "model_eligible_identity_sha256": "1" * 64,
 }
 
 
@@ -74,18 +76,44 @@ def _model(variant: str) -> dict[str, object]:
     rows = [
         {"fold": 1, "game_id": "g1", "target": 1.0, "candidate": 0.75},
         {"fold": 2, "game_id": "g2", "target": 0.0, "candidate": 0.25},
+        {"fold": 3, "game_id": "g3", "target": 1.0, "candidate": 0.5},
     ]
     ledger = {
         "schema_version": "scryglass:future-value-prediction-ledger:v1",
-        "row_count": 2,
-        "game_identity_sha256": identity_sha256(["g1", "g2"]),
+        "row_count": 3,
+        "game_identity_sha256": identity_sha256(["g1", "g2", "g3"]),
         "rows": rows,
         "sha256": hashlib.sha256(canonical_json_bytes(rows)).hexdigest(),
     }
     result_source = {
         **{key: SOURCE[key] for key in ("source_as_of", "source_game_count", "source_identity_sha256", "source_receipt_sha256")},
         "source_receipt_file_sha256": SOURCE["source_receipt_file_sha256"],
+        "model_eligible_game_count": SOURCE["model_eligible_game_count"],
+        "model_eligible_identity_sha256": SOURCE["model_eligible_identity_sha256"],
     }
+    folds = []
+    for fold, game_id in enumerate(("g1", "g2", "g3"), 1):
+        folds.append(
+            {
+                "fold": fold,
+                "paired_game_ids": [game_id],
+                "paired_game_id_count": 1,
+                "validation_game_id_count": 1,
+                "validation_game_identity_sha256": identity_sha256([game_id]),
+                "train_end": "2026-01-01T00:00:00Z",
+                "validation_start": "2026-01-02T00:00:00Z",
+                "validation_end": "2026-01-03T00:00:00Z",
+                "validation_interval_start": "2026-01-02T00:00:00Z",
+                "validation_interval_end": "2026-01-03T00:00:00Z",
+                "feature_ledger_binding": {
+                    "fit_date_max": "2026-01-01T00:00:00Z",
+                    "fit_window_end": "2026-01-01T00:00:00Z",
+                    "strict_prior_timing": "fit_rows_strictly_before_cutoff",
+                    "same_timestamp_policy": "batch_exclude_same_timestamp",
+                    "series_safety": {"policy": "whole_series_disjoint"},
+                },
+            }
+        )
     return {
         "schema_version": "scryglass:future-value-four-variant-evaluation:v1",
         "source": {key: SOURCE[key] for key in ("source_as_of", "source_game_count", "source_identity_sha256", "source_receipt_sha256")},
@@ -98,6 +126,7 @@ def _model(variant: str) -> dict[str, object]:
                 "blockers": ["research_blocker"],
                 "variant_receipt": {"receipt_sha256": "4" * 64},
                 "prediction_ledger": ledger,
+                "folds": folds,
             }
         },
     }
@@ -106,14 +135,29 @@ def _model(variant: str) -> dict[str, object]:
 def test_prediction_offsets_are_hash_bound_and_finite(tmp_path: Path) -> None:
     path = tmp_path / "model.json"
     raw_hash = _write_json(path, _model("future_player_form"))
+    maps_path = tmp_path / "maps.parquet"
+    pd.DataFrame(
+        {
+            "game_uid": ["g1", "g2", "g3"],
+            "date": [
+                "2026-01-02T12:00:00Z",
+                "2026-01-02T12:00:00Z",
+                "2026-01-02T12:00:00Z",
+            ],
+            "y_blue_win": [1, 0, 1],
+        }
+    ).to_parquet(maps_path)
+    maps_hash = hashlib.sha256(maps_path.read_bytes()).hexdigest()
     offsets, targets, binding = load_prediction_offsets(
         path,
         variant="future_player_form",
         expected_raw_sha256=raw_hash,
         source=SOURCE,
+        maps_path=maps_path,
+        expected_maps_sha256=maps_hash,
     )
     assert offsets["g1"] == pytest.approx(1.0986122886681098)
-    assert targets == {"g1": 1.0, "g2": 0.0}
+    assert targets == {"g1": 1.0, "g2": 0.0, "g3": 1.0}
     assert binding["blockers"] == ["research_blocker"]
     changed = _model("future_player_form")
     changed["variants"]["future_player_form"]["prediction_ledger"]["rows"][0]["candidate"] = 1.0  # type: ignore[index]
@@ -124,6 +168,8 @@ def test_prediction_offsets_are_hash_bound_and_finite(tmp_path: Path) -> None:
             variant="future_player_form",
             expected_raw_sha256=changed_hash,
             source=SOURCE,
+            maps_path=maps_path,
+            expected_maps_sha256=maps_hash,
         )
 
 
@@ -156,10 +202,25 @@ def test_common_prediction_universe_checks_frozen_targets(tmp_path: Path) -> Non
 
 def _candidate(swapped: bool = False) -> dict[str, object]:
     first_rank, second_rank = ((2, 1) if swapped else (1, 2))
-    return {
-        "artifact_sha256": "5" * 64,
-        "source": {"source_identity_sha256": "6" * 64},
-        "pre_map_offset_override": {"applied": True},
+    candidate: dict[str, object] = {
+        "artifact_sha256": "",
+        "schema_version": "scryglass:champion-role-elo-candidate:v2",
+        "status": "development_only",
+        "development_only": True,
+        "publication_eligible": False,
+        "production_eligible": False,
+        "source": {
+            "maps_replayed": 2,
+            "maps_used_in_joint_likelihood": 2,
+            "source_identity_sha256": "7" * 64,
+        },
+        "pre_map_offset_override": {
+            "applied": True,
+            "game_count": 2,
+            "game_identity_sha256": "7" * 64,
+            "offsets_sha256": "5" * 64,
+            "provenance": {},
+        },
         "cells": [
             {
                 "scope_id": "patch:26.16",
@@ -200,6 +261,23 @@ def _candidate(swapped: bool = False) -> dict[str, object]:
             }
         ],
     }
+    provenance: dict[str, object] = {
+        "schema_version": "scryglass:tierlist-pre-map-offset-override:v1",
+        "status": "research_only",
+        "authority": False,
+        "producer": "test",
+        "timing": "strict_prior_pre_map",
+        "source_receipt_sha256": "8" * 64,
+        "source_identity_sha256": "7" * 64,
+        "source_game_count": 2,
+        "offsets_sha256": "5" * 64,
+    }
+    provenance["receipt_sha256"] = hashlib.sha256(canonical_json_bytes(provenance)).hexdigest()
+    candidate["pre_map_offset_override"]["provenance"] = provenance  # type: ignore[index]
+    candidate["artifact_sha256"] = hashlib.sha256(
+        canonical_json_bytes({key: value for key, value in candidate.items() if key != "artifact_sha256"})
+    ).hexdigest()
+    return candidate
 
 
 def test_fourway_diff_uses_exact_stable_identity_and_rank_direction() -> None:
@@ -207,7 +285,11 @@ def test_fourway_diff_uses_exact_stable_identity_and_rank_direction() -> None:
     bindings = {variant: {"blockers": []} for variant in VARIANTS}
     report = build_fourway_diff(
         candidates,
-        source={"source_as_of": SOURCE["source_as_of"]},
+        source={
+            "source_as_of": SOURCE["source_as_of"],
+            "source_identity_sha256": "7" * 64,
+            "source_receipt_sha256": "8" * 64,
+        },
         universe={"game_count": 2, "game_identity_sha256": "7" * 64},
         model_bindings=bindings,
         trust_manifest_raw_sha256="8" * 64,

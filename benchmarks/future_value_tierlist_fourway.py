@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 from typing import Any, Mapping
 
 from lol_kills.research.future_value_rating import (
@@ -24,6 +25,7 @@ from lol_kills.research.future_value_tierlist import (
     load_trust_manifest,
     make_offset_provenance,
     sha256_path,
+    validate_candidate,
     validate_common_prediction_universe,
 )
 from lol_kills.v2.tierlists.pooled_candidate import build_pooled_candidate
@@ -46,6 +48,35 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
     path.write_bytes(canonical_json_bytes(dict(value)) + b"\n")
 
 
+def _implementation_binding(repo_root: Path) -> dict[str, Any]:
+    """Bind the code that produced a research run receipt."""
+
+    try:
+        commit = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise FutureValueTierListError("implementation git commit is unavailable") from error
+    if not commit:
+        raise FutureValueTierListError("implementation git commit is empty")
+    locators = (
+        "benchmarks/future_value_tierlist_fourway.py",
+        "lol_kills/research/future_value_tierlist.py",
+        "lol_kills/v2/tierlists/pooled_candidate.py",
+        "lol_kills/v2/tierlists/joint_pooled_model.py",
+    )
+    files: dict[str, str] = {}
+    for locator in locators:
+        path = repo_root / locator
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueTierListError(f"implementation file is missing: {locator}")
+        files[locator] = sha256_path(path)
+    return {"git_commit": commit, "files": files}
+
+
 def _verify_source(
     source_root: Path,
     trust: Mapping[str, Any],
@@ -59,7 +90,13 @@ def _verify_source(
         receipt,
         expected_receipt_sha256=binding["source_receipt_sha256"],
     )
-    for field in ("source_as_of", "source_game_count", "source_identity_sha256"):
+    for field in (
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
+    ):
         if receipt.get(field) != binding.get(field):
             raise FutureValueTierListError(f"source receipt field changed: {field}")
     player_path = source_root / "source" / "oe_player_games.parquet"
@@ -119,6 +156,7 @@ def _build_variant(
     game_ids: list[str],
     offsets: dict[str, float],
     provenance: dict[str, Any],
+    expected_source_receipt_sha256: str,
 ) -> tuple[str, dict[str, Any]]:
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -129,6 +167,7 @@ def _build_variant(
         allowed_game_ids=game_ids,
         pre_map_offset_override=offsets,
         pre_map_offset_provenance=provenance,
+        expected_pre_map_offset_source_receipt_sha256=expected_source_receipt_sha256,
     )
     return variant, candidate
 
@@ -160,6 +199,17 @@ def run_fourway(
         or sha256_path(baseline_path) != baseline_record["raw_sha256"]
     ):
         raise FutureValueTierListError("baseline public Tier candidate bytes changed")
+    source_binding = {
+        "source_as_of": receipt["source_as_of"],
+        "source_game_count": receipt["source_game_count"],
+        "source_identity_sha256": receipt["source_identity_sha256"],
+        "source_receipt_sha256": receipt["receipt_sha256"],
+        "source_receipt_file_sha256": trust["source"]["source_receipt_file_sha256"],
+        "model_eligible_game_count": receipt["model_eligible_game_count"],
+        "model_eligible_identity_sha256": receipt["model_eligible_identity_sha256"],
+        "accepted_game_ids": list(receipt["accepted_game_ids"]),
+        "model_eligible_game_ids": list(receipt["model_eligible_game_ids"]),
+    }
     offsets: dict[str, dict[str, float]] = {}
     targets: dict[str, dict[str, float]] = {}
     bindings: dict[str, dict[str, Any]] = {}
@@ -170,7 +220,9 @@ def run_fourway(
             model_path,
             variant=variant,
             expected_raw_sha256=record["raw_sha256"],
-            source=trust["source"],
+            source=source_binding,
+            maps_path=maps_path,
+            expected_maps_sha256=trust["source"]["maps_source_sha256"],
         )
     game_ids, universe = validate_common_prediction_universe(
         offsets,
@@ -208,21 +260,20 @@ def run_fourway(
                 game_ids,
                 offsets[variant],
                 provenances[variant],
+                str(receipt["receipt_sha256"]),
             ): variant
             for variant in VARIANTS
         }
         for future in as_completed(futures):
             variant, candidate = future.result()
+            validate_candidate(
+                candidate,
+                variant=variant,
+                universe=universe,
+                expected_source_receipt_sha256=str(receipt["receipt_sha256"]),
+            )
             candidates[variant] = candidate
             _write_json(output_root / "candidates" / f"{variant}.json", candidate)
-    source_binding = {
-        "source_as_of": receipt["source_as_of"],
-        "source_game_count": receipt["source_game_count"],
-        "source_identity_sha256": receipt["source_identity_sha256"],
-        "source_receipt_sha256": receipt["receipt_sha256"],
-        "source_receipt_file_sha256": trust["source"]["source_receipt_file_sha256"],
-        "accepted_game_ids_sha256": receipt["source_identity_sha256"],
-    }
     report = build_fourway_diff(
         candidates,
         source=source_binding,
@@ -232,6 +283,7 @@ def run_fourway(
         baseline_candidate_raw_sha256=baseline_record["raw_sha256"],
     )
     _write_json(output_root / "fourway-tierlist-report.json", report)
+    implementation = _implementation_binding(repo_root)
     receipt_payload = {
         "schema_version": "scryglass:future-value-tierlist-fourway-run:v1",
         "status": "research_only",
@@ -244,6 +296,7 @@ def run_fourway(
             variant: sha256_path(output_root / "candidates" / f"{variant}.json")
             for variant in VARIANTS
         },
+        "implementation": implementation,
     }
     receipt_payload["receipt_sha256"] = __import__("hashlib").sha256(
         canonical_json_bytes(receipt_payload)
