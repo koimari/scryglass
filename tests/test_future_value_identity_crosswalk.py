@@ -119,6 +119,53 @@ def test_future_only_identity_is_rejected(tmp_path: Path) -> None:
     assert any("strict_prior" in reason for reason in result["rejected"][0]["reasons"])
 
 
+@pytest.mark.parametrize("label", ["players", "teams"])
+def test_accepted_row_dates_must_match_authoritative_map_dates(
+    tmp_path: Path, label: str
+) -> None:
+    maps, players, teams, _, _, _ = _fixture(tmp_path, missing="player")
+    frame = players if label == "players" else teams
+    frame.loc[frame["gameid"] == "game-1", "date"] = "2025-12-31T00:00:00Z"
+    receipt, files, receipt_file = _bind(tmp_path, maps, players, teams)
+
+    with pytest.raises(
+        IdentityCrosswalkError,
+        match=f"{label} game dates do not match authoritative map dates",
+    ):
+        _call(maps, players, teams, receipt, files, receipt_file)
+
+
+def test_backdated_future_map_rows_cannot_supply_strict_prior_identity(
+    tmp_path: Path,
+) -> None:
+    maps, players, teams, _, _, _ = _fixture(tmp_path, missing="all")
+    # Make game-1 the target with missing identities.  Give the later game
+    # stable identities, then backdate only its player/team rows.  A row-local
+    # history implementation would incorrectly use those future identities.
+    players.loc[players["gameid"] == "game-1", ["playerid", "teamid"]] = None
+    teams.loc[teams["gameid"] == "game-1", "teamid"] = None
+    for side in ("Blue", "Red"):
+        players.loc[
+            (players["gameid"] == "game-2") & (players["side"] == side),
+            "teamid",
+        ] = f"oe:team:{side}"
+    players.loc[players["gameid"] == "game-2", "playerid"] = [
+        f"oe:player:future-{index}" for index in range(10)
+    ]
+    teams.loc[teams["gameid"] == "game-2", "teamid"] = [
+        "oe:team:Blue", "oe:team:Red"
+    ]
+    players.loc[players["gameid"] == "game-2", "date"] = "2025-12-31T00:00:00Z"
+    teams.loc[teams["gameid"] == "game-2", "date"] = "2025-12-31T00:00:00Z"
+    receipt, files, receipt_file = _bind(tmp_path, maps, players, teams)
+
+    with pytest.raises(
+        IdentityCrosswalkError,
+        match="game dates do not match authoritative map dates",
+    ):
+        _call(maps, players, teams, receipt, files, receipt_file)
+
+
 def test_repeated_player_name_is_rejected_when_context_is_ambiguous(tmp_path: Path) -> None:
     maps, players, teams, _, _, _ = _fixture(tmp_path, missing="player")
     players.loc[(players["gameid"] == "game-1") & (players["playername"] == "Blue-top"), "playername"] = "Shared"

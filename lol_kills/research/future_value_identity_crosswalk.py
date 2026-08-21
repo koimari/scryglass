@@ -26,6 +26,7 @@ import unicodedata
 import pandas as pd
 
 from lol_kills.etl.aliases import normalize_team
+from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
 
 
@@ -652,6 +653,88 @@ def _map_groups(
     }
 
 
+def _authoritative_map_dates(
+    frame: pd.DataFrame,
+    game_ids: pd.Series,
+    *,
+    date_column: str,
+    accepted: set[str],
+) -> dict[str, datetime]:
+    """Return one trusted UTC date for every accepted map.
+
+    The map frame is the only source of chronology.  A duplicate accepted map
+    or a map without a valid date makes the source unsafe for strict-prior
+    identity work.
+    """
+
+    dates: dict[str, datetime] = {}
+    for game_id, raw_date in zip(game_ids.tolist(), frame[date_column].tolist()):
+        game_id = str(game_id)
+        if game_id not in accepted:
+            continue
+        if game_id in dates:
+            raise IdentityCrosswalkError(
+                f"accepted maps contain duplicate map rows: {game_id}"
+            )
+        dates[game_id] = _timestamp(raw_date, label=f"maps {game_id}")
+    missing = sorted(accepted - set(dates))
+    if missing:
+        raise IdentityCrosswalkError(
+            f"accepted maps are missing authoritative dates: {missing[:5]}"
+        )
+    return dates
+
+
+def _validate_source_row_dates(
+    frame: pd.DataFrame,
+    game_ids: pd.Series,
+    *,
+    date_column: str,
+    map_dates: Mapping[str, datetime],
+    accepted: set[str],
+    label: str,
+    rows_per_map: int,
+) -> None:
+    """Require complete accepted rows and exact equality to map timestamps."""
+
+    counts: Counter[str] = Counter(
+        str(game_id)
+        for game_id in game_ids.tolist()
+        if str(game_id) in accepted
+    )
+    missing = sorted(accepted - set(counts))
+    if missing:
+        raise IdentityCrosswalkError(
+            f"{label} are missing accepted maps: {missing[:5]}"
+        )
+    invalid_counts = sorted(
+        game_id for game_id in accepted if counts[game_id] != rows_per_map
+    )
+    if invalid_counts:
+        raise IdentityCrosswalkError(
+            f"{label} have duplicate or incomplete map rows: {invalid_counts[:5]}"
+        )
+
+    mismatches: list[str] = []
+    for game_id, raw_date in zip(game_ids.tolist(), frame[date_column].tolist()):
+        game_id = str(game_id)
+        if game_id not in accepted:
+            continue
+        try:
+            row_date = _timestamp(raw_date, label=f"{label} {game_id}")
+        except IdentityCrosswalkError as error:
+            raise IdentityCrosswalkError(
+                f"{label} contain an invalid accepted map date: {game_id}"
+            ) from error
+        if row_date != map_dates[game_id]:
+            mismatches.append(game_id)
+    if mismatches:
+        raise IdentityCrosswalkError(
+            f"{label} game dates do not match authoritative map dates: "
+            + ", ".join(sorted(set(mismatches))[:5])
+        )
+
+
 def _require_columns(frame: pd.DataFrame, required: Sequence[str], label: str) -> None:
     missing = sorted(set(required) - set(frame.columns))
     if missing:
@@ -797,6 +880,30 @@ def _build_identity_crosswalk(
         raise IdentityCrosswalkError("accepted maps contain duplicate map rows")
     player_ids = _canonical_frame_games(players_frame, "players")
     team_ids = _canonical_frame_games(teams_frame, "teams")
+    map_dates = _authoritative_map_dates(
+        maps_frame,
+        map_ids,
+        date_column=map_date_column,
+        accepted=accepted_set,
+    )
+    _validate_source_row_dates(
+        players_frame,
+        player_ids,
+        date_column=player_date_column,
+        map_dates=map_dates,
+        accepted=accepted_set,
+        label="players",
+        rows_per_map=10,
+    )
+    _validate_source_row_dates(
+        teams_frame,
+        team_ids,
+        date_column=team_date_column,
+        map_dates=map_dates,
+        accepted=accepted_set,
+        label="teams",
+        rows_per_map=2,
+    )
     # Frozen parquet files can retain physical rows that the accepted census
     # excludes.  They are ignored after identity validation of the row key.
     player_missing_mask = players_frame["playerid"].map(
@@ -829,12 +936,15 @@ def _build_identity_crosswalk(
     player_history_frame = players_frame.loc[
         player_ids.isin(accepted_set), player_history_columns
     ].copy()
+    player_history_frame["__canonical_map_date"] = player_history_frame[
+        player_game_column
+    ].map(canonical_source_game_key).map(map_dates)
     if "league" not in player_history_frame.columns:
         player_history_frame["league"] = ""
     player_history_rows = _history_rows(
         player_history_frame,
         game_column=player_game_column,
-        date_column=player_date_column,
+        date_column="__canonical_map_date",
         id_column="playerid",
         prefix="oe:player:",
         name_column="playername",
@@ -853,13 +963,16 @@ def _build_identity_crosswalk(
             columns.append("league")
         selected = frame.loc[frame_ids.isin(accepted_set), columns].copy()
         selected = selected.rename(columns={game_column: "__game", date_column: "__date"})
+        selected["__canonical_map_date"] = selected["__game"].map(
+            canonical_source_game_key
+        ).map(map_dates)
         if "league" not in selected.columns:
             selected["league"] = ""
         team_history_frames.append(selected)
     team_history = _history_rows(
         pd.concat(team_history_frames, ignore_index=True),
         game_column="__game",
-        date_column="__date",
+        date_column="__canonical_map_date",
         id_column="teamid",
         prefix="oe:team:",
         name_column="teamname",
@@ -885,7 +998,7 @@ def _build_identity_crosswalk(
         map_group = map_groups[game_id]
         player_group = player_groups.get(game_id, pd.DataFrame())
         team_group = team_groups.get(game_id, pd.DataFrame())
-        target_date = _timestamp_or_none(map_group.iloc[0].get(map_date_column)) if len(map_group) else None
+        target_date = map_dates.get(game_id)
         reasons: list[str] = []
         if target_date is None:
             reasons.append("target_timestamp_missing")
