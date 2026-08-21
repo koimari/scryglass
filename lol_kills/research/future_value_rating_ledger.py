@@ -66,7 +66,6 @@ RECEIPT_SCHEMA_VERSION = "scryglass:future-value-current-rating-ledger-receipt:v
 IMPLEMENTATION_LOCATOR = "lol_kills/research/future_value_rating_ledger.py"
 
 _MAP_ID_COLUMNS = ("game_uid", "gameid", "game_id")
-_PLAYER_ID_COLUMNS = ("game_uid", "gameid", "game_id")
 _STRUCTURAL_MAP_COLUMNS = frozenset(
     {
         "game_uid",
@@ -500,8 +499,6 @@ def _team_replay(
     lineups = _stable_lineup_hashes(source_players)
     states: dict[str, TeamState] = defaultdict(lambda: TeamState(sigma=cfg.sigma0))
     rows: list[dict[str, Any]] = []
-    blue_col = "blue_team" if "blue_team" in frame.columns else "blue_teamname"
-    red_col = "red_team" if "red_team" in frame.columns else "red_teamname"
     for stamp, batch in frame.groupby("date", sort=False, dropna=False):
         # Prepare uncertainty and roster state once for the timestamp.  A team
         # appearing twice in one timestamp would have two simultaneous lineups

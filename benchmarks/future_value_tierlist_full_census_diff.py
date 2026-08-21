@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 from typing import Any, Mapping
@@ -169,7 +170,7 @@ def _verify_candidate(
                 raise FullCensusTierDiffError(
                     f"{label} contains a non-numeric {field}"
                 ) from error
-            if not (number == number and abs(number) != float("inf")):
+            if not math.isfinite(number):
                 raise FullCensusTierDiffError(f"{label} contains a non-finite {field}")
     return rows, claimed_artifact
 

@@ -376,10 +376,6 @@ def _paired_bootstrap(
     baseline_sorted_target = target[baseline_order]
     candidate_sorted_probability = candidate[candidate_order]
     baseline_sorted_probability = baseline[baseline_order]
-    candidate_log_loss = -(target * np.log(np.clip(candidate, LOG_EPSILON, 1.0 - LOG_EPSILON)) + (1.0 - target) * np.log1p(-np.clip(candidate, LOG_EPSILON, 1.0 - LOG_EPSILON)))
-    baseline_log_loss = -(target * np.log(np.clip(baseline, LOG_EPSILON, 1.0 - LOG_EPSILON)) + (1.0 - target) * np.log1p(-np.clip(baseline, LOG_EPSILON, 1.0 - LOG_EPSILON)))
-    candidate_brier = (candidate - target) ** 2
-    baseline_brier = (baseline - target) ** 2
     delta_log_loss: list[float] = []
     delta_brier: list[float] = []
     delta_auc: list[float] = []

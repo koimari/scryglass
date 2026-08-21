@@ -114,7 +114,7 @@ def _verify_current_snapshot_trust_root(
     ):
         ids = frame[identity].astype("string")
         values = frame["mu_effective"]
-        finite = values.map(lambda value: _finite_number(value))
+        finite = values.map(_finite_number)
         valid = ids.notna() & ids.str.strip().ne("") & finite
         verified_ids = [str(value) for value in ids[valid].tolist()]
         if len(verified_ids) != len(set(verified_ids)):
