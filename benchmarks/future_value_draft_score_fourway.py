@@ -253,6 +253,10 @@ def _verify_public_atom_pack(
     frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
     if frame["date"].isna().any():
         raise FourWayDraftScoreError("public Draft Score dates are invalid")
+    atom_ids = set(frame["game_id"].astype(str))
+    accepted_ids = {str(value) for value in source["accepted_game_ids"]}
+    if not atom_ids.issubset(accepted_ids):
+        raise FourWayDraftScoreError("public Draft Score contains IDs outside the accepted census")
     static_payload = [
         {
             "game_id": str(row["game_id"]),
@@ -444,10 +448,10 @@ def _joined_fold(
     base = base.merge(
         scaling[["game_id", *SCALING_FEATURES, "forecast_curve_available"]],
         on="game_id",
-        how="inner",
+        how="left",
         validate="one_to_one",
     )
-    base = base.merge(future, on="game_id", how="inner", validate="one_to_one")
+    base = base.merge(future, on="game_id", how="left", validate="one_to_one")
     base = base.merge(
         atom.drop(columns=["date"], errors="ignore"),
         on="game_id",
@@ -455,6 +459,8 @@ def _joined_fold(
         validate="one_to_one",
     )
     expected = set(train_ids) | set(validation_ids)
+    static_atom_ids = set(atom["game_id"].astype(str))
+    static_atom_missing = sorted(expected - static_atom_ids)
     producer_audit = {
         "current_rating": _producer_id_audit(current, expected),
         "scaling": _producer_id_audit(scaling, expected),
@@ -503,6 +509,8 @@ def _joined_fold(
         "joined_validation_count": int(base["is_validation"].sum()),
         "missing_game_count": len(missing),
         "missing_game_ids": missing[:20],
+        "static_atom_missing_game_count": len(static_atom_missing),
+        "static_atom_missing_game_ids": static_atom_missing[:20],
         "train_dates_at_or_after_cutoff": prior_violations,
         "validation_dates_at_or_before_cutoff": validation_prior_violations,
         "static_atom_fit_through": atom_fit_through.isoformat().replace("+00:00", "Z")
@@ -543,6 +551,15 @@ def _feature_names(variant: str) -> tuple[str, ...]:
     if variant in {"scaling_curve", "both"}:
         names += SCALING_FEATURES
     return names
+
+
+def _producer_requirements(variant: str) -> tuple[str, ...]:
+    requirements = ["public_static_atoms", "current_rating"]
+    if variant in {"future_player_form", "both"}:
+        requirements.append("future_player_form")
+    if variant in {"scaling_curve", "both"}:
+        requirements.append("scaling")
+    return tuple(requirements)
 
 
 def _fit_zero_intercept(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
@@ -632,11 +649,13 @@ def _static_descriptive_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
             if feature in raw:
                 row[feature] = float(raw[feature])
         if FORM_FEATURE in raw:
-            row[FORM_FEATURE] = float(raw[FORM_FEATURE])
+            row[FORM_FEATURE] = (
+                None if pd.isna(raw[FORM_FEATURE]) else float(raw[FORM_FEATURE])
+            )
             row["future_player_support_status"] = str(raw.get("future_player_support_status") or "unknown")
         for feature in SCALING_FEATURES:
             if feature in raw:
-                row[feature] = float(raw[feature])
+                row[feature] = None if pd.isna(raw[feature]) else float(raw[feature])
         rows.append(row)
     return rows
 
@@ -689,7 +708,7 @@ def build_report(
         )
         joined_by_fold[fold] = joined
         fold_reports.append(fold_report)
-        if fold_report["missing_game_count"]:
+        if fold_report["static_atom_missing_game_count"]:
             blockers.add(f"fold_{fold}_static_atom_coverage_missing")
         if fold_report["train_dates_at_or_after_cutoff"]:
             blockers.add(f"fold_{fold}_training_chronology_invalid")
@@ -782,6 +801,7 @@ def build_report(
             "status": "evaluated" if len(evaluated) == 3 else "blocked",
             "feature_mode": "group_projection",
             "feature_names": list(feature_names),
+            "producer_requirements": list(_producer_requirements(variant)),
             "static_components_sha256": atom_receipt["static_components_sha256"],
             "folds": fold_results,
             "valid_fold_count": len(evaluated),

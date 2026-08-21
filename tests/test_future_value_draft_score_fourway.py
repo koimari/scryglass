@@ -273,3 +273,44 @@ def test_fourway_fails_closed_when_atom_rows_do_not_cover_train(tmp_path: Path) 
     assert report["variants"]["both"]["status"] == "blocked"
     assert "fold_1_static_atom_coverage_missing" in report["blockers"]
     assert "both_requires_three_valid_folds" in report["blockers"]
+
+
+def test_variants_do_not_require_unselected_optional_producers(tmp_path: Path) -> None:
+    game_ids = [f"g{i}" for i in range(1, 7)]
+    source_path, source_root = _source(tmp_path, game_ids)
+    source = json.loads(source_path.read_text())
+    public_root, manifest_hash = _public_pack(tmp_path, source, game_ids)
+    folds, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
+    model_path = evaluation / "future_player_form" / "model.json"
+    model = json.loads(model_path.read_text())
+    for fold in (1, 2, 3):
+        spec = json.loads((folds / f"fold-{fold}-spec.json").read_text())
+        validation = set(spec["validation_game_ids"])
+        rows = [
+            row
+            for row in model["variants"]["future_player_form"]["folds"][fold - 1][
+                "component_evidence"
+            ]["rows"]
+            if row["game_id"] in validation
+        ]
+        evidence = {"rows": rows, "row_count": len(rows)}
+        evidence["sha256"] = hashlib.sha256(_canonical(rows)).hexdigest()
+        model["variants"]["future_player_form"]["folds"][fold - 1][
+            "component_evidence"
+        ] = evidence
+    _write_json(model_path, model)
+    report = build_report(
+        source_receipt_path=source_path,
+        source_root=source_root,
+        folds_root=folds,
+        evaluation_root=evaluation,
+        public_pack_root=public_root,
+        expected_manifest_sha256=manifest_hash,
+        authority_path=tmp_path / "authority.json",
+        expected_authority_sha256=hashlib.sha256((tmp_path / "authority.json").read_bytes()).hexdigest(),
+        model_artifact_path=tmp_path / "model.json",
+    )
+    assert report["variants"]["current_only"]["status"] == "evaluated"
+    assert report["variants"]["scaling_curve"]["status"] == "evaluated"
+    assert report["variants"]["future_player_form"]["status"] == "blocked"
+    assert report["variants"]["both"]["status"] == "blocked"
