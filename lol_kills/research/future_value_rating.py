@@ -59,6 +59,10 @@ RANK_3 = 3
 SIDE_SWAP_MEAN_TOLERANCE = 1e-12
 SIDE_SWAP_MAX_TOLERANCE = 1e-12
 REGULARIZATION_GRID = (0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0)
+# Variant ledgers are external producer outputs.  A nested selector cannot
+# reuse an outer ledger.  Until a separately bound inner ledger is supplied,
+# every explicit variant uses this predeclared value and records the blocker.
+PREDECLARED_VARIANT_REGULARIZATION_C = 0.1
 FORM_METRICS = (
     "cs_per_min",
     "gold_per_min",
@@ -1286,6 +1290,9 @@ CENTERED_ATOM_LEVEL_FEATURES = frozenset(
 # canonical receipt and therefore part of the model identity.
 RATING_VARIANT_SCHEMA_VERSION = "scryglass:future-value-rating-variants:v2"
 RATING_FEATURE_LEDGER_SCHEMA_VERSION = "scryglass:future-value-rating-feature-ledger:v1"
+RATING_FEATURE_PRODUCER_SCHEMA_VERSION = (
+    "scryglass:future-value-rating-feature-producer:v1"
+)
 CURRENT_RATING_SIGNED_MAP_FEATURES = (
     "base_team_logit",
     "team_rating_diff_scaled",
@@ -1399,6 +1406,193 @@ _RATING_DERIVED_FEATURES = frozenset(
         *SCALING_CURVE_DERIVED_FEATURES,
     }
 )
+
+
+def _trusted_producer_spec(
+    *,
+    name: str,
+    feature_family: str,
+    feature_names: Sequence[str],
+    implementation_locator: str,
+    implementation_version: str,
+) -> dict[str, Any]:
+    """Build one code-owned producer adapter declaration.
+
+    The implementation digest is derived from this declaration.  A caller
+    must use one of these exact declarations.  A caller cannot mint a name,
+    feature family, or implementation digest in a ledger receipt.
+    """
+
+    payload: dict[str, Any] = {
+        "schema_version": RATING_FEATURE_PRODUCER_SCHEMA_VERSION,
+        "name": name,
+        "feature_family": feature_family,
+        "feature_names": list(feature_names),
+        "implementation_locator": implementation_locator,
+        "implementation_version": implementation_version,
+        "strict_prior_timing": "fit_rows_strictly_before_cutoff",
+        "same_timestamp_policy": "batch_exclude_same_timestamp",
+        "series_safety": "whole_series_disjoint",
+        "target_free": True,
+    }
+    implementation_path = Path(__file__).resolve().parents[2] / implementation_locator
+    if not implementation_path.is_file() or implementation_path.is_symlink():
+        raise FutureValueSourceError(
+            f"trusted rating feature producer source is missing: {implementation_locator}"
+        )
+    payload["implementation_sha256"] = _sha256_path(implementation_path)
+    return payload
+
+
+_TRUSTED_FEATURE_PRODUCER_SPECS = MappingProxyType(
+    {
+        "current_sequential_rating": MappingProxyType(
+            _trusted_producer_spec(
+                name="current_sequential_rating",
+                feature_family="current_rating",
+                feature_names=CURRENT_RATING_SIGNED_MAP_FEATURES,
+                implementation_locator="lol_kills/ratings/player_elo.py",
+                implementation_version="sequential-rating-v1",
+            )
+        ),
+        "strict_prior_atomized_scaling": MappingProxyType(
+            _trusted_producer_spec(
+                name="strict_prior_atomized_scaling",
+                feature_family="scaling_curve",
+                feature_names=SCALING_CURVE_SIGNED_MAP_FEATURES,
+                implementation_locator="lol_kills/research/future_phase_curve.py",
+                implementation_version="strict-prior-scaling-v1",
+            )
+        ),
+    }
+)
+
+
+def trusted_feature_producer_receipt(
+    name: str,
+    *,
+    row_values_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Return an immutable-by-value receipt for a registered producer.
+
+    The returned value is a declaration, not a trust grant.  ``bind`` checks
+    every field against the code-owned registry before it records the receipt.
+    """
+
+    key = str(name).strip()
+    spec = _TRUSTED_FEATURE_PRODUCER_SPECS.get(key)
+    if spec is None:
+        raise FutureValueSourceError(f"unknown rating feature producer: {name}")
+    payload = dict(spec)
+    if row_values_sha256 is not None:
+        if re.fullmatch(r"[0-9a-f]{64}", str(row_values_sha256), re.I) is None:
+            raise FutureValueSourceError("rating feature producer row digest is invalid")
+        payload["row_values_sha256"] = str(row_values_sha256).lower()
+    payload["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(payload)
+    ).hexdigest()
+    return payload
+
+
+def _verified_source_receipt_for_ledger(
+    receipt: Mapping[str, Any] | None,
+) -> tuple[str, str]:
+    """Verify the canonical source receipt without trusting ledger metadata."""
+
+    if not isinstance(receipt, Mapping):
+        raise FutureValueSourceError("verified source receipt is required for rating ledger")
+    required = {
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "accepted_game_ids",
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
+        "model_eligible_game_ids",
+        "source_files",
+        "receipt_sha256",
+    }
+    if not required.issubset(receipt):
+        raise FutureValueSourceError("verified source receipt is incomplete")
+    claimed = receipt.get("receipt_sha256")
+    if not isinstance(claimed, str) or re.fullmatch(r"[0-9a-f]{64}", claimed, re.I) is None:
+        raise FutureValueSourceError("verified source receipt hash is invalid")
+    payload = dict(receipt)
+    payload.pop("receipt_sha256", None)
+    if hashlib.sha256(_canonical_json_bytes(payload)).hexdigest() != claimed:
+        raise FutureValueSourceError("verified source receipt hash does not match payload")
+    accepted = tuple(str(value) for value in receipt["accepted_game_ids"])
+    eligible = tuple(str(value) for value in receipt["model_eligible_game_ids"])
+    if (
+        not accepted
+        or tuple(canonical_game_ids(accepted)) != accepted
+        or int(receipt["source_game_count"]) != len(accepted)
+        or str(receipt["source_identity_sha256"]) != identity_sha256(accepted)
+        or int(receipt["model_eligible_game_count"]) != len(eligible)
+        or tuple(canonical_game_ids(eligible)) != eligible
+        or str(receipt["model_eligible_identity_sha256"]) != identity_sha256(eligible)
+    ):
+        raise FutureValueSourceError("verified source receipt census identity is invalid")
+    _utc_timestamp(receipt["source_as_of"], "source_as_of")
+    source_files = receipt["source_files"]
+    if not isinstance(source_files, Mapping) or not source_files:
+        raise FutureValueSourceError("verified source receipt has no source file hashes")
+    for label, record in source_files.items():
+        if not isinstance(record, Mapping) or not isinstance(record.get("bytes"), int):
+            raise FutureValueSourceError(f"verified source file record is invalid: {label}")
+        if re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256") or ""), re.I) is None:
+            raise FutureValueSourceError(f"verified source file hash is invalid: {label}")
+    return str(receipt["source_identity_sha256"]), claimed
+
+
+def _verified_producer_adapters(
+    producer: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], ...]:
+    """Validate producer names and implementation hashes against the registry."""
+
+    if not isinstance(producer, Mapping):
+        raise FutureValueSourceError("trusted rating feature producer is required")
+    raw_adapters = producer.get("adapters")
+    if raw_adapters is None:
+        raw_adapters = [producer]
+    if not isinstance(raw_adapters, (list, tuple)) or not raw_adapters:
+        raise FutureValueSourceError("rating feature producer adapters are missing")
+    adapters: list[dict[str, Any]] = []
+    for raw in raw_adapters:
+        if not isinstance(raw, Mapping):
+            raise FutureValueSourceError("rating feature producer adapter is invalid")
+        name = str(raw.get("name") or "").strip()
+        expected = _TRUSTED_FEATURE_PRODUCER_SPECS.get(name)
+        if expected is None:
+            raise FutureValueSourceError(f"unknown rating feature producer: {name}")
+        allowed = set(expected) | {"receipt_sha256", "row_values_sha256"}
+        if set(raw) - allowed:
+            raise FutureValueSourceError("rating feature producer declaration has unknown fields")
+        row_digest = str(raw.get("row_values_sha256") or "")
+        if re.fullmatch(r"[0-9a-f]{64}", row_digest, re.I) is None:
+            raise FutureValueSourceError(
+                "rating feature producer row-value digest is required"
+            )
+        raw_payload = dict(raw)
+        claimed_receipt = raw_payload.pop("receipt_sha256", None)
+        if claimed_receipt is not None:
+            if not isinstance(claimed_receipt, str) or hashlib.sha256(
+                _canonical_json_bytes(raw_payload)
+            ).hexdigest() != claimed_receipt:
+                raise FutureValueSourceError(
+                    "rating feature producer declaration receipt changed"
+                )
+        raw_payload.pop("row_values_sha256", None)
+        if dict(raw_payload) != dict(expected):
+            raise FutureValueSourceError(
+                f"rating feature producer declaration changed: {name}"
+            )
+        if name in {str(item.get("name")) for item in adapters}:
+            raise FutureValueSourceError("rating feature producer adapters are duplicated")
+        verified = dict(expected)
+        verified["row_values_sha256"] = row_digest.lower()
+        adapters.append(verified)
+    return tuple(adapters)
 
 
 def _resolve_rating_variant(value: RatingVariant | str) -> RatingVariant:
@@ -1715,6 +1909,16 @@ def _ledger_rows_sha256(frame: pd.DataFrame, feature_names: Sequence[str]) -> st
     return hashlib.sha256(_canonical_json_bytes(rows)).hexdigest()
 
 
+def rating_feature_values_sha256(
+    frame: pd.DataFrame,
+    feature_names: Iterable[str],
+) -> str:
+    """Hash canonical feature values for an independently bound producer."""
+
+    names = assert_rating_feature_names(feature_names)
+    return _ledger_rows_sha256(frame, names)
+
+
 def bind_rating_feature_ledger(
     frame: pd.DataFrame,
     *,
@@ -1723,6 +1927,7 @@ def bind_rating_feature_ledger(
     fit_window_end: Any,
     feature_names: Iterable[str],
     producer: Mapping[str, Any] | None = None,
+    validation_game_ids: Iterable[str] | None = None,
 ) -> pd.DataFrame:
     """Bind one fold-bound, out-of-sample signed-feature ledger.
 
@@ -1739,25 +1944,36 @@ def bind_rating_feature_ledger(
         classify_rating_feature(name) != "signed_map" for name in config_features
     ):
         raise FutureValueSourceError("rating feature ledger accepts signed map features only")
-    if not isinstance(source_receipt, Mapping):
-        raise FutureValueSourceError("verified source receipt is required for rating ledger")
-    source_identity = str(source_receipt.get("source_identity_sha256") or "")
-    if not re.fullmatch(r"[0-9a-f]{64}", source_identity):
-        raise FutureValueSourceError("rating ledger source identity is invalid")
-    source_payload = dict(source_receipt)
-    source_hash = source_payload.pop("receipt_sha256", None)
-    if not isinstance(source_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", source_hash):
-        raise FutureValueSourceError("rating ledger source receipt hash is invalid")
-    if hashlib.sha256(_canonical_json_bytes(source_payload)).hexdigest() != source_hash:
-        raise FutureValueSourceError("rating ledger source receipt changed")
-    required = {"game_id", *config_features}
+    source_identity, source_hash = _verified_source_receipt_for_ledger(source_receipt)
+    producer_adapters = _verified_producer_adapters(producer)
+    producer_feature_names = tuple(
+        feature
+        for adapter in producer_adapters
+        for feature in adapter["feature_names"]
+    )
+    if len(set(producer_feature_names)) != len(producer_feature_names):
+        raise FutureValueSourceError("rating feature producer feature families overlap")
+    if set(producer_feature_names) != set(config_features):
+        raise FutureValueSourceError(
+            "rating feature producer feature families do not match ledger features"
+        )
+    required = {"game_id", "date", "series_id", *config_features}
     missing = sorted(required - set(frame.columns))
     if missing:
         raise FutureValueSourceError("rating feature ledger is missing: " + ", ".join(missing))
-    work = frame[list(dict.fromkeys(("game_id", *config_features)))].copy()
+    work = frame[
+        list(dict.fromkeys(("game_id", "date", "series_id", *config_features)))
+    ].copy()
     work["game_id"] = work["game_id"].astype(str)
     if work["game_id"].eq("").any() or work["game_id"].duplicated().any():
         raise FutureValueSourceError("rating feature ledger game IDs are not unique")
+    dates = pd.to_datetime(work["date"], utc=True, errors="coerce")
+    if dates.isna().any():
+        raise FutureValueSourceError("rating feature ledger dates are invalid")
+    work["date"] = dates
+    work["series_id"] = work["series_id"].astype(str).str.strip()
+    if work["series_id"].eq("").any() or work["series_id"].eq("nan").any():
+        raise FutureValueSourceError("rating feature ledger series IDs are invalid")
     for name in config_features:
         values = pd.to_numeric(work[name], errors="coerce").to_numpy(dtype=float)
         if not np.isfinite(values).all():
@@ -1766,31 +1982,84 @@ def bind_rating_feature_ledger(
     train_ids = tuple(sorted({str(value) for value in train_game_ids}))
     if not train_ids or not set(train_ids).issubset(set(work["game_id"])):
         raise FutureValueSourceError("rating ledger training game IDs are incomplete")
+    model_ids = tuple(sorted(work["game_id"].astype(str)))
+    if validation_game_ids is None:
+        validation_ids = tuple(sorted(set(model_ids) - set(train_ids)))
+    else:
+        validation_ids = tuple(sorted({str(value) for value in validation_game_ids}))
+    if not validation_ids or set(validation_ids) != set(model_ids) - set(train_ids):
+        raise FutureValueSourceError(
+            "rating ledger validation game IDs do not match the model frame"
+        )
     cutoff = _utc_text(fit_window_end)
+    cutoff_stamp = _utc_timestamp(cutoff, "fit_window_end")
+    train_dates = dates[work["game_id"].isin(train_ids)]
+    if train_dates.empty or not bool(train_dates.lt(cutoff_stamp).all()):
+        raise FutureValueSourceError("rating ledger training rows violate strict-prior cutoff")
+    train_series = set(work.loc[work["game_id"].isin(train_ids), "series_id"])
+    validation_series = set(
+        work.loc[work["game_id"].isin(validation_ids), "series_id"]
+    )
+    if train_series & validation_series:
+        raise FutureValueSourceError("rating ledger train and validation series overlap")
     rows_hash = _ledger_rows_sha256(work, config_features)
     producer_payload: dict[str, Any] = {
         "schema_version": RATING_FEATURE_LEDGER_SCHEMA_VERSION,
         "source_identity_sha256": source_identity,
-        "game_identity_sha256": identity_sha256(tuple(sorted(work["game_id"].astype(str)))),
+        "source_receipt_sha256": source_hash,
+        "game_identity_sha256": identity_sha256(model_ids),
         "fit_game_identity_sha256": identity_sha256(train_ids),
         "fit_game_ids": list(train_ids),
+        "fit_date_min": _utc_text(train_dates.min()),
+        "fit_date_max": _utc_text(train_dates.max()),
         "fit_window_end": cutoff,
+        "validation_game_identity_sha256": identity_sha256(validation_ids),
+        "validation_game_ids": list(validation_ids),
         "feature_names": list(config_features),
         "ledger_rows_sha256": rows_hash,
-        "producer": dict(producer or {}),
+        "feature_value_digest": rows_hash,
+        "strict_prior_timing": "fit_rows_strictly_before_cutoff",
+        "same_timestamp_policy": "batch_exclude_same_timestamp",
+        "series_safety": {
+            "policy": "whole_series_disjoint",
+            "train_series_identity_sha256": identity_sha256(tuple(sorted(train_series))),
+            "validation_series_identity_sha256": identity_sha256(
+                tuple(sorted(validation_series))
+            ),
+        },
+        "producer_adapters": [
+            trusted_feature_producer_receipt(
+                str(adapter["name"]),
+                row_values_sha256=_ledger_rows_sha256(
+                    work, tuple(str(value) for value in adapter["feature_names"])
+                ),
+            )
+            for adapter in producer_adapters
+        ],
     }
     producer_payload["receipt_sha256"] = hashlib.sha256(
         _canonical_json_bytes(producer_payload)
     ).hexdigest()
     work.attrs["schema_version"] = RATING_FEATURE_LEDGER_SCHEMA_VERSION
     work.attrs["source_identity_sha256"] = source_identity
+    work.attrs["source_receipt_sha256"] = source_hash
     work.attrs["fit_game_ids"] = list(train_ids)
     work.attrs["fit_game_identity_sha256"] = identity_sha256(train_ids)
-    work.attrs["game_identity_sha256"] = identity_sha256(tuple(sorted(work["game_id"].astype(str))))
+    work.attrs["game_identity_sha256"] = identity_sha256(model_ids)
     work.attrs["fit_window_end"] = cutoff
+    work.attrs["fit_date_min"] = producer_payload["fit_date_min"]
+    work.attrs["fit_date_max"] = producer_payload["fit_date_max"]
+    work.attrs["validation_game_ids"] = list(validation_ids)
+    work.attrs["validation_game_identity_sha256"] = producer_payload[
+        "validation_game_identity_sha256"
+    ]
     work.attrs["feature_names"] = list(config_features)
     work.attrs["ledger_rows_sha256"] = rows_hash
     work.attrs["ledger_sha256"] = rows_hash
+    work.attrs["feature_value_digest"] = rows_hash
+    work.attrs["strict_prior_timing"] = producer_payload["strict_prior_timing"]
+    work.attrs["same_timestamp_policy"] = producer_payload["same_timestamp_policy"]
+    work.attrs["series_safety"] = producer_payload["series_safety"]
     work.attrs["producer_receipt"] = producer_payload
     work.attrs["producer_receipt_sha256"] = producer_payload["receipt_sha256"]
     return work
@@ -1816,7 +2085,7 @@ def validate_rating_feature_ledger(
         raise FutureValueSourceError("rating feature ledger is required for signed map features")
     if not isinstance(ledger, pd.DataFrame):
         raise FutureValueSourceError("rating feature ledger must be a DataFrame")
-    required = {"game_id", *config_features}
+    required = {"game_id", "date", "series_id", *config_features}
     missing = sorted(required - set(ledger.columns))
     if missing:
         raise FutureValueSourceError("rating feature ledger is missing: " + ", ".join(missing))
@@ -1834,6 +2103,11 @@ def validate_rating_feature_ledger(
     expected_source_identity = str((source_receipt or {}).get("source_identity_sha256") or "")
     if not source_identity or source_identity != expected_source_identity:
         raise FutureValueSourceError("rating feature ledger source identity does not match source receipt")
+    _verified_identity, expected_receipt_hash = _verified_source_receipt_for_ledger(
+        source_receipt
+    )
+    if attrs.get("source_receipt_sha256") != expected_receipt_hash:
+        raise FutureValueSourceError("rating feature ledger source receipt binding changed")
     if tuple(str(value) for value in attrs.get("feature_names", ())) != config_features:
         raise FutureValueSourceError("rating feature ledger feature list is not canonical")
     attr_train_ids = tuple(sorted({str(value) for value in attrs.get("fit_game_ids", ())}))
@@ -1843,6 +2117,12 @@ def validate_rating_feature_ledger(
         raise FutureValueSourceError("rating feature ledger fit identity does not match fold")
     if attrs.get("game_identity_sha256") != identity_sha256(model_ids):
         raise FutureValueSourceError("rating feature ledger game identity does not match frame")
+    validation_ids = tuple(sorted({str(value) for value in attrs.get("validation_game_ids", ())}))
+    expected_validation_ids = tuple(sorted(set(model_ids) - set(train_ids)))
+    if validation_ids != expected_validation_ids:
+        raise FutureValueSourceError("rating feature ledger validation IDs do not match frame")
+    if attrs.get("validation_game_identity_sha256") != identity_sha256(validation_ids):
+        raise FutureValueSourceError("rating feature ledger validation identity does not match frame")
     expected_cutoff = _utc_text(fit_window_end)
     if str(attrs.get("fit_window_end") or "") != expected_cutoff:
         raise FutureValueSourceError("rating feature ledger cutoff does not match fold")
@@ -1861,16 +2141,73 @@ def validate_rating_feature_ledger(
         raise FutureValueSourceError("rating feature ledger producer schema is invalid")
     if producer.get("source_identity_sha256") != source_identity:
         raise FutureValueSourceError("rating feature ledger producer source identity changed")
+    if producer.get("source_receipt_sha256") != expected_receipt_hash:
+        raise FutureValueSourceError("rating feature ledger producer source receipt changed")
     if tuple(str(value) for value in producer.get("fit_game_ids", ())) != train_ids:
         raise FutureValueSourceError("rating feature ledger producer training IDs changed")
     if producer.get("fit_window_end") != expected_cutoff:
         raise FutureValueSourceError("rating feature ledger producer cutoff changed")
     if tuple(str(value) for value in producer.get("feature_names", ())) != config_features:
         raise FutureValueSourceError("rating feature ledger producer features changed")
+    if tuple(str(value) for value in producer.get("validation_game_ids", ())) != validation_ids:
+        raise FutureValueSourceError("rating feature ledger producer validation IDs changed")
+    if producer.get("validation_game_identity_sha256") != identity_sha256(validation_ids):
+        raise FutureValueSourceError("rating feature ledger producer validation identity changed")
+    if producer.get("strict_prior_timing") != "fit_rows_strictly_before_cutoff":
+        raise FutureValueSourceError("rating feature ledger strict-prior timing policy changed")
+    if producer.get("same_timestamp_policy") != "batch_exclude_same_timestamp":
+        raise FutureValueSourceError("rating feature ledger same-timestamp policy changed")
+    producer_series_safety = producer.get("series_safety")
+    if not isinstance(producer_series_safety, Mapping) or producer_series_safety.get(
+        "policy"
+    ) != "whole_series_disjoint":
+        raise FutureValueSourceError("rating feature ledger series safety policy is invalid")
+    dates = pd.to_datetime(work["date"], utc=True, errors="coerce")
+    if dates.isna().any():
+        raise FutureValueSourceError("rating feature ledger dates are invalid")
+    cutoff_stamp = _utc_timestamp(expected_cutoff, "fit_window_end")
+    fit_dates = dates[work["game_id"].isin(train_ids)]
+    if fit_dates.empty or not bool(fit_dates.lt(cutoff_stamp).all()):
+        raise FutureValueSourceError("rating feature ledger training rows violate strict-prior cutoff")
+    train_series = set(work.loc[work["game_id"].isin(train_ids), "series_id"].astype(str))
+    validation_series = set(
+        work.loc[work["game_id"].isin(validation_ids), "series_id"].astype(str)
+    )
+    if train_series & validation_series:
+        raise FutureValueSourceError("rating feature ledger train and validation series overlap")
+    if producer_series_safety.get("train_series_identity_sha256") != identity_sha256(
+        tuple(sorted(train_series))
+    ) or producer_series_safety.get("validation_series_identity_sha256") != identity_sha256(
+        tuple(sorted(validation_series))
+    ):
+        raise FutureValueSourceError("rating feature ledger series safety binding changed")
+    expected_adapters = _verified_producer_adapters(
+        {"adapters": producer.get("producer_adapters", ())}
+    )
+    expected_adapter_names = tuple(str(adapter["name"]) for adapter in expected_adapters)
+    if not expected_adapter_names:
+        raise FutureValueSourceError("rating feature ledger producer adapters are missing")
+    adapter_features = tuple(
+        feature for adapter in expected_adapters for feature in adapter["feature_names"]
+    )
+    if set(adapter_features) != set(config_features) or len(adapter_features) != len(config_features):
+        raise FutureValueSourceError("rating feature ledger producer adapters do not match features")
+    for adapter in expected_adapters:
+        adapter_rows_hash = _ledger_rows_sha256(
+            work, tuple(str(value) for value in adapter["feature_names"])
+        )
+        if adapter.get("row_values_sha256") != adapter_rows_hash:
+            raise FutureValueSourceError(
+                f"rating feature ledger producer feature values changed: {adapter['name']}"
+            )
     rows_hash = _ledger_rows_sha256(work, config_features)
     claimed_rows_hash = str(attrs.get("ledger_rows_sha256") or attrs.get("ledger_sha256") or "")
     if claimed_rows_hash != rows_hash or producer.get("ledger_rows_sha256") != rows_hash:
         raise FutureValueSourceError("rating feature ledger row hash changed")
+    if producer.get("feature_value_digest") != rows_hash or attrs.get(
+        "feature_value_digest"
+    ) != rows_hash:
+        raise FutureValueSourceError("rating feature ledger feature values changed")
     if producer.get("game_identity_sha256") != identity_sha256(model_ids):
         raise FutureValueSourceError("rating feature ledger game identity changed")
     if producer.get("fit_game_identity_sha256") != identity_sha256(train_ids):
@@ -1892,7 +2229,9 @@ def validate_rating_feature_ledger(
         if not np.isfinite(values).all():
             raise FutureValueSourceError(f"rating feature ledger contains missing values: {name}")
         work[name] = values
-    return work[["game_id", *config_features]].copy()
+    result = work[["game_id", "date", "series_id", *config_features]].copy()
+    result.attrs = dict(attrs)
+    return result
 
 
 def _side_level_column(side: str, feature: str) -> str:
@@ -2176,10 +2515,25 @@ def build_future_value_design(
         design.attrs["feature_ledger"] = {
             "schema_version": RATING_FEATURE_LEDGER_SCHEMA_VERSION,
             "source_identity_sha256": signed_ledger.attrs.get("source_identity_sha256"),
+            "source_receipt_sha256": signed_ledger.attrs.get("source_receipt_sha256"),
             "producer_receipt_sha256": signed_ledger.attrs.get("producer_receipt_sha256"),
             "ledger_rows_sha256": signed_ledger.attrs.get("ledger_rows_sha256"),
+            "feature_value_digest": signed_ledger.attrs.get("feature_value_digest"),
             "fit_window_end": signed_ledger.attrs.get("fit_window_end"),
+            "fit_date_min": signed_ledger.attrs.get("fit_date_min"),
+            "fit_date_max": signed_ledger.attrs.get("fit_date_max"),
             "fit_game_ids": list(signed_ledger.attrs.get("fit_game_ids", ())),
+            "validation_game_ids": list(
+                signed_ledger.attrs.get("validation_game_ids", ())
+            ),
+            "validation_game_identity_sha256": signed_ledger.attrs.get(
+                "validation_game_identity_sha256"
+            ),
+            "strict_prior_timing": signed_ledger.attrs.get("strict_prior_timing"),
+            "same_timestamp_policy": signed_ledger.attrs.get(
+                "same_timestamp_policy"
+            ),
+            "series_safety": signed_ledger.attrs.get("series_safety"),
             "feature_names": list(variant_config.signed_map_features),
         }
     design.attrs["series_cluster_source"] = map_frame.attrs.get("series_cluster_source")
@@ -2366,6 +2720,21 @@ def _select_fold_regularization(
     fit_window_end: Any | None = None,
 ) -> dict[str, Any]:
     """Select L2 strength on one strictly earlier nested chronological fold."""
+
+    if variant is not None:
+        # The outer producer ledger is valid for the outer fit only.  Reusing
+        # it in an inner selector would make the selector see future producer
+        # state.  Use the frozen value and make the missing inner-ledger gate
+        # explicit in every research receipt.
+        return {
+            "method": "predeclared_regularization_c",
+            "candidate_grid": [float(PREDECLARED_VARIANT_REGULARIZATION_C)],
+            "selected_c": float(PREDECLARED_VARIANT_REGULARIZATION_C),
+            "inner_ledger_status": "missing",
+            "blockers": ["nested_inner_feature_ledger_missing_fixed_c_used"],
+            "outer_ledger_reuse": False,
+            "selection_scope": "predeclared_before_outer_fold",
+        }
 
     outer_train_maps = map_frame[map_frame["game_id"].isin(train_game_ids)].copy()
     inner_fold = chronological_whole_series_folds(
@@ -3258,6 +3627,17 @@ def _side_swap_metrics(
         blue = swapped[blue_column].copy()
         swapped[blue_column] = swapped[red_column].to_numpy()
         swapped[red_column] = blue.to_numpy()
+    for feature_name in model.feature_names:
+        if is_signed_map_feature(feature_name):
+            if feature_name not in swapped.columns:
+                return {
+                    "status": "blocked",
+                    "rows": 0,
+                    "blockers": ["side_swap_signed_feature_missing"],
+                }
+            swapped[feature_name] = -pd.to_numeric(
+                swapped[feature_name], errors="coerce"
+            )
     swapped_probability = model.predict_probability(swapped).loc[paired]
     swapped_target = 1.0 - target.loc[paired]
     original_probability = probability.loc[paired]
@@ -4117,6 +4497,10 @@ def evaluate_future_value(
         }
         for report in (*slice_reports.values(), missingness, side_swap):
             pooled_slice_blockers.extend(str(value) for value in report.get("blockers", []))
+        pooled_slice_blockers.extend(
+            str(value)
+            for value in model.regularization_selection.get("blockers", [])
+        )
         paired_game_ids = tuple(
             sorted(validation.loc[paired_mask, "game_id"].astype(str))
         )
@@ -4130,6 +4514,8 @@ def evaluate_future_value(
                 "game_id": str(row.game_id),
                 "player_value_logit": float(row.player_value_logit),
                 "team_context_logit": float(row.team_context_logit),
+                "current_rating_logit": float(row.current_rating_logit),
+                "scaling_curve_logit": float(row.scaling_curve_logit),
                 "data_quality_logit": float(row.data_quality_logit),
                 "full_model_logit": float(row.full_model_logit),
                 "component_reconstruction_error": float(
@@ -4762,6 +5148,7 @@ __all__ = [
     "CURRENT_RATING_STRENGTH_FEATURES",
     "CURRENT_RATING_FEATURE_SEMANTICS",
     "RATING_FEATURE_LEDGER_SCHEMA_VERSION",
+    "RATING_FEATURE_PRODUCER_SCHEMA_VERSION",
     "FUTURE_PLAYER_FORM_SIDE_FEATURES",
     "MODEL_FEATURES",
     "MODEL_FIT_SCHEMA_VERSION",
@@ -4805,7 +5192,9 @@ __all__ = [
     "rating_variant_registry_receipt",
     "rating_variant_registry_sha256",
     "rating_variant_configs",
+    "rating_feature_values_sha256",
     "team_value_difference",
+    "trusted_feature_producer_receipt",
     "validate_rating_feature_ledger",
     "build_rating_variant_matrix",
     "write_source_receipt",

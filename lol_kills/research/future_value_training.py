@@ -25,13 +25,17 @@ import pandas as pd
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.research.future_value_rating import (
     FutureValueSourceError,
+    RATING_VARIANT_ORDER,
+    RatingVariant,
     bind_accepted_future_value_source,
     evaluate_future_value,
+    rating_variant_config_receipt,
     write_source_receipt,
 )
 from lol_kills.v2.tierlists.accepted_census import (
     canonical_game_ids,
     census_payload,
+    identity_sha256,
 )
 
 
@@ -412,6 +416,145 @@ def _load_json_mapping(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
+def _validate_source_receipt_mapping(receipt: Mapping[str, Any]) -> None:
+    """Verify the source receipt payload before any training binding."""
+
+    required = {
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "accepted_game_ids",
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
+        "model_eligible_game_ids",
+        "source_files",
+        "receipt_sha256",
+    }
+    if not required.issubset(receipt):
+        raise FutureValueTrainingError("source receipt is incomplete")
+    claimed = str(receipt.get("receipt_sha256") or "")
+    payload = dict(receipt)
+    payload.pop("receipt_sha256", None)
+    if len(claimed) != 64 or hashlib.sha256(_canonical_bytes(payload)).hexdigest() != claimed:
+        raise FutureValueTrainingError("source receipt canonical hash changed")
+    accepted = tuple(str(value) for value in receipt["accepted_game_ids"])
+    eligible = tuple(str(value) for value in receipt["model_eligible_game_ids"])
+    if (
+        tuple(canonical_game_ids(accepted)) != accepted
+        or int(receipt["source_game_count"]) != len(accepted)
+        or str(receipt["source_identity_sha256"]) != identity_sha256(accepted)
+        or tuple(canonical_game_ids(eligible)) != eligible
+        or int(receipt["model_eligible_game_count"]) != len(eligible)
+        or str(receipt["model_eligible_identity_sha256"]) != identity_sha256(eligible)
+    ):
+        raise FutureValueTrainingError("source receipt census identity changed")
+    try:
+        stamp = pd.Timestamp(receipt["source_as_of"])
+    except (TypeError, ValueError) as error:
+        raise FutureValueTrainingError("source receipt as-of is invalid") from error
+    if pd.isna(stamp) or stamp.tzinfo is None:
+        raise FutureValueTrainingError("source receipt as-of must include a timezone")
+    source_files = receipt["source_files"]
+    if not isinstance(source_files, Mapping) or not source_files:
+        raise FutureValueTrainingError("source receipt file bindings are missing")
+    for label, record in source_files.items():
+        if not isinstance(record, Mapping) or not isinstance(record.get("bytes"), int):
+            raise FutureValueTrainingError(f"source receipt file binding is invalid: {label}")
+        if len(str(record.get("sha256") or "")) != 64:
+            raise FutureValueTrainingError(f"source receipt file hash is invalid: {label}")
+
+
+def verify_variant_input_binding(
+    binding_path: Path,
+    *,
+    source_receipt: Mapping[str, Any],
+    expected_game_ids: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Verify the frozen four-variant producer inputs and file receipts."""
+
+    binding = _load_json_mapping(binding_path, "variant input binding")
+    _validate_source_receipt_mapping(source_receipt)
+    claimed_binding_hash = binding.get("receipt_sha256")
+    if not isinstance(claimed_binding_hash, str) or hashlib.sha256(
+        _canonical_bytes({key: value for key, value in binding.items() if key != "receipt_sha256"})
+    ).hexdigest() != claimed_binding_hash:
+        raise FutureValueTrainingError("variant input binding receipt changed")
+    if binding.get("source_receipt_sha256") != source_receipt.get("receipt_sha256"):
+        raise FutureValueTrainingError("variant input binding source receipt changed")
+    if binding.get("source_identity_sha256") != source_receipt.get("source_identity_sha256"):
+        raise FutureValueTrainingError("variant input binding source identity changed")
+    expected_ids = tuple(sorted(str(value) for value in (expected_game_ids or ())))
+    if expected_ids:
+        bound_ids = tuple(sorted(str(value) for value in binding.get("evaluation_game_ids", ())))
+        if bound_ids != expected_ids or binding.get("evaluation_game_identity_sha256") != identity_sha256(
+            bound_ids
+        ):
+            raise FutureValueTrainingError("variant input evaluation census changed")
+    producer_contract = binding.get("producer_contract")
+    if not isinstance(producer_contract, Mapping):
+        raise FutureValueTrainingError("variant input producer contract is missing")
+    expected_contract = {
+        "current_rating": "sequential strict-prior Dual Elo and exact-roster player Elo; same timestamp batch uses the prior timestamp state",
+        "same_timestamp_policy": "features for all maps at one timestamp are emitted before any map at that timestamp updates history",
+        "scaling_curve": "strict-prior player-champion checkpoint histories with champion fallback; current map checkpoint values update history after scoring",
+    }
+    if dict(producer_contract) != expected_contract:
+        raise FutureValueTrainingError("variant input producer contract changed")
+    files = binding.get("files")
+    if not isinstance(files, Mapping) or not files:
+        raise FutureValueTrainingError("variant input file receipts are missing")
+    verified_files: dict[str, dict[str, Any]] = {}
+    for label, record in files.items():
+        if not isinstance(record, Mapping):
+            raise FutureValueTrainingError(f"variant input file record is invalid: {label}")
+        path_value = record.get("path")
+        if not isinstance(path_value, str) or not path_value:
+            raise FutureValueTrainingError(f"variant input file path is missing: {label}")
+        path = Path(path_value)
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueTrainingError(f"variant input file is missing or unsafe: {label}")
+        expected_bytes = record.get("bytes")
+        expected_hash = str(record.get("sha256") or "")
+        if not isinstance(expected_bytes, int) or len(expected_hash) != 64:
+            raise FutureValueTrainingError(f"variant input file receipt is incomplete: {label}")
+        actual_bytes = path.stat().st_size
+        actual_hash = _sha256(path)
+        if actual_bytes != expected_bytes or actual_hash != expected_hash:
+            raise FutureValueTrainingError(f"variant input file changed: {label}")
+        verified_files[str(label)] = {
+            "path": str(path),
+            "bytes": actual_bytes,
+            "sha256": actual_hash,
+        }
+    source_file = verified_files.get("source_receipt")
+    if source_file is None:
+        raise FutureValueTrainingError("variant input source receipt file is missing")
+    source_path = Path(source_file["path"])
+    source_payload = _load_json_mapping(source_path, "variant input source receipt")
+    if source_payload.get("receipt_sha256") != source_receipt.get("receipt_sha256"):
+        raise FutureValueTrainingError("variant input source receipt payload changed")
+    matrix_file = verified_files.get("atomized_matrix")
+    manifest_file = verified_files.get("atomized_manifest")
+    if matrix_file is None or manifest_file is None:
+        raise FutureValueTrainingError("atomized producer files are incomplete")
+    manifest = _load_json_mapping(Path(manifest_file["path"]), "atomized producer manifest")
+    if manifest.get("matrix_sha256") != matrix_file["sha256"]:
+        raise FutureValueTrainingError("atomized matrix manifest hash changed")
+    if int(manifest.get("rows") or -1) != int(binding.get("evaluation_game_count") or -2):
+        raise FutureValueTrainingError("atomized matrix row count changed")
+    return {
+        "schema_version": binding.get("schema_version"),
+        "receipt_sha256": claimed_binding_hash,
+        "source_receipt_sha256": source_receipt.get("receipt_sha256"),
+        "evaluation_game_count": binding.get("evaluation_game_count"),
+        "evaluation_game_identity_sha256": binding.get("evaluation_game_identity_sha256"),
+        "files": verified_files,
+        "atomized_manifest_sha256": manifest_file["sha256"],
+        "atomized_matrix_sha256": matrix_file["sha256"],
+        "authority": {"research_only": True, "promotion": False, "deployment": False},
+    }
+
+
 def _row_game_ids(frame: pd.DataFrame, label: str) -> pd.Series:
     if "game_uid" in frame.columns:
         fallback = frame["gameid"] if "gameid" in frame.columns else None
@@ -430,6 +573,73 @@ def _row_game_ids(frame: pd.DataFrame, label: str) -> pd.Series:
     if ids.isna().any() or ids.str.strip().eq("").any():
         raise FutureValueTrainingError(f"{label} has an empty game identity")
     return ids
+
+
+def _code_hashes(repo_root: Path) -> dict[str, str]:
+    """Bind every producer module used by the four-way research run."""
+
+    paths = (
+        "lol_kills/research/future_value_rating.py",
+        "lol_kills/research/future_value_training.py",
+        "lol_kills/research/future_phase_curve.py",
+        "lol_kills/research/future_value_draft_score.py",
+    )
+    output: dict[str, str] = {}
+    for relative in paths:
+        path = repo_root / relative
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueTrainingError(f"model producer source is missing: {relative}")
+        output[relative] = _sha256(path)
+    return output
+
+
+def _load_feature_ledger_bundle(path: Path | None) -> Mapping[str, Any] | None:
+    """Load JSON ledger bundles with explicit per-variant fold bindings.
+
+    JSON is used because a parquet round trip drops ``DataFrame.attrs``, which
+    carry the producer receipt.  Every fold record must contain ``rows`` and
+    ``attrs``.  The caller still validates the complete binding in the rating
+    module before fitting.
+    """
+
+    if path is None:
+        return None
+    value = _load_json_mapping(path, "feature ledger bundle")
+    variants = value.get("variants")
+    if not isinstance(variants, Mapping):
+        raise FutureValueTrainingError("feature ledger bundle variants are missing")
+    bundle: dict[str, Any] = {}
+    for variant_name, variant_value in variants.items():
+        if not isinstance(variant_value, Mapping):
+            raise FutureValueTrainingError("feature ledger variant binding is invalid")
+        folds = variant_value.get("folds")
+        if not isinstance(folds, Mapping):
+            raise FutureValueTrainingError("feature ledger fold bindings are missing")
+        fold_bundle: dict[str, pd.DataFrame] = {}
+        for fold, record in folds.items():
+            if not isinstance(record, Mapping) or not isinstance(record.get("rows"), list):
+                raise FutureValueTrainingError("feature ledger fold record is invalid")
+            attrs = record.get("attrs")
+            if not isinstance(attrs, Mapping):
+                raise FutureValueTrainingError("feature ledger fold attrs are missing")
+            frame = pd.DataFrame(record["rows"])
+            frame.attrs = dict(attrs)
+            fold_bundle[str(fold)] = frame
+        bundle[str(variant_name)] = fold_bundle
+    return bundle
+
+
+def _resolve_variant_names(value: str | None) -> tuple[RatingVariant, ...] | None:
+    """Resolve one or all explicit rating variants for the CLI."""
+
+    if value is None or value.strip().casefold() in {"legacy", "current_ratings"}:
+        return None
+    if value.strip().casefold() == "all":
+        return tuple(RATING_VARIANT_ORDER)
+    try:
+        return (RatingVariant(value.strip()),)
+    except ValueError as error:
+        raise FutureValueTrainingError(f"unknown rating variant: {value}") from error
 
 
 def _git_output(repo_root: Path, *arguments: str) -> str:
@@ -454,11 +664,15 @@ def run_model_evaluation(
     runtime_receipt_path: Path,
     n_folds: int = 3,
     command: list[str] | None = None,
+    rating_variant: str | None = None,
+    feature_ledger_path: Path | None = None,
+    input_binding_path: Path | None = None,
 ) -> dict[str, Any]:
     """Run the frozen research model and emit a gate-grade runtime receipt."""
 
     freeze = _load_freeze(freeze_path)
     source_receipt = _load_json_mapping(source_receipt_path, "source receipt")
+    _validate_source_receipt_mapping(source_receipt)
     expected_receipt_hash = str(freeze["reference_source_receipt_sha256"])
     expected_receipt_file_hash = str(freeze.get("source_receipt_file_sha256") or "")
     expected_receipt_path = str(freeze.get("source_receipt_path") or "")
@@ -469,6 +683,12 @@ def run_model_evaluation(
     receipt_file_hash = _sha256(source_receipt_path)
     if receipt_file_hash != expected_receipt_file_hash:
         raise FutureValueTrainingError("source receipt file hash changed")
+    input_binding = None
+    if input_binding_path is not None:
+        input_binding = verify_variant_input_binding(
+            input_binding_path,
+            source_receipt=source_receipt,
+        )
 
     paths = {
         "maps": oe_root / "maps.parquet",
@@ -504,11 +724,20 @@ def run_model_evaluation(
         "lol_kills/research/future_value_training.py",
         "lol_kills/ratings/player_elo.py",
         "lol_kills/ratings/hierarchical_bt.py",
+        "lol_kills/research/future_phase_curve.py",
+        "lol_kills/research/future_value_draft_score.py",
     ]
     dirty_code = _git_output(repo_root, "status", "--porcelain", "--", *code_paths)
     if dirty_code:
         raise FutureValueTrainingError("model code has uncommitted changes")
     code_commit = _git_output(repo_root, "rev-parse", "HEAD")
+    producer_code_hashes = _code_hashes(repo_root)
+    selected_variants = _resolve_variant_names(rating_variant)
+    ledger_bundle = _load_feature_ledger_bundle(feature_ledger_path)
+    if selected_variants is not None and ledger_bundle is None:
+        raise FutureValueTrainingError(
+            "explicit rating variants require a per-variant feature ledger bundle"
+        )
     started_at = datetime.now(timezone.utc)
     started = time.perf_counter()
     try:
@@ -518,15 +747,58 @@ def run_model_evaluation(
     except (ImportError, RuntimeError):
         threadpools = []
     try:
-        result = evaluate_future_value(
-            frames["maps"],
-            frames["players"],
-            n_folds=int(n_folds),
-            source_receipt=source_receipt,
-            source_receipt_path=str(source_receipt_path),
-            source_receipt_file_sha256=receipt_file_hash,
-            runtime_receipt_path=str(runtime_receipt_path),
-        )
+        if selected_variants is None:
+            result: dict[str, Any] = evaluate_future_value(
+                frames["maps"],
+                frames["players"],
+                n_folds=int(n_folds),
+                source_receipt=source_receipt,
+                source_receipt_path=str(source_receipt_path),
+                source_receipt_file_sha256=receipt_file_hash,
+                runtime_receipt_path=str(runtime_receipt_path),
+            )
+        else:
+            variant_results: dict[str, Any] = {}
+            for variant in selected_variants:
+                variant_key = variant.value
+                variant_ledger = ledger_bundle.get(variant_key)
+                if not isinstance(variant_ledger, Mapping):
+                    raise FutureValueTrainingError(
+                        f"feature ledger bundle is missing variant: {variant_key}"
+                    )
+                variant_results[variant_key] = evaluate_future_value(
+                    frames["maps"],
+                    frames["players"],
+                    n_folds=int(n_folds),
+                    source_receipt=source_receipt,
+                    source_receipt_path=str(source_receipt_path),
+                    source_receipt_file_sha256=receipt_file_hash,
+                    runtime_receipt_path=str(runtime_receipt_path),
+                    variant=variant,
+                    feature_ledger=variant_ledger,
+                )
+            result = {
+                "schema_version": "scryglass:future-value-four-variant-evaluation:v1",
+                "variants": variant_results,
+                "variant_configs": {
+                    variant.value: rating_variant_config_receipt(variant)
+                    for variant in selected_variants
+                },
+                "source": {
+                    "source_as_of": source_receipt["source_as_of"],
+                    "source_game_count": source_receipt["source_game_count"],
+                    "source_identity_sha256": source_receipt["source_identity_sha256"],
+                    "source_receipt_sha256": source_receipt["receipt_sha256"],
+                },
+                "authority": {
+                    "research_only": True,
+                    "public_player_rating": False,
+                    "public_team_rating": False,
+                    "public_probability": False,
+                    "deployment": False,
+                    "promotion": False,
+                },
+            }
     except FutureValueSourceError as error:
         raise FutureValueTrainingError(str(error)) from error
     result["source"]["normalized_source_files"] = {
@@ -543,6 +815,10 @@ def run_model_evaluation(
         "entrypoint": "lol_kills.research.future_value_training.run_model_evaluation",
         "command": list(command or []),
         "code_commit": code_commit,
+        "producer_code_hashes": producer_code_hashes,
+        "rating_variant": rating_variant or "legacy",
+        "feature_ledger_path": str(feature_ledger_path) if feature_ledger_path else None,
+        "input_binding": input_binding,
         "started_at": started_at.isoformat().replace("+00:00", "Z"),
         "completed_at": completed_at.isoformat().replace("+00:00", "Z"),
         "elapsed_seconds": float(elapsed),
@@ -587,8 +863,22 @@ def run_model_evaluation(
             "path": str(model_output_path),
             "bytes": model_output_path.stat().st_size,
             "sha256": output_hash,
-            "prediction_ledger_sha256": result["prediction_ledger"]["sha256"],
-            "prediction_ledger_rows": result["prediction_ledger"]["row_count"],
+            "prediction_ledger_sha256": (
+                result.get("prediction_ledger", {}).get("sha256")
+                if selected_variants is None
+                else {
+                    key: value.get("prediction_ledger", {}).get("sha256")
+                    for key, value in result.get("variants", {}).items()
+                }
+            ),
+            "prediction_ledger_rows": (
+                result.get("prediction_ledger", {}).get("row_count")
+                if selected_variants is None
+                else {
+                    key: value.get("prediction_ledger", {}).get("row_count")
+                    for key, value in result.get("variants", {}).items()
+                }
+            ),
         },
         "authority": {
             "research_only": True,
@@ -620,6 +910,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model-output", type=Path)
     parser.add_argument("--runtime-receipt", type=Path)
     parser.add_argument("--n-folds", type=int, default=3)
+    parser.add_argument(
+        "--rating-variant",
+        "--variants",
+        default=None,
+        choices=("legacy", "current_only", "future_player_form", "scaling_curve", "both", "all"),
+        help="run the legacy model, one registered variant, or all four variants",
+    )
+    parser.add_argument(
+        "--feature-ledger-bundle",
+        type=Path,
+        help="JSON bundle with independently bound per-variant fold ledgers",
+    )
+    parser.add_argument(
+        "--input-binding",
+        type=Path,
+        help="frozen current-rating and atomized producer input binding",
+    )
     args = parser.parse_args(argv)
     try:
         if args.fit_model:
@@ -639,6 +946,9 @@ def main(argv: list[str] | None = None) -> int:
                 model_output_path=args.model_output,
                 runtime_receipt_path=args.runtime_receipt,
                 n_folds=args.n_folds,
+                rating_variant=args.rating_variant,
+                feature_ledger_path=args.feature_ledger_bundle,
+                input_binding_path=args.input_binding,
                 command=[
                     sys.executable,
                     "-m",
@@ -683,5 +993,6 @@ __all__ = [
     "verify_annual_sources",
     "verify_bridge_sources",
     "verify_research_source",
+    "verify_variant_input_binding",
     "run_model_evaluation",
 ]

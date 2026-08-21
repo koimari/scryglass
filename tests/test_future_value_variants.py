@@ -25,8 +25,12 @@ from lol_kills.research.future_value_rating import (
     rating_variant_config_receipt,
     rating_variant_config_sha256,
     rating_variant_registry_receipt,
+    rating_feature_values_sha256,
+    trusted_feature_producer_receipt,
     validate_rating_feature_ledger,
 )
+from lol_kills.research import future_value_training as training_module
+from lol_kills.research.future_value_training import FutureValueTrainingError
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
@@ -208,6 +212,36 @@ def _variant_design() -> pd.DataFrame:
     return frame
 
 
+def _bound_current_ledger(game_ids: list[str], source: dict[str, object]) -> pd.DataFrame:
+    raw = pd.DataFrame(
+        {
+            "game_id": game_ids,
+            "date": pd.date_range("2026-01-01", periods=len(game_ids), tz="UTC"),
+            "series_id": [f"series-{value}" for value in game_ids],
+            **{
+                feature: np.linspace(0.1, 1.0, len(game_ids))
+                for feature in CURRENT_RATING_SIGNED_MAP_FEATURES
+            },
+        }
+    )
+    train_count = max(1, len(game_ids) // 2)
+    return bind_rating_feature_ledger(
+        raw,
+        source_receipt=source,
+        train_game_ids=game_ids[:train_count],
+        validation_game_ids=game_ids[train_count:],
+        fit_window_end=pd.Timestamp("2026-01-01", tz="UTC")
+        + pd.Timedelta(days=train_count),
+        feature_names=CURRENT_RATING_SIGNED_MAP_FEATURES,
+        producer=trusted_feature_producer_receipt(
+            "current_sequential_rating",
+            row_values_sha256=rating_feature_values_sha256(
+                raw, CURRENT_RATING_SIGNED_MAP_FEATURES
+            ),
+        ),
+    )
+
+
 def test_four_variant_matrices_select_different_registered_families() -> None:
     design = _variant_design()
     matrices = {
@@ -233,14 +267,25 @@ def test_fold_bound_ledger_receipt_binds_source_cutoff_and_features() -> None:
     game_ids = ["g1", "g2", "g3", "g4"]
     source = _source_receipt(game_ids)
     features = tuple(CURRENT_RATING_SIGNED_MAP_FEATURES)
-    raw = pd.DataFrame({"game_id": game_ids, **{name: [1.0, 2.0, 3.0, 4.0] for name in features}})
+    raw = pd.DataFrame(
+        {
+            "game_id": game_ids,
+            "date": pd.date_range("2026-01-01", periods=4, tz="UTC"),
+            "series_id": ["s1", "s1", "s2", "s2"],
+            **{name: [1.0, 2.0, 3.0, 4.0] for name in features},
+        }
+    )
     ledger = bind_rating_feature_ledger(
         raw,
         source_receipt=source,
         train_game_ids=["g1", "g2"],
         fit_window_end="2026-01-03T00:00:00Z",
         feature_names=features,
-        producer={"name": "fixture"},
+        producer=trusted_feature_producer_receipt(
+            "current_sequential_rating",
+            row_values_sha256=rating_feature_values_sha256(raw, features),
+        ),
+        validation_game_ids=["g3", "g4"],
     )
     bound = validate_rating_feature_ledger(
         ledger,
@@ -282,3 +327,118 @@ def test_signed_variants_reject_missing_or_arbitrary_external_ledger() -> None:
             fit_window_end="2026-01-02T00:00:00Z",
             feature_names=("unknown_feature",),
         )
+
+
+def test_producer_receipt_rejects_self_issued_adapter_and_target_mutation() -> None:
+    game_ids = ["g1", "g2", "g3", "g4"]
+    source = _source_receipt(game_ids)
+    features = tuple(CURRENT_RATING_SIGNED_MAP_FEATURES)
+    raw = pd.DataFrame(
+        {
+            "game_id": game_ids,
+            "date": pd.date_range("2026-01-01", periods=4, tz="UTC"),
+            "series_id": ["s1", "s1", "s2", "s2"],
+            **{name: [1.0, 2.0, 3.0, 4.0] for name in features},
+        }
+    )
+    with pytest.raises(FutureValueSourceError, match="declaration"):
+        bind_rating_feature_ledger(
+            raw,
+            source_receipt=source,
+            train_game_ids=["g1", "g2"],
+            validation_game_ids=["g3", "g4"],
+            fit_window_end="2026-01-03T00:00:00Z",
+            feature_names=features,
+            producer={
+                **trusted_feature_producer_receipt(
+                    "current_sequential_rating",
+                    row_values_sha256=rating_feature_values_sha256(raw, features),
+                ),
+                "implementation_sha256": "f" * 64,
+            },
+        )
+    ledger = bind_rating_feature_ledger(
+        raw,
+        source_receipt=source,
+        train_game_ids=["g1", "g2"],
+        validation_game_ids=["g3", "g4"],
+        fit_window_end="2026-01-03T00:00:00Z",
+        feature_names=features,
+        producer=trusted_feature_producer_receipt(
+            "current_sequential_rating",
+            row_values_sha256=rating_feature_values_sha256(raw, features),
+        ),
+    )
+    mutated = ledger.copy()
+    mutated.loc[mutated["game_id"] == "g3", features[0]] = 0.0
+    with pytest.raises(FutureValueSourceError, match="row hash|feature values"):
+        validate_rating_feature_ledger(
+            mutated,
+            feature_names=features,
+            model_game_ids=game_ids,
+            train_game_ids=["g1", "g2"],
+            fit_window_end="2026-01-03T00:00:00Z",
+            source_receipt=source,
+        )
+
+
+def test_signed_map_side_swap_negates_every_variant_feature() -> None:
+    design = _variant_design()
+    for variant in RatingVariant:
+        config = get_rating_variant_config(variant)
+        original = build_rating_variant_matrix(design, variant)
+        swapped = design.copy()
+        for feature in config.signed_map_features:
+            swapped[feature] = -swapped[feature]
+        for feature in config.side_level_features:
+            blue = swapped[f"__blue_{feature}"].copy()
+            swapped[f"__blue_{feature}"] = swapped[f"__red_{feature}"].to_numpy()
+            swapped[f"__red_{feature}"] = blue.to_numpy()
+        assert np.allclose(
+            build_rating_variant_matrix(swapped, variant),
+            -original,
+            atol=1e-12,
+        )
+
+
+def test_training_variant_selector_is_exact_and_all_is_complete() -> None:
+    assert training_module._resolve_variant_names("legacy") is None
+    assert training_module._resolve_variant_names("current_ratings") is None
+    assert training_module._resolve_variant_names("current_only") == (
+        RatingVariant.CURRENT_ONLY,
+    )
+    assert training_module._resolve_variant_names("all") == tuple(RatingVariant)
+    with pytest.raises(FutureValueTrainingError, match="unknown rating variant"):
+        training_module._resolve_variant_names("future_player_form_v2")
+
+
+def test_training_cli_passes_one_or_all_variant_contract(monkeypatch, tmp_path) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run(**kwargs):
+        calls.append(kwargs)
+        return {"authority": {"research_only": True}}
+
+    monkeypatch.setattr(training_module, "run_model_evaluation", fake_run)
+    assert (
+        training_module.main(
+            [
+                "--fit-model",
+                "--oe-root",
+                str(tmp_path),
+                "--source-receipt",
+                str(tmp_path / "source.json"),
+                "--model-output",
+                str(tmp_path / "model.json"),
+                "--runtime-receipt",
+                str(tmp_path / "runtime.json"),
+                "--rating-variant",
+                "all",
+                "--feature-ledger-bundle",
+                str(tmp_path / "ledgers.json"),
+            ]
+        )
+        == 0
+    )
+    assert calls[0]["rating_variant"] == "all"
+    assert calls[0]["feature_ledger_path"] == tmp_path / "ledgers.json"
