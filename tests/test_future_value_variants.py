@@ -300,6 +300,9 @@ def _durable_manifest(
     native_frame.to_parquet(native_artifact_path, index=False)
     train_ids = sorted(str(value) for value in raw["game_id"].iloc[: len(raw) // 2])
     validation_ids = sorted(str(value) for value in raw["game_id"].iloc[len(raw) // 2 :])
+    series_by_game = native_frame.set_index(native_frame["game_id"].astype(str))["series_id"]
+    train_series_ids = sorted(set(series_by_game.loc[train_ids].astype(str)))
+    validation_series_ids = sorted(set(series_by_game.loc[validation_ids].astype(str)))
     native_artifact = {
         "path": str(native_artifact_path.resolve()),
         "bytes": native_artifact_path.stat().st_size,
@@ -326,13 +329,19 @@ def _durable_manifest(
             "validation_game_ids": validation_ids,
             "validation_game_count": len(validation_ids),
             "validation_game_identity_sha256": identity_sha256(validation_ids),
-            "train_series_ids": ["s1"],
-            "train_series_count": 1,
-            "train_series_identity_sha256": identity_sha256(["s1"]),
-            "validation_series_ids": ["s2"],
-            "validation_series_count": 1,
-            "validation_series_identity_sha256": identity_sha256(["s2"]),
+            "train_series_ids": train_series_ids,
+            "train_series_count": len(train_series_ids),
+            "train_series_identity_sha256": identity_sha256(train_series_ids),
+            "validation_series_ids": validation_series_ids,
+            "validation_series_count": len(validation_series_ids),
+            "validation_series_identity_sha256": identity_sha256(validation_series_ids),
             "series_disjoint": True,
+            "series_partition_source": "conservative_series_superset",
+            "series_partition_key_fields": [
+                "league",
+                "tournament",
+                "unordered_team_pair",
+            ],
             "state_key_policy": dict(_RECEIPT_STATE_KEY_POLICY),
             "fit_window_end": _utc_text("2026-01-03T00:00:00Z"),
             "strict_prior_timing": "train_outcomes_only_strictly_before_cutoff",
