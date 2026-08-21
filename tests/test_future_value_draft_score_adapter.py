@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from lol_kills.research.future_value_draft_score import FutureValueDraftScoreError
+from lol_kills.research.future_value_draft_score import (
+    DraftScoreProducerBinding,
+    FutureValueDraftScoreError,
+    validate_producer_binding,
+)
 from lol_kills.research.future_value_draft_score_adapter import (
     DraftScoreAdapterError,
     adapt_public_crossfit_draft_rows,
@@ -37,8 +41,10 @@ def _public_files(
     *,
     fit_through: str = "2026-02-03T00:00:00Z",
     ids: list[str] | None = None,
+    draft_ids: list[str] | None = None,
 ) -> tuple[Path, Path, Path]:
     ids = ids or ["game-1", "game-2"]
+    draft_ids = draft_ids or ids
     source_file = tmp_path / "accepted-census.csv"
     source_raw = b"game-1\ngame-2\n"
     source_file.write_bytes(source_raw)
@@ -75,7 +81,7 @@ def _public_files(
                 "total": 15.0 if game_id == "game-1" else 16.0,
             },
         }
-        for game_id in ids
+        for game_id in draft_ids
     }
     draft = {
         "schema_version": "scryglass:draft-records:v1",
@@ -188,6 +194,41 @@ def test_frozen_public_pack_adapts_as_coverage_scoped_evidence(tmp_path: Path) -
     assert result.static_atom_receipt["coverage_game_count"] == len(result.frame)
     assert result.static_atom_receipt["coverage_game_ids"] == list(result.frame["game_id"])
     assert result.chronological_evaluation_suitable is False
+    authority = verify_public_descriptive_authority(
+        repository_root
+        / "data/lol/v2/evaluation/composition-descriptive-authority.json",
+        repository_root=repository_root,
+    )
+    ledger = write_source_bound_atom_ledger(
+        result,
+        tmp_path / "real-pack-atoms.json",
+        authority=authority,
+        fold_id="descriptive-public-pack",
+        fit_game_ids=[],
+        fit_window_end="2026-07-18T16:33:48Z",
+    )
+    assert ledger.row_count == len(result.frame)
+    assert ledger.receipt["evidence_mode"] == "descriptive_only"
+    loaded = load_source_bound_atom_ledger(
+        ledger.ledger_path,
+        ledger.receipt_path,
+        source_receipt=result.source_receipt,
+        authority=authority,
+        expected_fold_id="descriptive-public-pack",
+    )
+    assert len(loaded) == 2051
+    with pytest.raises(DraftScoreAdapterError, match="fit and scored"):
+        write_source_bound_atom_ledger(
+            result,
+            tmp_path / "invalid-overlap-atoms.json",
+            authority=authority,
+            fold_id="invalid-overlap",
+            fit_game_ids=[str(result.frame.iloc[0]["game_id"])],
+            fit_window_end="2026-07-18T16:33:48Z",
+            fit_game_dates={
+                str(result.frame.iloc[0]["game_id"]): "2026-01-01T00:00:00Z"
+            },
+        )
 
 
 def test_independent_descriptive_authority_binds_model_recipe_and_scorer() -> None:
@@ -204,7 +245,12 @@ def test_independent_descriptive_authority_binds_model_recipe_and_scorer() -> No
 
 
 def test_verified_adapter_writes_source_bound_atom_ledger(tmp_path: Path) -> None:
-    draft_path, manifest_path, source_path = _public_files(tmp_path, fit_through="2026-02-01T00:00:00Z")
+    draft_path, manifest_path, source_path = _public_files(
+        tmp_path,
+        fit_through="2026-02-01T00:00:00Z",
+        ids=["fit-0", "game-1", "game-2"],
+        draft_ids=["game-1", "game-2"],
+    )
     model_path = tmp_path / "model.json"
     recipe_path = tmp_path / "recipe.json"
     scorer_path = tmp_path / "scorer.py"
@@ -251,10 +297,10 @@ def test_verified_adapter_writes_source_bound_atom_ledger(tmp_path: Path) -> Non
         tmp_path / "ledger" / "atoms.json",
         authority=verify_public_descriptive_authority(authority_path, repository_root=tmp_path),
         fold_id="fold-1",
-        fit_game_ids=["game-1"],
+        fit_game_ids=["fit-0"],
         fit_window_start="2026-01-30T00:00:00Z",
         fit_window_end="2026-02-01T00:00:00Z",
-        fit_game_dates={"game-1": "2026-01-31T00:00:00Z"},
+        fit_game_dates={"fit-0": "2026-01-31T00:00:00Z"},
     )
     assert ledger.row_count == 2
     assert ledger.ledger_path.is_file()
@@ -275,6 +321,8 @@ def test_verified_adapter_keeps_overlapping_static_fit_blocked(tmp_path: Path) -
     draft_path, manifest_path, source_path = _public_files(
         tmp_path,
         fit_through="2026-02-03T00:00:00Z",
+        ids=["fit-0", "game-1", "game-2"],
+        draft_ids=["game-1", "game-2"],
     )
     repository_root = Path(__file__).resolve().parents[1]
     authority_path = (
@@ -300,16 +348,37 @@ def test_verified_adapter_keeps_overlapping_static_fit_blocked(tmp_path: Path) -
         output_dir=tmp_path / "adapter",
     )
     assert result.chronological_evaluation_suitable is False
-    with pytest.raises(DraftScoreAdapterError, match="chronologically suitable"):
-        write_source_bound_atom_ledger(
-            result,
-            tmp_path / "blocked-atoms.json",
-            authority=authority,
-            fold_id="fold-blocked",
-            fit_game_ids=["game-1"],
-            fit_window_end="2026-02-01T00:00:00Z",
-            fit_game_dates={"game-1": "2026-01-31T00:00:00Z"},
-        )
+    ledger = write_source_bound_atom_ledger(
+        result,
+        tmp_path / "blocked-atoms.json",
+        authority=authority,
+        fold_id="fold-blocked",
+        fit_game_ids=["fit-0"],
+        fit_window_end="2026-02-03T00:00:00Z",
+        fit_game_dates={"fit-0": "2026-01-31T00:00:00Z"},
+    )
+    binding = DraftScoreProducerBinding.create(
+        source_receipt=result.source_receipt,
+        accepted_game_ids=result.source_receipt["accepted_game_ids"],
+        fit_game_ids=["fit-0"],
+        fit_window_end="2026-02-03T00:00:00Z",
+        fit_game_dates={"fit-0": "2026-01-31T00:00:00Z"},
+        fold_id="fold-blocked",
+        producer="public_descriptive_draft_records",
+        producer_family="static_composition",
+        series_safe_evidence={
+            "series_safe": True,
+            "fit_validation_disjoint": True,
+            "source_type": "public_pack",
+            "series_column": "game_id",
+            "cluster_identity_sha256": result.source_receipt["source_identity_sha256"],
+        },
+        source_receipt_path=result.source_receipt_path,
+        source_root=tmp_path,
+        producer_receipt_path=ledger.producer_receipt_path,
+    )
+    with pytest.raises(FutureValueDraftScoreError, match="strictly prior"):
+        validate_producer_binding(result.frame, binding)
 
 
 def test_crossfit_adapter_maps_public_component_rows(tmp_path: Path) -> None:

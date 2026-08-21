@@ -115,6 +115,9 @@ COEFFICIENT_RECEIPT_SCHEMA = "scryglass:future-value-draft-score-coefficients:v1
 MODEL_RECEIPT_SCHEMA = "scryglass:future-value-draft-score-model-receipt:v1"
 MODEL_ARTIFACT_SCHEMA = "scryglass:future-value-draft-score-linear-model:v1"
 MODEL_TRAINER_ID = "scryglass.future_value_draft_score.linear_logit.v1"
+PREDICTION_FEATURE_ARTIFACT_SCHEMA = (
+    "scryglass:future-value-draft-score-feature-matrix:v1"
+)
 PREDICTION_LEDGER_SCHEMA = "scryglass:future-value-draft-score-prediction-ledger:v2"
 _ALLOWED_PRODUCER_TIMINGS = frozenset(
     {"pregame_strict_prior", "cross_fitted_pregame", "strict_prior_pregame"}
@@ -255,6 +258,11 @@ _PREDICTION_LEDGER_REQUIRED_FIELDS = frozenset(
         "model_artifact_bytes",
         "model_artifact_sha256",
         "model_implementation_sha256",
+        "feature_artifact_locator",
+        "feature_artifact_bytes",
+        "feature_artifact_sha256",
+        "feature_names",
+        "feature_rows_sha256",
         "row_digest_sha256",
         "artifact_locator",
         "artifact_bytes",
@@ -2193,6 +2201,141 @@ def write_fitted_prediction_model(
     return artifact_path, receipt_path
 
 
+def write_prediction_feature_artifact(
+    output_path: Path | str,
+    design: DraftScoreVariantDesign,
+) -> Path:
+    """Write the source-bound feature matrix used by an independent scorer."""
+
+    config = draft_score_variant_config(design.variant)
+    if tuple(design.feature_frame.columns) != config.feature_names:
+        raise FutureValueDraftScoreError("prediction feature matrix columns changed")
+    rows: list[dict[str, Any]] = []
+    for game_id, values in zip(
+        design.game_ids,
+        design.feature_frame.to_numpy(dtype=float),
+    ):
+        if not np.isfinite(values).all():
+            raise FutureValueDraftScoreError("prediction feature matrix is not finite")
+        rows.append(
+            {
+                "game_id": str(game_id),
+                "features": {
+                    name: float(value)
+                    for name, value in zip(config.feature_names, values)
+                },
+            }
+        )
+    payload = {
+        "schema_version": PREDICTION_FEATURE_ARTIFACT_SCHEMA,
+        "authority": {"research_only": True},
+        "variant": design.variant.value,
+        "source_receipt_sha256": design.source_binding.source_receipt_sha256,
+        "source_identity_sha256": design.source_binding.source_identity_sha256,
+        "fold_id": design.source_binding.fold_id,
+        "game_ids": list(design.game_ids),
+        "feature_names": list(config.feature_names),
+        "feature_rows_sha256": _sha256(rows),
+        "rows": rows,
+    }
+    output = Path(output_path).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(_canonical_json_bytes(payload) + b"\n")
+    return output
+
+
+def _load_prediction_feature_artifact(
+    path: Path,
+    *,
+    expected_source_receipt_sha256: str,
+    expected_source_identity_sha256: str,
+    expected_fold_id: str,
+    expected_variant: DraftScoreVariant,
+) -> tuple[tuple[str, ...], tuple[str, ...], np.ndarray, str, int, str]:
+    payload, raw = _load_json_file(path, "prediction feature artifact")
+    fields = {
+        "schema_version",
+        "authority",
+        "variant",
+        "source_receipt_sha256",
+        "source_identity_sha256",
+        "fold_id",
+        "game_ids",
+        "feature_names",
+        "feature_rows_sha256",
+        "rows",
+    }
+    if set(payload) != fields or payload.get("schema_version") != PREDICTION_FEATURE_ARTIFACT_SCHEMA:
+        raise FutureValueDraftScoreError("prediction feature artifact schema is invalid")
+    if payload.get("authority") != {"research_only": True}:
+        raise FutureValueDraftScoreError("prediction feature artifact authority is invalid")
+    if str(payload.get("variant")) != expected_variant.value:
+        raise FutureValueDraftScoreError("prediction feature artifact variant changed")
+    if str(payload.get("source_receipt_sha256")).lower() != _require_hash(
+        expected_source_receipt_sha256, "source_receipt_sha256"
+    ):
+        raise FutureValueDraftScoreError("prediction feature artifact source changed")
+    if str(payload.get("source_identity_sha256")).lower() != _require_hash(
+        expected_source_identity_sha256, "source_identity_sha256"
+    ):
+        raise FutureValueDraftScoreError("prediction feature artifact census changed")
+    if str(payload.get("fold_id")) != str(expected_fold_id):
+        raise FutureValueDraftScoreError("prediction feature artifact fold changed")
+    raw_ids = payload.get("game_ids")
+    if not isinstance(raw_ids, list):
+        raise FutureValueDraftScoreError("prediction feature artifact game IDs are invalid")
+    game_ids = _normalise_ids(raw_ids, "prediction feature artifact game IDs")
+    if tuple(str(value) for value in raw_ids) != game_ids:
+        raise FutureValueDraftScoreError("prediction feature artifact game IDs are not canonical")
+    config = draft_score_variant_config(expected_variant)
+    feature_names = tuple(str(value) for value in payload.get("feature_names", ()))
+    if feature_names != config.feature_names:
+        raise FutureValueDraftScoreError("prediction feature artifact features changed")
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or len(rows) != len(game_ids):
+        raise FutureValueDraftScoreError("prediction feature artifact rows are invalid")
+    parsed_rows: list[dict[str, Any]] = []
+    matrix: list[list[float]] = []
+    for expected_game_id, row in zip(game_ids, rows):
+        if not isinstance(row, Mapping) or set(row) != {"game_id", "features"}:
+            raise FutureValueDraftScoreError("prediction feature artifact row schema is invalid")
+        if str(row["game_id"]) != expected_game_id:
+            raise FutureValueDraftScoreError("prediction feature artifact row order changed")
+        features = row.get("features")
+        if not isinstance(features, Mapping) or set(features) != set(feature_names):
+            raise FutureValueDraftScoreError("prediction feature artifact row features are invalid")
+        try:
+            values = [float(features[name]) for name in feature_names]
+        except (TypeError, ValueError) as error:
+            raise FutureValueDraftScoreError(
+                "prediction feature artifact row values are invalid"
+            ) from error
+        if not all(math.isfinite(value) for value in values):
+            raise FutureValueDraftScoreError("prediction feature artifact row values are invalid")
+        parsed_rows.append(
+            {
+                "game_id": expected_game_id,
+                "features": {
+                    name: value for name, value in zip(feature_names, values)
+                },
+            }
+        )
+        matrix.append(values)
+    rows_hash = _sha256(parsed_rows)
+    if rows_hash != _require_hash(
+        payload.get("feature_rows_sha256"), "prediction feature_rows_sha256"
+    ):
+        raise FutureValueDraftScoreError("prediction feature artifact rows changed")
+    return (
+        game_ids,
+        feature_names,
+        np.asarray(matrix, dtype=float),
+        hashlib.sha256(raw).hexdigest(),
+        len(raw),
+        rows_hash,
+    )
+
+
 def _validate_prediction_model_receipt(
     receipt_path: Path,
     *,
@@ -2204,7 +2347,7 @@ def _validate_prediction_model_receipt(
     expected_model_id: str,
     expected_coefficient_sha256: str,
     expected_variant: str | None,
-) -> tuple[dict[str, Any], str, str]:
+) -> tuple[dict[str, Any], str, str, dict[str, Any]]:
     """Verify the independent fitted-model receipt named by a ledger."""
 
     payload, raw = _load_json_file(receipt_path, "prediction model receipt")
@@ -2352,13 +2495,12 @@ def _validate_prediction_model_receipt(
         raise FutureValueDraftScoreError(
             "prediction model artifact parameters differ from coefficient receipt"
         )
-    return payload, hashlib.sha256(raw).hexdigest(), artifact_hash
+    return payload, hashlib.sha256(raw).hexdigest(), artifact_hash, artifact_payload
 
 
 def write_independent_prediction_ledger(
     output_path: Path | str,
-    game_ids: Sequence[object],
-    model_logits: Sequence[object],
+    feature_artifact_path: Path | str,
     *,
     source_receipt_sha256: str,
     source_identity_sha256: str,
@@ -2368,38 +2510,29 @@ def write_independent_prediction_ledger(
     model_id: str,
     coefficient_sha256: str,
     model_receipt_path: Path | str,
-    variant: DraftScoreVariant | RatingVariant | str | None = None,
+    variant: DraftScoreVariant | RatingVariant | str,
 ) -> tuple[Path, Path]:
-    """Write a receipt-bound prediction artifact from an external model run.
+    """Apply a verified model to a durable independent feature artifact.
 
-    The model receipt and model artifact are verified before the prediction
-    rows are written.  The returned paths can be passed to
-    :func:`score_draft_score_variant`.
+    Caller-supplied logits are outside this interface.  This function loads
+    exact feature bytes, applies the pinned linear model, and binds both input
+    artifacts into the prediction receipt.
     """
 
-    raw_ids = tuple(str(value) for value in game_ids)
-    ids = _normalise_ids(raw_ids, "prediction ledger game IDs")
-    if raw_ids != ids:
-        raise FutureValueDraftScoreError("prediction ledger game IDs are not canonical")
     fit_ids = _normalise_ids(fit_game_ids, "prediction ledger fit game IDs")
-    values: list[float] = []
-    for value in model_logits:
-        try:
-            parsed = float(value)
-        except (TypeError, ValueError) as error:
-            raise FutureValueDraftScoreError("prediction ledger values are invalid") from error
-        if not math.isfinite(parsed):
-            raise FutureValueDraftScoreError("prediction ledger values are not finite")
-        values.append(parsed)
-    if len(values) != len(ids):
-        raise FutureValueDraftScoreError("prediction ledger row count does not match game IDs")
     source_hash = _require_hash(source_receipt_sha256, "source_receipt_sha256")
     source_identity = _require_hash(source_identity_sha256, "source_identity_sha256")
     coefficient_hash = _require_hash(coefficient_sha256, "coefficient_sha256")
     if not str(fold_id).strip() or not str(fit_id).strip() or not str(model_id).strip():
         raise FutureValueDraftScoreError("prediction ledger model identity is required")
+    canonical_variant = _canonical_variant(variant)
     model_path = _regular_file(model_receipt_path, "prediction model receipt")
-    model_payload, model_receipt_hash, model_artifact_hash = _validate_prediction_model_receipt(
+    (
+        model_payload,
+        model_receipt_hash,
+        model_artifact_hash,
+        model_artifact_payload,
+    ) = _validate_prediction_model_receipt(
         model_path,
         expected_source_receipt_sha256=source_hash,
         expected_source_identity_sha256=source_identity,
@@ -2408,14 +2541,40 @@ def write_independent_prediction_ledger(
         expected_fit_id=str(fit_id),
         expected_model_id=str(model_id),
         expected_coefficient_sha256=coefficient_hash,
-        expected_variant=None if variant is None else _canonical_variant(variant).value,
+        expected_variant=canonical_variant.value,
     )
+    feature_path = _regular_file(feature_artifact_path, "prediction feature artifact")
+    (
+        ids,
+        feature_names,
+        feature_matrix,
+        feature_artifact_hash,
+        feature_artifact_bytes,
+        feature_rows_hash,
+    ) = _load_prediction_feature_artifact(
+        feature_path,
+        expected_source_receipt_sha256=source_hash,
+        expected_source_identity_sha256=source_identity,
+        expected_fold_id=str(fold_id),
+        expected_variant=canonical_variant,
+    )
+    if set(ids) & set(fit_ids):
+        raise FutureValueDraftScoreError(
+            "prediction feature and model fit game IDs overlap"
+        )
+    coefficients = {
+        name: float(model_artifact_payload["coefficients"][name])
+        for name in feature_names
+    }
+    values = _linear_model_logits(feature_names, coefficients, feature_matrix)
+    if values.shape != (len(ids),) or not np.isfinite(values).all():
+        raise FutureValueDraftScoreError("prediction model produced invalid logits")
     implementation_hash = _require_hash(
         model_payload["implementation_sha256"], "model_implementation_sha256"
     )
     rows = [
         {"game_id": game_id, "model_logit": value}
-        for game_id, value in zip(ids, values)
+        for game_id, value in zip(ids, values.tolist())
     ]
     row_digest = _sha256(rows)
     output = Path(output_path).expanduser()
@@ -2441,6 +2600,11 @@ def write_independent_prediction_ledger(
         "model_artifact_bytes": model_payload["artifact_bytes"],
         "model_artifact_sha256": model_artifact_hash,
         "model_implementation_sha256": implementation_hash,
+        "feature_artifact_locator": str(feature_path),
+        "feature_artifact_bytes": feature_artifact_bytes,
+        "feature_artifact_sha256": feature_artifact_hash,
+        "feature_names": list(feature_names),
+        "feature_rows_sha256": feature_rows_hash,
         "row_digest_sha256": row_digest,
         "artifact_locator": output.name,
         "artifact_bytes": len(artifact_raw),
@@ -2572,7 +2736,14 @@ def _prediction_ledger_values(
         raise FutureValueDraftScoreError("prediction ledger fit IDs are not canonical")
     if receipt_payload["fit_game_identity_sha256"] != identity_sha256(tuple(str(value) for value in fit_ids)):
         raise FutureValueDraftScoreError("prediction ledger fit identity changed")
-    model_payload, expected_model_receipt_hash, model_artifact_hash = _validate_prediction_model_receipt(
+    if set(str(value) for value in fit_ids) & set(expected_ids):
+        raise FutureValueDraftScoreError("prediction ledger fit and scored game IDs overlap")
+    (
+        model_payload,
+        expected_model_receipt_hash,
+        model_artifact_hash,
+        model_artifact_payload,
+    ) = _validate_prediction_model_receipt(
         model_receipt_path,
         expected_source_receipt_sha256=str(receipt_payload["source_receipt_sha256"]),
         expected_source_identity_sha256=str(receipt_payload["source_identity_sha256"]),
@@ -2591,6 +2762,47 @@ def _prediction_ledger_values(
         raise FutureValueDraftScoreError("prediction model artifact binding changed")
     if str(receipt_payload["model_implementation_sha256"]).lower() != str(model_payload["implementation_sha256"]).lower():
         raise FutureValueDraftScoreError("prediction model implementation changed")
+    if variant is None:
+        raise FutureValueDraftScoreError("prediction ledger variant binding is required")
+    canonical_variant = _canonical_variant(variant)
+    feature_path = _safe_locator(
+        receipt_payload["feature_artifact_locator"],
+        base=receipt_path.parent,
+        field="prediction feature artifact",
+    )
+    feature_hash = _verify_file_digest(
+        feature_path,
+        expected_bytes=receipt_payload["feature_artifact_bytes"],
+        expected_sha256=receipt_payload["feature_artifact_sha256"],
+        field="prediction feature artifact",
+    )
+    (
+        feature_ids,
+        feature_names,
+        feature_matrix,
+        expected_feature_hash,
+        _feature_bytes,
+        feature_rows_hash,
+    ) = _load_prediction_feature_artifact(
+        feature_path,
+        expected_source_receipt_sha256=str(receipt_payload["source_receipt_sha256"]),
+        expected_source_identity_sha256=str(receipt_payload["source_identity_sha256"]),
+        expected_fold_id=str(receipt_payload["fold_id"]),
+        expected_variant=canonical_variant,
+    )
+    if feature_hash != expected_feature_hash or feature_ids != expected_ids:
+        raise FutureValueDraftScoreError("prediction feature artifact binding changed")
+    if list(feature_names) != receipt_payload["feature_names"]:
+        raise FutureValueDraftScoreError("prediction feature names changed")
+    if feature_rows_hash != str(receipt_payload["feature_rows_sha256"]).lower():
+        raise FutureValueDraftScoreError("prediction feature rows changed")
+    model_coefficients = {
+        name: float(model_artifact_payload["coefficients"][name])
+        for name in feature_names
+    }
+    expected_logits = _linear_model_logits(
+        feature_names, model_coefficients, feature_matrix
+    )
 
     parsed: list[dict[str, Any]] = []
     for row in rows:
@@ -2610,6 +2822,10 @@ def _prediction_ledger_values(
     if row_digest != _require_hash(receipt_payload["row_digest_sha256"], "prediction ledger row_digest_sha256"):
         raise FutureValueDraftScoreError("prediction ledger row digest changed")
     values = np.asarray([row["model_logit"] for row in parsed], dtype=float)
+    if values.shape != expected_logits.shape or not np.array_equal(values, expected_logits):
+        raise FutureValueDraftScoreError(
+            "prediction ledger logits differ from verified model output"
+        )
     return values, artifact_hash
 
 
@@ -2849,6 +3065,7 @@ __all__ = [
     "PHASE_SHAPE_SIGNED_FEATURES",
     "SCHEMA_VERSION",
     "PREDICTION_LEDGER_SCHEMA",
+    "PREDICTION_FEATURE_ARTIFACT_SCHEMA",
     "MODEL_RECEIPT_SCHEMA",
     "MODEL_ARTIFACT_SCHEMA",
     "MODEL_TRAINER_ID",
@@ -2865,6 +3082,7 @@ __all__ = [
     "make_coefficient_receipt",
     "write_independent_prediction_ledger",
     "write_fitted_prediction_model",
+    "write_prediction_feature_artifact",
     "static_composition_parity_hash",
     "swap_variant_feature_frame",
     "swap_raw_blue_red_frame",

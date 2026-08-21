@@ -609,8 +609,9 @@ def write_source_bound_atom_ledger(
     if not required.issubset(frame.columns):
         raise DraftScoreAdapterError("public atom frame is incomplete")
     ids = core._normalise_ids(frame["game_id"].astype(str), "public atom game IDs")
-    if ids != tuple(result.source_receipt["accepted_game_ids"]):
-        raise DraftScoreAdapterError("public atom ledger census changed")
+    accepted_ids = tuple(result.source_receipt["accepted_game_ids"])
+    if not set(ids).issubset(set(accepted_ids)):
+        raise DraftScoreAdapterError("public atom ledger contains games outside accepted census")
     for field, expected in (
         ("authority_receipt_sha256", authority.authority_receipt_sha256),
         ("model_artifact_sha256", authority.model_sha256),
@@ -622,13 +623,14 @@ def write_source_bound_atom_ledger(
     dates = pd.to_datetime(frame["date"], utc=True, errors="coerce")
     if dates.isna().any():
         raise DraftScoreAdapterError("public atom ledger dates are invalid")
-    if not result.chronological_evaluation_suitable:
-        raise DraftScoreAdapterError("public descriptive artifact is not chronologically suitable")
-    fit_ids = core._normalise_ids(fit_game_ids, "atom ledger fit_game_ids")
-    if not fit_ids:
-        raise DraftScoreAdapterError("atom ledger fit_game_ids are required")
-    if not set(fit_ids).issubset(set(ids)):
-        raise DraftScoreAdapterError("atom ledger fit IDs are outside the census")
+    raw_fit_ids = tuple(str(value) for value in fit_game_ids)
+    fit_ids = tuple(core.canonical_game_ids(raw_fit_ids))
+    if raw_fit_ids != fit_ids:
+        raise DraftScoreAdapterError("atom ledger fit_game_ids are not canonical")
+    if not set(fit_ids).issubset(set(accepted_ids)):
+        raise DraftScoreAdapterError("atom ledger fit IDs are outside the accepted census")
+    if set(fit_ids) & set(ids):
+        raise DraftScoreAdapterError("atom ledger fit and scored game IDs overlap")
     cutoff = core._timestamp(fit_window_end, "atom ledger fit_window_end")
     supplied_dates = dict(fit_game_dates or {})
     if set(supplied_dates) != set(fit_ids):
@@ -639,13 +641,22 @@ def write_source_bound_atom_ledger(
         if stamp >= cutoff:
             raise DraftScoreAdapterError("atom ledger fit date is not strictly prior")
         normalized_fit_dates[game_id] = stamp.isoformat().replace("+00:00", "Z")
-    normalized_start = (
-        core._timestamp_text(fit_window_start, "atom ledger fit_window_start")
-        if fit_window_start is not None
-        else min(normalized_fit_dates.values())
-    )
-    if core._timestamp(normalized_start, "atom ledger fit_window_start") >= cutoff:
+    normalized_start = None
+    if fit_ids:
+        normalized_start = (
+            core._timestamp_text(fit_window_start, "atom ledger fit_window_start")
+            if fit_window_start is not None
+            else min(normalized_fit_dates.values())
+        )
+    elif fit_window_start is not None:
+        raise DraftScoreAdapterError(
+            "descriptive-only atom ledger cannot claim a fit window start"
+        )
+    if normalized_start is not None and core._timestamp(
+        normalized_start, "atom ledger fit_window_start"
+    ) >= cutoff:
         raise DraftScoreAdapterError("atom ledger fit window is not strictly prior")
+    evidence_mode = "fold_ready" if result.chronological_evaluation_suitable and fit_ids else "descriptive_only"
     rows: list[dict[str, Any]] = []
     ordered = frame.sort_values("game_id", kind="stable")
     for row in ordered.itertuples(index=False):
@@ -665,8 +676,8 @@ def write_source_bound_atom_ledger(
     fold_producer = dict(result.producer_receipt)
     fold_producer.update(
         {
-            "accepted_game_count": len(ids),
-            "accepted_game_ids": list(ids),
+            "accepted_game_count": len(accepted_ids),
+            "accepted_game_ids": list(accepted_ids),
             "fit_game_count": len(fit_ids),
             "fit_game_ids": list(fit_ids),
             "fit_game_identity_sha256": identity_sha256(fit_ids),
@@ -702,6 +713,11 @@ def write_source_bound_atom_ledger(
         "recipe_sha256": authority.recipe_sha256,
         "scorer_code_sha256": authority.scorer_sha256,
         "producer_timing": producer_timing,
+        "chronological_evaluation_suitable": result.chronological_evaluation_suitable,
+        "chronological_evaluation_reason": result.static_atom_receipt.get(
+            "chronological_evaluation_reason"
+        ),
+        "evidence_mode": evidence_mode,
         "row_digest_sha256": row_digest,
         "rows": rows,
     }
@@ -727,6 +743,11 @@ def write_source_bound_atom_ledger(
         "recipe_sha256": authority.recipe_sha256,
         "scorer_code_sha256": authority.scorer_sha256,
         "producer_timing": producer_timing,
+        "chronological_evaluation_suitable": result.chronological_evaluation_suitable,
+        "chronological_evaluation_reason": artifact_payload[
+            "chronological_evaluation_reason"
+        ],
+        "evidence_mode": evidence_mode,
         "row_digest_sha256": row_digest,
         "artifact_locator": output.name,
         "artifact_bytes": len(artifact_raw),
@@ -808,6 +829,17 @@ def load_source_bound_atom_ledger(
             raise DraftScoreAdapterError("source-bound atom ledger recipe changed")
         if str(payload.get("scorer_code_sha256") or "").lower() != authority.scorer_sha256:
             raise DraftScoreAdapterError("source-bound atom ledger scorer changed")
+        if not isinstance(payload.get("chronological_evaluation_suitable"), bool):
+            raise DraftScoreAdapterError("source-bound atom chronology binding is invalid")
+        if payload.get("evidence_mode") not in {"fold_ready", "descriptive_only"}:
+            raise DraftScoreAdapterError("source-bound atom evidence mode is invalid")
+    for field in (
+        "chronological_evaluation_suitable",
+        "chronological_evaluation_reason",
+        "evidence_mode",
+    ):
+        if ledger_payload.get(field) != receipt_payload.get(field):
+            raise DraftScoreAdapterError("source-bound atom chronology binding changed")
     if expected_fold_id is not None and str(ledger_payload.get("fold_id")) != str(expected_fold_id):
         raise DraftScoreAdapterError("source-bound atom ledger fold changed")
     if producer_payload.get("receipt_sha256") != receipt_payload.get("producer_receipt_sha256"):
@@ -818,8 +850,27 @@ def load_source_bound_atom_ledger(
     if not isinstance(rows, list) or not rows:
         raise DraftScoreAdapterError("source-bound atom ledger rows are missing")
     ids = tuple(str(value) for value in ledger_payload.get("game_ids", []))
-    if ids != tuple(source_receipt.get("accepted_game_ids", [])):
+    if ids != tuple(core.canonical_game_ids(ids)) or not set(ids).issubset(
+        set(source_receipt.get("accepted_game_ids", []))
+    ):
         raise DraftScoreAdapterError("source-bound atom ledger census changed")
+    if tuple(str(value) for value in receipt_payload.get("game_ids", [])) != ids:
+        raise DraftScoreAdapterError("source-bound atom receipt coverage changed")
+    if tuple(producer_payload.get("accepted_game_ids") or ()) != tuple(
+        source_receipt.get("accepted_game_ids", [])
+    ):
+        raise DraftScoreAdapterError("source-bound atom producer census changed")
+    fit_ids = tuple(str(value) for value in ledger_payload.get("fit_game_ids", []))
+    if fit_ids != tuple(core.canonical_game_ids(fit_ids)) or not set(fit_ids).issubset(
+        set(source_receipt.get("accepted_game_ids", []))
+    ):
+        raise DraftScoreAdapterError("source-bound atom fit census changed")
+    if set(fit_ids) & set(ids):
+        raise DraftScoreAdapterError("source-bound atom fit and scored IDs overlap")
+    if ledger_payload["evidence_mode"] == "fold_ready" and (
+        not ledger_payload["chronological_evaluation_suitable"] or not fit_ids
+    ):
+        raise DraftScoreAdapterError("source-bound atom fold-ready evidence is invalid")
     if any(not isinstance(row, Mapping) for row in rows):
         raise DraftScoreAdapterError("source-bound atom ledger row schema changed")
     if [str(row.get("game_id")) for row in rows] != list(ids):
