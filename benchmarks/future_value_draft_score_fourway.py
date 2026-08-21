@@ -42,6 +42,14 @@ SCHEMA_VERSION = "scryglass:future-value-draft-score-fourway:v1"
 STRICT_ATOM_SCHEMA = "scryglass:strict-prior-composition-atoms:v1"
 STRICT_FORM_SCHEMA = "scryglass:strict-prior-player-form:v1"
 VARIANTS = ("current_only", "future_player_form", "scaling_curve", "both")
+BOOTSTRAP_SEED = 20260821
+BOOTSTRAP_DRAWS = 2000
+BOOTSTRAP_COMPARISONS = {
+    "v2_vs_v1": ("future_player_form", "current_only"),
+    "v3_vs_v1": ("scaling_curve", "current_only"),
+    "v4_vs_v1": ("both", "current_only"),
+    "v4_vs_v2": ("both", "future_player_form"),
+}
 STATIC_COMPONENTS = (
     "base",
     "ally_synergy",
@@ -1242,6 +1250,231 @@ def _metrics(target: np.ndarray, probability: np.ndarray) -> dict[str, float]:
     return {"rows": int(len(target)), "log_loss": log_loss, "brier": brier, "auc": auc, "ece_10": ece}
 
 
+def _paired_common_prediction_rows(
+    variant_reports: Mapping[str, Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Return the rows scored by every variant with their fold clusters."""
+
+    required = set(VARIANTS)
+    if set(variant_reports) != required:
+        return [], ["paired_bootstrap_variant_set_incomplete"]
+    if any(
+        variant_reports[name].get("status") != "evaluated"
+        or int(variant_reports[name].get("valid_fold_count", 0)) != 3
+        for name in VARIANTS
+    ):
+        return [], ["paired_bootstrap_requires_four_evaluated_variants"]
+    rows: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    for fold in (1, 2, 3):
+        predictions_by_variant: dict[str, dict[str, Mapping[str, Any]]] = {}
+        for variant in VARIANTS:
+            result = next(
+                (item for item in variant_reports[variant].get("folds", []) if item.get("fold") == fold),
+                None,
+            )
+            if not isinstance(result, Mapping) or result.get("status") != "evaluated":
+                blockers.append(f"paired_bootstrap_fold_{fold}_{variant}_not_evaluated")
+                predictions_by_variant[variant] = {}
+                continue
+            raw_predictions = result.get("predictions")
+            if not isinstance(raw_predictions, list):
+                blockers.append(f"paired_bootstrap_fold_{fold}_{variant}_predictions_missing")
+                predictions_by_variant[variant] = {}
+                continue
+            by_id: dict[str, Mapping[str, Any]] = {}
+            for raw in raw_predictions:
+                if not isinstance(raw, Mapping):
+                    blockers.append(f"paired_bootstrap_fold_{fold}_{variant}_prediction_invalid")
+                    continue
+                game_id = str(raw.get("game_id") or "")
+                if not game_id or game_id in by_id:
+                    blockers.append(f"paired_bootstrap_fold_{fold}_{variant}_prediction_identity_invalid")
+                    continue
+                by_id[game_id] = raw
+            predictions_by_variant[variant] = by_id
+        common_ids = set.intersection(
+            *(set(predictions_by_variant[variant]) for variant in VARIANTS)
+        ) if all(predictions_by_variant[variant] for variant in VARIANTS) else set()
+        for game_id in sorted(common_ids):
+            reference = predictions_by_variant[VARIANTS[0]][game_id]
+            target = int(reference.get("target"))
+            series_id = str(reference.get("series_id") or "")
+            if not series_id:
+                blockers.append(f"paired_bootstrap_fold_{fold}_series_id_missing")
+                continue
+            probabilities: dict[str, float] = {}
+            row_valid = True
+            for variant in VARIANTS:
+                prediction = predictions_by_variant[variant][game_id]
+                if int(prediction.get("target")) != target:
+                    blockers.append(f"paired_bootstrap_fold_{fold}_target_mismatch")
+                    row_valid = False
+                    break
+                prediction_series = str(prediction.get("series_id") or "")
+                if prediction_series != series_id:
+                    blockers.append(f"paired_bootstrap_fold_{fold}_series_id_mismatch")
+                    row_valid = False
+                    break
+                try:
+                    probability = float(prediction["probability"])
+                except (KeyError, TypeError, ValueError):
+                    row_valid = False
+                    blockers.append(f"paired_bootstrap_fold_{fold}_{variant}_probability_invalid")
+                    break
+                if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+                    row_valid = False
+                    blockers.append(f"paired_bootstrap_fold_{fold}_{variant}_probability_invalid")
+                    break
+                probabilities[variant] = probability
+            if row_valid:
+                rows.append(
+                    {
+                        "fold": fold,
+                        "game_id": game_id,
+                        "series_id": series_id,
+                        "target": target,
+                        "probabilities": probabilities,
+                    }
+                )
+    rows.sort(key=lambda row: (int(row["fold"]), str(row["series_id"]), str(row["game_id"])))
+    return rows, sorted(set(blockers))
+
+
+def _paired_cluster_bootstrap(
+    variant_reports: Mapping[str, Mapping[str, Any]],
+    source: Mapping[str, Any],
+    *,
+    seed: int = BOOTSTRAP_SEED,
+    draws: int = BOOTSTRAP_DRAWS,
+) -> dict[str, Any]:
+    """Estimate paired variant deltas by resampling whole series clusters."""
+
+    if int(draws) <= 0:
+        return {
+            "status": "blocked",
+            "method": "paired_conservative_series_cluster_bootstrap",
+            "seed": int(seed),
+            "draws": int(draws),
+            "blockers": ["paired_bootstrap_draws_invalid"],
+        }
+    rows, blockers = _paired_common_prediction_rows(variant_reports)
+    input_hash = _sha_bytes(_canonical_bytes(rows)) if rows else None
+    result: dict[str, Any] = {
+        "schema_version": "scryglass:future-value-draft-score-paired-bootstrap:v1",
+        "status": "blocked" if blockers or not rows else "evaluated",
+        "method": "paired_conservative_series_cluster_bootstrap",
+        "seed": int(seed),
+        "draws": int(draws),
+        "source": {
+            "source_as_of": source.get("source_as_of"),
+            "source_game_count": int(source.get("source_game_count", 0)),
+            "source_identity_sha256": source.get("source_identity_sha256"),
+            "source_receipt_sha256": source.get("receipt_sha256"),
+        },
+        "input": {
+            "row_count": len(rows),
+            "rows_sha256": input_hash,
+            "cluster_assignment": "fold + series_id",
+            "fold_row_counts": {
+                str(fold): sum(int(row["fold"]) == fold for row in rows)
+                for fold in (1, 2, 3)
+            },
+            "fold_cluster_counts": {
+                str(fold): len(
+                    {
+                        str(row["series_id"])
+                        for row in rows
+                        if int(row["fold"]) == fold
+                    }
+                )
+                for fold in (1, 2, 3)
+            },
+        },
+        "blockers": blockers,
+        "comparisons": {},
+        "common_rows": rows,
+    }
+    if blockers or not rows:
+        if not rows and "paired_bootstrap_common_rows_empty" not in blockers:
+            result["blockers"] = sorted(set(blockers + ["paired_bootstrap_common_rows_empty"]))
+        return result
+
+    clusters_by_fold: dict[int, dict[str, list[dict[str, Any]]]] = {
+        fold: {} for fold in (1, 2, 3)
+    }
+    for row in rows:
+        clusters_by_fold[int(row["fold"])].setdefault(str(row["series_id"]), []).append(row)
+    if any(not clusters_by_fold[fold] for fold in (1, 2, 3)):
+        result["status"] = "blocked"
+        result["blockers"] = ["paired_bootstrap_fold_cluster_missing"]
+        return result
+
+    rng = np.random.default_rng(int(seed))
+    deltas: dict[str, dict[str, list[float]]] = {
+        comparison: {metric: [] for metric in ("log_loss", "brier", "auc")}
+        for comparison in BOOTSTRAP_COMPARISONS
+    }
+    for _ in range(int(draws)):
+        sampled_rows: list[dict[str, Any]] = []
+        for fold in (1, 2, 3):
+            cluster_ids = np.array(sorted(clusters_by_fold[fold]), dtype=object)
+            sampled_ids = rng.choice(cluster_ids, size=len(cluster_ids), replace=True)
+            for cluster_id in sampled_ids:
+                sampled_rows.extend(clusters_by_fold[fold][str(cluster_id)])
+        target = np.asarray([int(row["target"]) for row in sampled_rows], dtype=float)
+        metrics_by_variant = {
+            variant: _metrics(
+                target,
+                np.asarray(
+                    [float(row["probabilities"][variant]) for row in sampled_rows],
+                    dtype=float,
+                ),
+            )
+            for variant in VARIANTS
+        }
+        for comparison, (candidate, baseline) in BOOTSTRAP_COMPARISONS.items():
+            for metric in ("log_loss", "brier", "auc"):
+                candidate_value = float(metrics_by_variant[candidate][metric])
+                baseline_value = float(metrics_by_variant[baseline][metric])
+                delta = candidate_value - baseline_value
+                if math.isfinite(delta):
+                    deltas[comparison][metric].append(delta)
+
+    for comparison, (candidate, baseline) in BOOTSTRAP_COMPARISONS.items():
+        metric_results: dict[str, Any] = {}
+        for metric in ("log_loss", "brier", "auc"):
+            values = np.asarray(deltas[comparison][metric], dtype=float)
+            direction = "higher" if metric == "auc" else "lower"
+            if values.size == 0:
+                metric_results[metric] = {
+                    "status": "blocked",
+                    "improvement_direction": direction,
+                    "finite_draws": 0,
+                }
+                continue
+            improved = values > 0 if metric == "auc" else values < 0
+            metric_results[metric] = {
+                "status": "evaluated",
+                "delta": float(np.mean(values)),
+                "median_delta": float(np.median(values)),
+                "ci95": [
+                    float(np.quantile(values, 0.025)),
+                    float(np.quantile(values, 0.975)),
+                ],
+                "improvement_direction": direction,
+                "improvement_probability": float(np.mean(improved)),
+                "finite_draws": int(values.size),
+            }
+        result["comparisons"][comparison] = {
+            "candidate": candidate,
+            "baseline": baseline,
+            "metrics": metric_results,
+        }
+    result["blockers"] = []
+    return result
+
+
 def _side_swap_evidence(
     frame: pd.DataFrame,
     feature_names: Sequence[str],
@@ -1324,6 +1557,8 @@ def build_report(
     expected_strict_form_sha256: str | None = None,
     expected_strict_form_code_sha256: str | None = None,
     expected_future_model_sha256: str | None = None,
+    bootstrap_seed: int = BOOTSTRAP_SEED,
+    bootstrap_draws: int = BOOTSTRAP_DRAWS,
 ) -> dict[str, Any]:
     source = _load_source(source_receipt_path.resolve())
     accepted_ids = {str(value) for value in source["accepted_game_ids"]}
@@ -1569,8 +1804,20 @@ def build_report(
                     "component_reconstruction_error_max": 0.0,
                     "side_swap": side_swap,
                     "predictions": [
-                        {"game_id": str(game_id), "target": int(target), "logit": float(logit), "probability": float(probability)}
-                        for game_id, target, logit, probability in zip(validation["game_id"], validation["target"], logits, probabilities)
+                        {
+                            "game_id": str(game_id),
+                            "series_id": str(series_id),
+                            "target": int(target),
+                            "logit": float(logit),
+                            "probability": float(probability),
+                        }
+                        for game_id, series_id, target, logit, probability in zip(
+                            validation["game_id"],
+                            validation["series_id"],
+                            validation["target"],
+                            logits,
+                            probabilities,
+                        )
                     ],
                 }
             )
@@ -1591,6 +1838,12 @@ def build_report(
             "folds": fold_results,
             "valid_fold_count": len(evaluated),
         }
+    paired_bootstrap = _paired_cluster_bootstrap(
+        variant_reports,
+        source,
+        seed=bootstrap_seed,
+        draws=bootstrap_draws,
+    )
     descriptive_rows = _static_descriptive_rows(descriptive_frame)
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -1618,6 +1871,7 @@ def build_report(
             "folds": fold_reports,
         },
         "variants": variant_reports,
+        "paired_bootstrap": paired_bootstrap,
         "blockers": sorted(blockers),
         "claim_ceiling": "source-bound research-only descriptive subset; no fitted Draft Score authority",
         "descriptive_rows": descriptive_rows,
@@ -1675,6 +1929,8 @@ def main() -> int:
     parser.add_argument("--expected-strict-form-sha256")
     parser.add_argument("--expected-strict-form-code-sha256")
     parser.add_argument("--expected-future-model-sha256")
+    parser.add_argument("--bootstrap-seed", type=int, default=BOOTSTRAP_SEED)
+    parser.add_argument("--bootstrap-draws", type=int, default=BOOTSTRAP_DRAWS)
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args()
     report = build_report(
@@ -1694,6 +1950,8 @@ def main() -> int:
         expected_strict_form_sha256=args.expected_strict_form_sha256,
         expected_strict_form_code_sha256=args.expected_strict_form_code_sha256,
         expected_future_model_sha256=args.expected_future_model_sha256,
+        bootstrap_seed=args.bootstrap_seed,
+        bootstrap_draws=args.bootstrap_draws,
     )
     write_report(report, args.output_dir)
     print(json.dumps({"status": report["status"], "descriptive_rows": report["coverage"]["descriptive_subset_game_count"], "blockers": report["blockers"]}, sort_keys=True))

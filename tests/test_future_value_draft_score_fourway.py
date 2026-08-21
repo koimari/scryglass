@@ -249,6 +249,24 @@ def test_fourway_evaluation_fits_all_variants_on_complete_fixture(tmp_path: Path
     assert report["status"] == "research_only"
     assert report["coverage"]["descriptive_subset_game_count"] == 6
     assert not report["blockers"]
+    bootstrap = report["paired_bootstrap"]
+    assert bootstrap["status"] == "evaluated"
+    assert bootstrap["seed"] == 20260821
+    assert bootstrap["draws"] == 2000
+    assert bootstrap["input"]["row_count"] == 12
+    assert len(bootstrap["input"]["rows_sha256"]) == 64
+    assert set(bootstrap["comparisons"]) == {
+        "v2_vs_v1",
+        "v3_vs_v1",
+        "v4_vs_v1",
+        "v4_vs_v2",
+    }
+    for comparison in bootstrap["comparisons"].values():
+        for metric in ("log_loss", "brier", "auc"):
+            result = comparison["metrics"][metric]
+            assert result["status"] == "evaluated"
+            assert 0.0 <= result["improvement_probability"] <= 1.0
+            assert 0 < result["finite_draws"] <= 2000
     assert set(report["variants"]) == set(VARIANTS)
     static_digests = {
         result["static_components_sha256"] for result in report["variants"].values()
