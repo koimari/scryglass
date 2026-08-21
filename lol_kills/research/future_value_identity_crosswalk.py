@@ -708,8 +708,15 @@ def build_identity_crosswalk(
             expected = {(side, role) for side in SIDES for role in ROLES}
             if slots != expected:
                 reasons.append("player_role_or_side_closure_invalid")
-            champions = [_norm(row.get("champion")) for _, row in player_group.iterrows()]
-            if any(value is None for value in champions) or len(set(champions)) != 10:
+            champions_by_side: dict[str | None, list[str | None]] = defaultdict(list)
+            for _, row in player_group.iterrows():
+                champions_by_side[_side(row.get("side"))].append(_norm(row.get("champion")))
+            if any(
+                len(champions_by_side.get(side, [])) != 5
+                or any(value is None for value in champions_by_side.get(side, []))
+                or len(set(champions_by_side.get(side, []))) != 5
+                for side in SIDES
+            ):
                 reasons.append("champion_identity_not_unique")
         if len(team_group) == 2 and {
             _side(value) for value in team_group["side"]

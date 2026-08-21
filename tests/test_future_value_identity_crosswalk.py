@@ -137,6 +137,21 @@ def test_role_side_and_champion_closure_fail_closed() -> None:
     assert "champion_identity_not_unique" in reasons
 
 
+def test_cross_side_champion_mirror_is_allowed() -> None:
+    maps, players, teams, receipt, files = _fixture(missing="player")
+    players.loc[(players["gameid"] == "game-2") & (players["side"] == "Red") & (players["position"] == "top"), "champion"] = "Blue-top-champion"
+    result = build_identity_crosswalk(maps=maps, players=players, teams=teams, source_receipt=receipt, source_file_records=files)
+    assert result["counts"]["candidate_game_count"] == 1
+
+
+def test_same_side_champion_duplicate_is_rejected() -> None:
+    maps, players, teams, receipt, files = _fixture(missing="player")
+    players.loc[(players["gameid"] == "game-2") & (players["side"] == "Blue") & (players["position"] == "bot"), "champion"] = "Blue-top-champion"
+    result = build_identity_crosswalk(maps=maps, players=players, teams=teams, source_receipt=receipt, source_file_records=files)
+    assert result["counts"]["candidate_game_count"] == 0
+    assert "champion_identity_not_unique" in result["rejected"][0]["reasons"]
+
+
 def test_source_receipt_and_file_binding_are_required() -> None:
     maps, players, teams, receipt, files = _fixture(missing="player")
     bad_receipt = dict(receipt)
