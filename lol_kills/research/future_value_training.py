@@ -444,13 +444,21 @@ def _phase_file_record(
     expected_sha256: str,
     label: str,
 ) -> dict[str, Any]:
-    if (
-        not path.is_absolute()
-        or ".." in path.parts
-        or path.is_symlink()
-        or not path.is_file()
-    ):
+    if not path.is_absolute() or ".." in path.parts:
         raise FutureValueTrainingError(f"{label} is missing or unsafe")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise FutureValueTrainingError(f"{label} path contains a symlink")
+    if path.is_symlink() or not path.is_file():
+        raise FutureValueTrainingError(f"{label} is missing or unsafe")
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as error:
+        raise FutureValueTrainingError(f"{label} path cannot be resolved") from error
+    if resolved != path:
+        raise FutureValueTrainingError(f"{label} path is not canonical")
     expected = _phase_hash(expected_sha256, f"expected {label}")
     actual = _sha256(path)
     if actual != expected:

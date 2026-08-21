@@ -710,6 +710,9 @@ def _phase_partition_fixture(tmp_path, game_ids: list[str]):
         "crosswalk_sha256": hashes["crosswalk_sha256"],
         "crosswalk_artifact_sha256": hashes["artifact_sha256"],
         "crosswalk_receipt_sha256": hashes["receipt_sha256"],
+        "partial_series_blocker": True,
+        "retained_proxy_game_count": 1,
+        "retained_proxy_cluster_count": 1,
     }
     frame.attrs["crosswalk_receipt_file_sha256"] = hashes["receipt_file_sha256"]
     source = _source_receipt(game_ids)
@@ -748,6 +751,7 @@ def _phase_partition_fixture(tmp_path, game_ids: list[str]):
                 "series_partition_reference_game_count": len(game_ids),
                 "series_partition_reference_identity_sha256": identity_sha256(game_ids),
                 "series_partition_reference_assignment_sha256": assignment_sha256,
+                "series_partition_proxy_authority_blocker": True,
             },
             sort_keys=True,
         ),
@@ -917,6 +921,31 @@ def test_phase_partition_binding_requires_durable_source_receipt(tmp_path) -> No
             binding,
             expected_phase_artifact_sha256=artifact_hash,
             expected_phase_receipt_file_sha256=receipt_hash,
+        )
+
+
+def test_phase_partition_binding_requires_proxy_blocker_in_every_copy(tmp_path) -> None:
+    frame, source, binding, _artifact_hash, receipt_hash, source_path, source_file_hash = (
+        _phase_partition_fixture(tmp_path, ["1", "2", "3", "4"])
+    )
+    artifact_path = Path(binding["phase_artifact"]["path"])
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    payload["cross_model_series_partition"].pop("proxy_authority_blocker")
+    payload.pop("series_partition_proxy_authority_blocker")
+    artifact_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    artifact_hash = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+    binding["phase_artifact"]["bytes"] = artifact_path.stat().st_size
+    binding["phase_artifact"]["sha256"] = artifact_hash
+    binding["phase_artifact_sha256"] = artifact_hash
+    with pytest.raises(FutureValueSourceError, match="proxy_authority_blocker"):
+        verify_phase_series_partition_binding(
+            frame,
+            source,
+            binding,
+            expected_phase_artifact_sha256=artifact_hash,
+            expected_phase_receipt_file_sha256=receipt_hash,
+            source_receipt_path=source_path,
+            source_receipt_file_sha256=source_file_hash,
         )
 
 
@@ -1553,6 +1582,7 @@ def _phase_training_fixture(tmp_path, source: dict[str, object]):
                 "series_partition_reference_game_count": len(game_ids),
                 "series_partition_reference_identity_sha256": identity_sha256(game_ids),
                 "series_partition_reference_assignment_sha256": assignment,
+                "series_partition_proxy_authority_blocker": True,
             },
             sort_keys=True,
         ),
@@ -1598,6 +1628,22 @@ def test_training_phase_binding_verifies_files_and_receipt_output(tmp_path) -> N
     assert binding["eligible_game_count"] == 2
     assert binding["phase_artifact_kind"] == "candidate"
     assert runtime["expected_artifact_sha256"] == binding["phase_artifact_sha256"]
+
+
+def test_training_phase_file_guard_rejects_symlinked_parent(tmp_path) -> None:
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    path = real_root / "phase.json"
+    path.write_text("{}", encoding="utf-8")
+    linked_root = tmp_path / "linked"
+    linked_root.symlink_to(real_root, target_is_directory=True)
+    linked_path = linked_root / "phase.json"
+    with pytest.raises(FutureValueTrainingError, match="symlink"):
+        training_module._phase_file_record(
+            linked_path,
+            expected_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+            label="phase artifact",
+        )
 
 
 def test_training_phase_inputs_fail_closed_when_partial(tmp_path, monkeypatch) -> None:

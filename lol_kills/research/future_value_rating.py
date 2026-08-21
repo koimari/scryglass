@@ -2299,6 +2299,30 @@ def _normalize_phase_partition_field(
     return value
 
 
+def _phase_partition_is_evidence_copy(
+    path: str,
+    container: Mapping[str, Any],
+) -> bool:
+    """Identify a partition copy that must carry the proxy blocker."""
+
+    if path in {"source", "source.series_partition_reference"} or path.endswith(".audit"):
+        return False
+    core_fields = (
+        "eligible_game_count",
+        "eligible_identity_sha256",
+        "eligible_assignment_sha256",
+        "reference_game_count",
+        "reference_identity_sha256",
+        "reference_assignment_sha256",
+        "status",
+    )
+    return any(
+        alias in container
+        for field in core_fields
+        for alias in _PHASE_PARTITION_FIELD_ALIASES[field]
+    )
+
+
 def _phase_partition_evidence(
     payload: Mapping[str, Any],
     *,
@@ -2335,7 +2359,29 @@ def _phase_partition_evidence(
                 raise FutureValueSourceError(
                     f"{label} contains conflicting {field} evidence"
                 )
-            result[field] = first
+        result[field] = first
+
+    proxy_aliases = _PHASE_PARTITION_FIELD_ALIASES["proxy_authority_blocker"]
+    for path, container in containers:
+        if not _phase_partition_is_evidence_copy(path, container):
+            continue
+        present = [alias for alias in proxy_aliases if alias in container]
+        if not present:
+            raise FutureValueSourceError(
+                f"{label} {path} is missing proxy_authority_blocker"
+            )
+        values = [
+            _normalize_phase_partition_field(
+                "proxy_authority_blocker",
+                container[alias],
+                f"{label} {path}.{alias}",
+            )
+            for alias in present
+        ]
+        if any(value is not True for value in values):
+            raise FutureValueSourceError(
+                f"{label} {path} proxy_authority_blocker is not true"
+            )
 
     required = (
         "source_receipt_sha256",
@@ -2352,17 +2398,21 @@ def _phase_partition_evidence(
         "artifact_sha256",
         "receipt_sha256",
         "receipt_file_sha256",
+        "proxy_authority_blocker",
     )
     missing = [field for field in required if field not in result]
     if missing:
         raise FutureValueSourceError(
             f"{label} partition evidence is incomplete: {', '.join(missing)}"
         )
-    result.setdefault("proxy_authority_blocker", False)
     if result["status"] != "comparable":
         raise FutureValueSourceError(f"{label} partition is not comparable")
     if result["reference_assignment_match"] is not True:
         raise FutureValueSourceError(f"{label} reference assignment is not verified")
+    if result["proxy_authority_blocker"] is not True:
+        raise FutureValueSourceError(
+            f"{label} mixed partition proxy_authority_blocker is not true"
+        )
     return result
 
 
@@ -2697,6 +2747,30 @@ def verify_phase_series_partition_binding(
             or ""
         ).lower(),
     }
+    partial_series_blocker = rating_audit.get("partial_series_blocker")
+    retained_proxy_game_count = rating_audit.get("retained_proxy_game_count")
+    retained_proxy_cluster_count = rating_audit.get("retained_proxy_cluster_count")
+    if not isinstance(partial_series_blocker, bool):
+        raise FutureValueSourceError(
+            "rating phase partition proxy coverage is missing"
+        )
+    for field, value in (
+        ("retained_proxy_game_count", retained_proxy_game_count),
+        ("retained_proxy_cluster_count", retained_proxy_cluster_count),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise FutureValueSourceError(
+                f"rating phase partition {field} is invalid"
+            )
+    rating_proxy_blocker = bool(
+        partial_series_blocker
+        or retained_proxy_game_count > 0
+        or retained_proxy_cluster_count > 0
+    )
+    if not rating_proxy_blocker:
+        raise FutureValueSourceError(
+            "rating crosswalk audit does not show retained proxy coverage"
+        )
     for field, value in rating_crosswalk.items():
         if re.fullmatch(r"[0-9a-f]{64}", value) is None:
             raise FutureValueSourceError(f"rating phase partition {field} is missing")
@@ -2704,6 +2778,12 @@ def verify_phase_series_partition_binding(
             raise FutureValueSourceError(f"phase partition {field} differs")
     if artifact_evidence["reference_assignment_sha256"] != binding_reference_assignment:
         raise FutureValueSourceError("phase partition reference assignment differs")
+    if not artifact_evidence["proxy_authority_blocker"] or not receipt_evidence[
+        "proxy_authority_blocker"
+    ]:
+        raise FutureValueSourceError(
+            "phase partition proxy_authority_blocker is not true"
+        )
     if (
         len(reference_ids) != len(eligible_ids)
         and artifact_evidence["reference_assignment_sha256"]
@@ -2730,10 +2810,7 @@ def verify_phase_series_partition_binding(
         "crosswalk_artifact_sha256": artifact_evidence["artifact_sha256"],
         "crosswalk_receipt_sha256": artifact_evidence["receipt_sha256"],
         "crosswalk_receipt_file_sha256": artifact_evidence["receipt_file_sha256"],
-        "proxy_authority_blocker": bool(
-            artifact_evidence["proxy_authority_blocker"]
-            or receipt_evidence["proxy_authority_blocker"]
-        ),
+        "proxy_authority_blocker": True,
         "blockers": [],
     }
 
