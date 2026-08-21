@@ -90,6 +90,14 @@ SOURCE_RECEIPT_SCHEMA = "scryglass:future-value-rating-source:v1"
 SOURCE_TRANSPORT = (
     "official_public_oracles_elixir_annual_exports_plus_oe_api_bridge"
 )
+MIXED_SERIES_PARTITION_SOURCE = (
+    "mixed:leaguepedia_crosswalk+conservative_series_superset"
+)
+MIXED_SERIES_PARTITION_KEY_FIELDS = (
+    "league",
+    "tournament",
+    "unordered_team_pair",
+)
 _REQUIRED_ANNUAL_SOURCE_FILES = frozenset({"annual_2025", "annual_2026"})
 _REQUIRED_BRIDGE_SOURCE_FILES = frozenset(
     {
@@ -526,10 +534,24 @@ def _series_identity_report(frame: pd.DataFrame) -> dict[str, Any]:
         )
     if counts.get("game_fallback", 0):
         blockers.append("game-level fallback identities cannot prove whole-series membership")
+    if counts.get("leaguepedia_crosswalk", 0) and frame.attrs.get(
+        "series_partition_authoritative"
+    ) is False:
+        blockers.append(
+            "verified crosswalk coverage remains research-only and cannot grant authoritative series identity"
+        )
+    if frame.attrs.get("series_partition_proxy_authority_blocker") is True:
+        blockers.append("authoritative_series_id_missing_proxy_cluster_used")
     unknown = sorted(
         key
         for key in counts
-        if key not in {"exact_id_proxy", "team_tournament_proxy", "game_fallback"}
+        if key
+        not in {
+            "exact_id_proxy",
+            "leaguepedia_crosswalk",
+            "team_tournament_proxy",
+            "game_fallback",
+        }
     )
     if unknown:
         blockers.append("unknown series identity provenance: " + ", ".join(unknown))
@@ -549,6 +571,40 @@ def _series_identity_report(frame: pd.DataFrame) -> dict[str, Any]:
         proxy_clusters.loc[proxy_clusters["dates"] > 1, "rows"].sum()
     )
     authoritative = not blockers and bool(counts)
+    partition_binding = frame.attrs.get("series_partition")
+    if isinstance(partition_binding, Mapping):
+        cross_model_partition = {
+            "status": "comparable",
+            "source": partition_binding.get("source"),
+            "mapping_sha256": partition_binding.get("mapping_sha256"),
+            "crosswalk_sha256": partition_binding.get("crosswalk_sha256"),
+            "receipt_sha256": partition_binding.get("receipt_sha256"),
+            "receipt_file_sha256": partition_binding.get("receipt_file_sha256"),
+            "eligible_game_count": partition_binding.get("eligible_game_count"),
+            "eligible_identity_sha256": partition_binding.get(
+                "eligible_identity_sha256"
+            ),
+            "key_fields": list(
+                partition_binding.get("key_fields")
+                or MIXED_SERIES_PARTITION_KEY_FIELDS
+            ),
+            "reason": "phase and future-value evaluation use the same verified mixed series crosswalk",
+        }
+    else:
+        cross_model_partition = {
+            "status": "non_comparable",
+            "phase_key_fields": [
+                "league",
+                "tournament",
+                "unordered_stable_oe_team_pair",
+            ],
+            "other_model_key_fields": [
+                "league",
+                "tournament",
+                "unordered_team_pair_alias_key",
+            ],
+            "reason": "phase and future-value evaluation must use one shared team crosswalk before their cluster metrics can be compared",
+        }
     return {
         "status": "verified" if authoritative else "blocked",
         "authoritative": authoritative,
@@ -566,22 +622,188 @@ def _series_identity_report(frame: pd.DataFrame) -> dict[str, Any]:
             "cross_date_rows": cross_date_rows,
             "definition": "proxy clusters with multiple maps may contain separate series because authoritative series IDs are unavailable",
         },
-        "cross_model_partition": {
-            "status": "non_comparable",
-            "phase_key_fields": [
-                "league",
-                "tournament",
-                "unordered_stable_oe_team_pair",
-            ],
-            "other_model_key_fields": [
-                "league",
-                "tournament",
-                "unordered_team_pair_alias_key",
-            ],
-            "reason": "phase and future-value evaluation must use one shared team crosswalk before their cluster metrics can be compared",
-        },
+        "cross_model_partition": cross_model_partition,
         "blockers": blockers,
     }
+
+
+def _phase_partition_map_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Build the outcome-free map view needed by the verified crosswalk.
+
+    The Leaguepedia join uses team identity, competition, and time.  It does
+    not use a match result.  A fixed zero target satisfies the shared map-frame
+    validator while keeping phase targets outside the partition decision.
+    """
+
+    game_ids = _game_series(frame, "phase frame")
+    dates = _date_series(frame, "phase frame")
+    result = pd.DataFrame(
+        {
+            "game_id": game_ids.astype(str).to_numpy(),
+            "date": dates.to_numpy(),
+            "y_blue_win": np.zeros(len(frame), dtype=float),
+        },
+        index=frame.index,
+    )
+    for name in (
+        "league",
+        "league_source",
+        "tournament",
+        "blue_team_key",
+        "red_team_key",
+        "blue_team",
+        "red_team",
+        "blue_teamid",
+        "red_teamid",
+        "blue_team_id",
+        "red_team_id",
+    ):
+        if name in frame.columns:
+            result[name] = frame[name].to_numpy(copy=False)
+    team_pairs = (
+        ("blue_team_id", "red_team_id"),
+        ("blue_teamid", "red_teamid"),
+        ("blue_team_key", "red_team_key"),
+        ("blue_team", "red_team"),
+    )
+    if not any(left in result.columns and right in result.columns for left, right in team_pairs):
+        raise FuturePhaseCurveError(
+            "verified phase series partition needs both blue and red team identities"
+        )
+    return result
+
+
+def bind_phase_series_partition(
+    frame: pd.DataFrame,
+    source_receipt: Mapping[str, Any],
+    *,
+    crosswalk_path: Path | str,
+    crosswalk_receipt_path: Path | str,
+    crosswalk_receipt_file_sha256: str,
+    require_full_eligible: bool,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Verify and attach the future-value mixed series partition.
+
+    This adapter intentionally delegates receipt and assignment validation to
+    ``future_value_rating``.  That keeps phase and rating models on one
+    crosswalk contract.  The import is local because the rating module imports
+    this phase module for shared feature names.
+    """
+
+    if not isinstance(source_receipt, Mapping):
+        raise FuturePhaseCurveError("verified source receipt is required for a series crosswalk")
+    eligible_raw = source_receipt.get("model_eligible_game_ids")
+    if not isinstance(eligible_raw, list) or not all(
+        isinstance(value, str) for value in eligible_raw
+    ):
+        raise FuturePhaseCurveError(
+            "source receipt has no model-eligible census for the series crosswalk"
+        )
+    eligible_ids = tuple(canonical_game_ids(eligible_raw))
+    if int(source_receipt.get("model_eligible_game_count", -1)) != len(eligible_ids):
+        raise FuturePhaseCurveError("source receipt model-eligible count changed")
+    expected_eligible_identity = identity_sha256(eligible_ids)
+    if str(source_receipt.get("model_eligible_identity_sha256") or "").lower() != expected_eligible_identity:
+        raise FuturePhaseCurveError("source receipt model-eligible identity changed")
+    try:
+        from lol_kills.research.future_value_rating import (
+            _map_model_frame,
+            bind_verified_leaguepedia_series_crosswalk,
+        )
+    except ImportError as error:
+        raise FuturePhaseCurveError("verified phase series partition is unavailable") from error
+    raw_maps = _phase_partition_map_frame(frame)
+    try:
+        bound_maps = bind_verified_leaguepedia_series_crosswalk(
+            raw_maps,
+            crosswalk_path=crosswalk_path,
+            receipt_path=crosswalk_receipt_path,
+            source_receipt=source_receipt,
+            expected_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+        )
+        model_frame = _map_model_frame(
+            bound_maps,
+            verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+            verified_source_receipt=source_receipt,
+            verified_crosswalk_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+        )
+    except Exception as error:
+        # The source loader uses its own exception type.  Keep the phase API
+        # fail-closed without exposing a second provenance exception family.
+        if isinstance(error, FuturePhaseCurveError):
+            raise
+        raise FuturePhaseCurveError(
+            "verified phase series crosswalk could not be bound"
+        ) from error
+    phase_ids = _game_series(frame, "phase frame").astype(str)
+    phase_id_set = set(phase_ids)
+    eligible_set = set(eligible_ids)
+    if not phase_id_set.issubset(eligible_set):
+        raise FuturePhaseCurveError(
+            "phase frame contains accepted but model-ineligible games"
+        )
+    if require_full_eligible and phase_id_set != eligible_set:
+        raise FuturePhaseCurveError(
+            "phase evaluation does not match the model-eligible census"
+        )
+    model_ids = model_frame["game_id"].astype(str)
+    if set(model_ids) != phase_id_set:
+        raise FuturePhaseCurveError("phase series crosswalk changed phase game IDs")
+    series_by_game = pd.Series(
+        model_frame["series_id"].astype(str).to_numpy(), index=model_ids
+    )
+    source_by_game = series_by_game.map(
+        lambda value: (
+            "leaguepedia_crosswalk"
+            if str(value).startswith("leaguepedia:")
+            else "game_fallback"
+            if str(value).startswith("game-fallback:")
+            else "team_tournament_proxy"
+        )
+    )
+    result = frame.copy()
+    result["series_id"] = phase_ids.map(series_by_game).to_numpy()
+    result["series_id_source"] = phase_ids.map(source_by_game).to_numpy()
+    base_audit = dict(model_frame.attrs.get("series_cluster_audit") or {})
+    verified_binding = bound_maps.attrs.get("verified_leaguepedia_series_crosswalk")
+    if not isinstance(verified_binding, Mapping):
+        raise FuturePhaseCurveError("verified phase series crosswalk binding is missing")
+    mapped_ids = {
+        str(value) for value in verified_binding.get("mapped_game_ids", ())
+    }
+    mapped_ids &= eligible_set
+    # Recompute the audit on the exact phase rows.  The shared loader's audit
+    # is scoped to its input frame, which is a fold subset during fitting.
+    partition = {
+        "source": MIXED_SERIES_PARTITION_SOURCE,
+        "key_fields": list(
+            base_audit.get("key_fields") or MIXED_SERIES_PARTITION_KEY_FIELDS
+        ),
+        "mapping_sha256": str(base_audit.get("crosswalk_assignment_sha256") or ""),
+        "crosswalk_sha256": str(base_audit.get("crosswalk_sha256") or ""),
+        "artifact_sha256": str(base_audit.get("crosswalk_artifact_sha256") or ""),
+        "receipt_sha256": str(base_audit.get("crosswalk_receipt_sha256") or ""),
+        "receipt_file_sha256": str(crosswalk_receipt_file_sha256).lower(),
+        "eligible_game_count": len(eligible_ids),
+        "eligible_identity_sha256": expected_eligible_identity,
+        "eligible_game_ids": list(eligible_ids),
+        "authoritative": False,
+        "proxy_authority_blocker": bool(
+            len(mapped_ids & eligible_set) < len(eligible_set)
+            or base_audit.get("partial_series_blocker")
+        ),
+        "audit": base_audit,
+    }
+    if not partition["mapping_sha256"] or not partition["crosswalk_sha256"]:
+        raise FuturePhaseCurveError("verified phase series mapping hash is missing")
+    result.attrs["series_partition"] = partition
+    result.attrs["series_partition_source"] = MIXED_SERIES_PARTITION_SOURCE
+    result.attrs["series_partition_key_fields"] = tuple(partition["key_fields"])
+    result.attrs["series_partition_authoritative"] = False
+    result.attrs["series_partition_proxy_authority_blocker"] = partition[
+        "proxy_authority_blocker"
+    ]
+    return result, partition
 
 
 def _normalised_name(value: Any) -> str:
@@ -760,6 +982,10 @@ def prepare_phase_frame(
                 result = result.fillna(pd.to_numeric(source[name], errors="coerce"))
         return result
 
+    team_id_column = next(
+        (name for name in ("teamid", "team_id") if name in teams_value.columns),
+        None,
+    )
     result = pd.DataFrame(index=map_index.index)
     result["game_uid"] = map_index["_game_id"].astype(str)
     result["date"] = map_index["_date"]
@@ -768,6 +994,11 @@ def prepare_phase_frame(
         ("region", ("region", "league_source")),
         ("patch", ("patch", "oe_patch_token")),
         ("series_id", ("series_id", "seriesid")),
+        ("tournament", ("tournament",)),
+        ("blue_team_key", ("blue_team_key",)),
+        ("red_team_key", ("red_team_key",)),
+        ("blue_team", ("blue_team",)),
+        ("red_team", ("red_team",)),
     ):
         source = next((name for name in names if name in map_index.columns), None)
         if source is not None:
@@ -775,6 +1006,15 @@ def prepare_phase_frame(
         else:
             fallback = next((name for name in names if name in blue.columns), None)
             result[output] = blue.reindex(map_index.index)[fallback] if fallback else pd.NA
+    for output, source in (
+        ("blue_team_id", "blue"),
+        ("red_team_id", "red"),
+    ):
+        if team_id_column is None:
+            result[output] = pd.NA
+        else:
+            side_frame = blue if source == "blue" else red
+            result[output] = side_frame.reindex(map_index.index)[team_id_column]
     cluster_metadata = pd.DataFrame(index=map_index.index)
     cluster_metadata["game_uid"] = result["game_uid"]
     cluster_metadata["date"] = result["date"]
@@ -784,10 +1024,6 @@ def prepare_phase_frame(
             cluster_metadata[name] = map_index[name]
         else:
             cluster_metadata[name] = pd.NA
-    team_id_column = next(
-        (name for name in ("teamid", "team_id") if name in teams_value.columns),
-        None,
-    )
     if team_id_column is not None:
         cluster_metadata["blue_team_id"] = blue.reindex(map_index.index)[team_id_column]
         cluster_metadata["red_team_id"] = red.reindex(map_index.index)[team_id_column]
@@ -1619,6 +1855,9 @@ def fit_phase_curve(
     feature_columns: Sequence[str] | None = None,
     alpha: float = 10.0,
     model_version: str = MODEL_VERSION,
+    crosswalk_path: Path | str | None = None,
+    crosswalk_receipt_path: Path | str | None = None,
+    crosswalk_receipt_file_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Fit OE-only gold and XP curves from strictly pregame features.
 
@@ -1634,7 +1873,26 @@ def fit_phase_curve(
         source_receipt_path=source_receipt_path,
         source_receipt_file_sha256=source_receipt_file_sha256,
     )
+    crosswalk_values = (
+        crosswalk_path,
+        crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256,
+    )
+    if any(value is not None for value in crosswalk_values) and not all(
+        value is not None for value in crosswalk_values
+    ):
+        raise FuturePhaseCurveError("phase series crosswalk inputs must be supplied together")
     value = bound.frame.copy()
+    partition: dict[str, Any] | None = None
+    if crosswalk_path is not None:
+        value, partition = bind_phase_series_partition(
+            value,
+            bound.receipt,
+            crosswalk_path=crosswalk_path,
+            crosswalk_receipt_path=crosswalk_receipt_path,
+            crosswalk_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+            require_full_eligible=False,
+        )
     selected_features = tuple(feature_columns or _default_feature_columns(value))
     assert_pregame_feature_names(selected_features)
     matrix, design_names = _design(value, selected_features)
@@ -1721,6 +1979,36 @@ def fit_phase_curve(
             "promotion": False,
         },
     }
+    if partition is not None:
+        output.update(
+            {
+                "series_partition_source": partition["source"],
+                "series_partition_key_fields": list(partition["key_fields"]),
+                "series_partition_mapping_sha256": partition["mapping_sha256"],
+                "series_partition_crosswalk_sha256": partition["crosswalk_sha256"],
+                "series_partition_artifact_sha256": partition["artifact_sha256"],
+                "series_partition_receipt_sha256": partition["receipt_sha256"],
+                "series_partition_receipt_file_sha256": partition[
+                    "receipt_file_sha256"
+                ],
+                "series_partition_eligible_game_count": partition[
+                    "eligible_game_count"
+                ],
+                "series_partition_eligible_identity_sha256": partition[
+                    "eligible_identity_sha256"
+                ],
+                "series_partition_eligible_game_ids": list(
+                    partition["eligible_game_ids"]
+                ),
+                "series_partition": partition,
+                "cross_model_series_partition": series_identity[
+                    "cross_model_partition"
+                ],
+                "series_partition_proxy_authority_blocker": partition[
+                    "proxy_authority_blocker"
+                ],
+            }
+        )
     if source_receipt_path is not None:
         output["source_receipt_artifact"] = _receipt_file_reference(
             source_receipt_path,
@@ -2016,6 +2304,9 @@ def _evaluate_transfer_slices(
     columns: Sequence[str],
     alpha: float,
     max_groups_per_column: int | None = None,
+    crosswalk_path: Path | str | None = None,
+    crosswalk_receipt_path: Path | str | None = None,
+    crosswalk_receipt_file_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate earlier rows from other groups against each transfer group."""
 
@@ -2054,6 +2345,9 @@ def _evaluate_transfer_slices(
                 source_receipt_file_sha256=source_receipt_file_sha256,
                 feature_columns=feature_columns,
                 alpha=alpha,
+                crosswalk_path=crosswalk_path,
+                crosswalk_receipt_path=crosswalk_receipt_path,
+                crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
             )
             residuals, _missing = _prediction_errors(artifact, test, feature_columns)
             metric_report: dict[str, Any] = {}
@@ -2098,6 +2392,9 @@ def evaluate_phase_curve(
     alpha: float = 10.0,
     transfer_columns: Sequence[str] = ("region", "patch"),
     max_transfer_groups: int | None = None,
+    crosswalk_path: Path | str | None = None,
+    crosswalk_receipt_path: Path | str | None = None,
+    crosswalk_receipt_file_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate each phase on future rows with fold-internal fitting."""
 
@@ -2108,13 +2405,35 @@ def evaluate_phase_curve(
         source_receipt_path=source_receipt_path,
         source_receipt_file_sha256=source_receipt_file_sha256,
     )
+    crosswalk_values = (
+        crosswalk_path,
+        crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256,
+    )
+    if any(item is not None for item in crosswalk_values) and not all(
+        item is not None for item in crosswalk_values
+    ):
+        raise FuturePhaseCurveError("phase series crosswalk inputs must be supplied together")
     value = bound.frame.copy()
+    partition: dict[str, Any] | None = None
+    if crosswalk_path is not None:
+        value, partition = bind_phase_series_partition(
+            value,
+            bound.receipt,
+            crosswalk_path=crosswalk_path,
+            crosswalk_receipt_path=crosswalk_receipt_path,
+            crosswalk_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+            require_full_eligible=True,
+        )
+    effective_cluster_column = cluster_column or (
+        "series_id" if partition is not None else None
+    )
 
     folds = chronological_folds(
         value,
         n_splits=n_splits,
         min_train_rows=max(1, len(feature_columns) + 1),
-        cluster_column=cluster_column,
+        cluster_column=effective_cluster_column,
     )
     errors: dict[str, dict[str, list[float]]] = {
         kind: {str(phase): [] for phase in PHASES} for kind in ("gold", "xp")
@@ -2141,10 +2460,15 @@ def evaluate_phase_curve(
             source_receipt_file_sha256=source_receipt_file_sha256,
             feature_columns=feature_columns,
             alpha=alpha,
+            crosswalk_path=crosswalk_path,
+            crosswalk_receipt_path=crosswalk_receipt_path,
+            crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
         )
         prediction_errors, missing_count = _prediction_errors(artifact, test, feature_columns)
         side_swap_checks.append(side_swap_invariance_report(artifact, test, feature_columns))
-        boundary = _cluster_boundary_diagnostics(value, test_indices, cluster_column)
+        boundary = _cluster_boundary_diagnostics(
+            value, test_indices, effective_cluster_column
+        )
         row: dict[str, Any] = {
             "fold": fold_number,
             "train_rows": len(train),
@@ -2208,6 +2532,9 @@ def evaluate_phase_curve(
         columns=transfer_columns,
         alpha=alpha,
         max_groups_per_column=max_transfer_groups,
+        crosswalk_path=crosswalk_path,
+        crosswalk_receipt_path=crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
     )
     side_swap = {
         "passed": bool(side_swap_checks) and all(item["passed"] for item in side_swap_checks),
@@ -2244,7 +2571,7 @@ def evaluate_phase_curve(
         "metrics": metrics,
         "fold_count": len(fold_rows),
         "cluster_safe": bool(series_identity["authoritative"]),
-        "cluster_column": cluster_column or "game_uid",
+        "cluster_column": effective_cluster_column or "game_uid",
         "cluster_fallback_rows": fallback_rows,
         "series_identity": series_identity,
         "cluster_boundary_exclusions": {
@@ -2276,6 +2603,36 @@ def evaluate_phase_curve(
         "side_swap_invariance": side_swap,
         "authority": "development_only",
     }
+    if partition is not None:
+        output.update(
+            {
+                "series_partition_source": partition["source"],
+                "series_partition_key_fields": list(partition["key_fields"]),
+                "series_partition_mapping_sha256": partition["mapping_sha256"],
+                "series_partition_crosswalk_sha256": partition["crosswalk_sha256"],
+                "series_partition_artifact_sha256": partition["artifact_sha256"],
+                "series_partition_receipt_sha256": partition["receipt_sha256"],
+                "series_partition_receipt_file_sha256": partition[
+                    "receipt_file_sha256"
+                ],
+                "series_partition_eligible_game_count": partition[
+                    "eligible_game_count"
+                ],
+                "series_partition_eligible_identity_sha256": partition[
+                    "eligible_identity_sha256"
+                ],
+                "series_partition_eligible_game_ids": list(
+                    partition["eligible_game_ids"]
+                ),
+                "series_partition": partition,
+                "cross_model_series_partition": series_identity[
+                    "cross_model_partition"
+                ],
+                "series_partition_proxy_authority_blocker": partition[
+                    "proxy_authority_blocker"
+                ],
+            }
+        )
     if source_receipt_path is not None:
         output["source_receipt_artifact"] = _receipt_file_reference(
             source_receipt_path,
@@ -2320,6 +2677,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "assert_pregame_feature_names",
     "bind_phase_source",
+    "bind_phase_series_partition",
     "build_strict_prior_team_features",
     "chronological_folds",
     "evaluate_phase_curve",

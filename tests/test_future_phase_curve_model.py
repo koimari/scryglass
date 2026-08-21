@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import lol_kills.research.future_value_rating as future_value_rating
 
 from lol_kills.research.future_phase_curve import (
     FuturePhaseCurveError,
@@ -91,6 +92,10 @@ def _phase_frame(rows: int = 12) -> pd.DataFrame:
             "series_id_source": "exact_id_proxy",
             "prior_form_gold_diff": float(index - 5),
             "prior_form_gold_diff_missing": index == 3,
+            "league": "LCK",
+            "tournament": "fixture",
+            "blue_team_key": f"blue-{index // 2}",
+            "red_team_key": f"red-{index // 2}",
         }
         for phase in (10, 15, 20, 25):
             value[f"gold_diff_{phase}"] = float((index - 5) * phase)
@@ -104,6 +109,61 @@ def _phase_frame(rows: int = 12) -> pd.DataFrame:
         value["gold_diff_25_missing"] = index == 0
         values.append(value)
     return pd.DataFrame(values)
+
+
+def _crosswalk_receipt(ids: list[str]) -> dict[str, object]:
+    receipt = _receipt(ids)
+    receipt.update(
+        {
+            "model_eligible_game_count": len(ids),
+            "model_eligible_game_ids": list(canonical_game_ids(ids)),
+            "model_eligible_identity_sha256": identity_sha256(ids),
+        }
+    )
+    payload = dict(receipt)
+    payload.pop("receipt_sha256", None)
+    receipt["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return receipt
+
+
+def _fake_crosswalk_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    def bind(maps: pd.DataFrame, **_kwargs: object) -> pd.DataFrame:
+        result = maps.copy()
+        result.attrs["verified_leaguepedia_series_crosswalk"] = {
+            "mapped_game_ids": result["game_id"].astype(str).tolist(),
+        }
+        return result
+
+    def model_frame(maps: pd.DataFrame, **_kwargs: object) -> pd.DataFrame:
+        result = maps.copy()
+        result["series_id"] = [
+            f"leaguepedia:series-{int(index) // 2}"
+            for index in range(len(result))
+        ]
+        result.attrs["series_cluster_audit"] = {
+            "key_fields": ["league", "tournament", "unordered_team_pair"],
+            "crosswalk_assignment_sha256": "a" * 64,
+            "crosswalk_sha256": "b" * 64,
+            "crosswalk_artifact_sha256": "c" * 64,
+            "crosswalk_receipt_sha256": "d" * 64,
+            "partial_series_blocker": True,
+        }
+        return result
+
+    monkeypatch.setattr(
+        future_value_rating,
+        "bind_verified_leaguepedia_series_crosswalk",
+        bind,
+    )
+    monkeypatch.setattr(future_value_rating, "_map_model_frame", model_frame)
 
 
 def test_prepare_phase_frame_marks_short_game_targets_as_censored() -> None:
@@ -522,6 +582,58 @@ def test_evaluation_blocks_non_authoritative_team_tournament_series_proxies() ->
     assert report["series_identity"]["status"] == "blocked"
     assert report["series_identity"]["source_counts"]["team_tournament_proxy"] == len(frame)
     assert report["series_identity"]["blockers"]
+
+
+def test_verified_mixed_partition_binds_hashes_and_keeps_proxy_blocker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = _phase_frame(8)
+    receipt = _crosswalk_receipt(frame["game_uid"].tolist())
+    _fake_crosswalk_loader(monkeypatch)
+    artifact = fit_phase_curve(
+        frame,
+        source_receipt=receipt,
+        feature_columns=["prior_form_gold_diff"],
+        crosswalk_path="fixture/crosswalk.json",
+        crosswalk_receipt_path="fixture/crosswalk.receipt.json",
+        crosswalk_receipt_file_sha256="e" * 64,
+    )
+    assert artifact["series_partition_source"] == (
+        "mixed:leaguepedia_crosswalk+conservative_series_superset"
+    )
+    assert artifact["series_partition_mapping_sha256"] == "a" * 64
+    assert artifact["series_partition_crosswalk_sha256"] == "b" * 64
+    assert artifact["series_partition_eligible_game_ids"] == receipt[
+        "model_eligible_game_ids"
+    ]
+    assert artifact["cross_model_series_partition"]["status"] == "comparable"
+    assert artifact["series_partition_proxy_authority_blocker"] is True
+    assert artifact["series_identity"]["authoritative"] is False
+    assert artifact["series_identity"]["blockers"]
+
+
+def test_verified_mixed_partition_evaluation_uses_shared_series_clusters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = _phase_frame(12)
+    receipt = _crosswalk_receipt(frame["game_uid"].tolist())
+    _fake_crosswalk_loader(monkeypatch)
+    report = evaluate_phase_curve(
+        frame,
+        source_receipt=receipt,
+        feature_columns=["prior_form_gold_diff"],
+        n_splits=2,
+        transfer_columns=(),
+        crosswalk_path="fixture/crosswalk.json",
+        crosswalk_receipt_path="fixture/crosswalk.receipt.json",
+        crosswalk_receipt_file_sha256="e" * 64,
+    )
+    assert report["cluster_column"] == "series_id"
+    assert report["cross_model_series_partition"]["status"] == "comparable"
+    assert report["series_partition_mapping_sha256"] == "a" * 64
+    assert report["series_partition_eligible_game_count"] == len(frame)
+    assert report["series_identity"]["authoritative"] is False
+    assert report["cluster_safe"] is False
 
 
 def test_static_phase_artifacts_bind_the_accepted_census_reference() -> None:
