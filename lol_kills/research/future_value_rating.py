@@ -4263,17 +4263,31 @@ def _select_fold_regularization(
         )
         if set(inner_train_ids) & set(inner_validation_ids):
             raise FutureValueSourceError("nested selector train and validation IDs overlap")
-        if set(inner_train_ids) | set(inner_validation_ids) != set(outer_train_ids):
-            raise FutureValueSourceError("nested selector does not cover the outer training census")
+        inner_model_ids = tuple(sorted(set(inner_train_ids) | set(inner_validation_ids)))
+        if not set(inner_model_ids).issubset(set(outer_train_ids)):
+            raise FutureValueSourceError("nested selector is outside the outer training census")
+        boundary_excluded_ids = tuple(
+            sorted(set(outer_train_ids) - set(inner_model_ids))
+        )
+        expected_boundary_excluded = int(
+            (inner_fold.get("overlap_audit") or {}).get(
+                "excluded_boundary_map_count", -1
+            )
+        )
+        if len(boundary_excluded_ids) != expected_boundary_excluded:
+            raise FutureValueSourceError(
+                "nested selector boundary exclusion count changed"
+            )
 
         # An inner producer ledger is a separate source-bound artifact.  Its
-        # model census is exactly the outer training census.  This proves that
-        # no outer validation row, feature value, or producer state entered
-        # candidate-C selection.
+        # model census contains only the inner train and validation rows.
+        # Boundary-spanning series stay outside both sets. This proves that no
+        # outer validation row or excluded series entered candidate-C
+        # selection.
         inner_ledger = validate_rating_feature_ledger(
             inner_feature_ledger,
             feature_names=config.signed_map_features,
-            model_game_ids=outer_train_ids,
+            model_game_ids=inner_model_ids,
             train_game_ids=inner_train_ids,
             fit_window_end=inner_fold["validation_start"],
             source_receipt=source_receipt,
@@ -4291,9 +4305,14 @@ def _select_fold_regularization(
         if not bool(inner_dates.loc[inner_ledger["game_id"].isin(inner_validation_ids)].ge(inner_cutoff).all()):
             raise FutureValueSourceError("nested inner feature ledger validation rows violate cutoff")
 
-        inner_form = form[form["game_id"].astype(str).isin(outer_train_ids)].copy()
-        if set(inner_form["game_id"].astype(str)) != set(outer_train_ids):
-            raise FutureValueSourceError("nested inner form does not cover the outer training census")
+        inner_maps = outer_train_maps[
+            outer_train_maps["game_id"].astype(str).isin(inner_model_ids)
+        ].copy()
+        if set(inner_maps["game_id"].astype(str)) != set(inner_model_ids):
+            raise FutureValueSourceError("nested inner maps are incomplete")
+        inner_form = form[form["game_id"].astype(str).isin(inner_model_ids)].copy()
+        if set(inner_form["game_id"].astype(str)) != set(inner_model_ids):
+            raise FutureValueSourceError("nested inner form is incomplete")
         atom_model = fit_rank3_player_champion_role_atoms(
             inner_form,
             train_game_ids=inner_train_ids,
@@ -4302,10 +4321,10 @@ def _select_fold_regularization(
             fit_window_end=inner_fold["validation_start"],
         )
         inner_design = build_future_value_design(
-            outer_train_maps,
+            inner_maps,
             inner_form,
             atom_model,
-            verified_model_frame=outer_train_maps,
+            verified_model_frame=inner_maps,
             variant=config.variant,
             feature_ledger=inner_ledger,
             source_receipt=source_receipt,
@@ -4459,6 +4478,10 @@ def _select_fold_regularization(
             "inner_train_identity_sha256": identity_sha256(inner_train_ids),
             "inner_validation_game_count": len(inner_validation_ids),
             "inner_validation_identity_sha256": identity_sha256(inner_validation_ids),
+            "inner_boundary_excluded_game_count": len(boundary_excluded_ids),
+            "inner_boundary_excluded_identity_sha256": identity_sha256(
+                boundary_excluded_ids
+            ),
             "inner_validation_start": str(inner_fold["validation_start"]),
             "inner_validation_end": str(inner_fold["validation_end"]),
             "inner_overlap_audit": dict(inner_fold["overlap_audit"]),

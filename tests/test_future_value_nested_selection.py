@@ -140,6 +140,57 @@ def test_variant_selector_binds_inner_census_and_candidate_grid(monkeypatch) -> 
     assert selection["selected_c"] in selection["candidate_grid"]
 
 
+def test_variant_selector_binds_series_boundary_exclusions(monkeypatch) -> None:
+    maps, form = _manual_form(24)
+    map_frame = rating._map_model_frame(maps)
+    all_ids = [str(value) for value in range(1, 25)]
+    outer_train_ids = all_ids[:23]
+    inner_train_ids = outer_train_ids[:11]
+    excluded_id = outer_train_ids[11]
+    inner_validation_ids = outer_train_ids[12:]
+    source = _source_for(maps, all_ids)
+    inner = _ledger(
+        maps,
+        source,
+        [*inner_train_ids, *inner_validation_ids],
+        inner_train_ids,
+    )
+    inner_fold = {
+        "train_game_ids": inner_train_ids,
+        "validation_game_ids": inner_validation_ids,
+        "validation_start": "2026-01-12T00:00:00Z",
+        "validation_end": "2026-01-23T00:00:00Z",
+        "overlap_audit": {"excluded_boundary_map_count": 1},
+    }
+    monkeypatch.setattr(
+        rating,
+        "chronological_whole_series_folds",
+        lambda *_args, **_kwargs: [inner_fold],
+    )
+    monkeypatch.setattr(
+        rating,
+        "validate_rating_feature_ledger",
+        lambda frame, **_kwargs: frame.copy(),
+    )
+
+    selection = rating._select_fold_regularization(
+        map_frame,
+        form,
+        train_game_ids=tuple(outer_train_ids),
+        rank=rating.RANK_3,
+        min_cell_support=1,
+        variant=rating.RatingVariant.FUTURE_PLAYER_FORM,
+        inner_feature_ledger=inner,
+        source_receipt=source,
+        fit_window_end="2026-01-24T00:00:00Z",
+    )
+
+    assert selection["inner_boundary_excluded_game_count"] == 1
+    assert selection["inner_boundary_excluded_identity_sha256"] == (
+        rating.identity_sha256((excluded_id,))
+    )
+
+
 def test_variant_selector_rejects_inner_ledger_with_outer_validation_rows(monkeypatch) -> None:
     maps, form = _manual_form(24)
     map_frame = rating._map_model_frame(maps)
