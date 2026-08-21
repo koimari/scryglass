@@ -184,6 +184,184 @@ def test_complete_crosswalk_binds_exact_prefix_and_keeps_outcomes_out(
     verify_crosswalk(result)
 
 
+def test_direct_riot_platform_identity_survives_team_and_timestamp_drift(
+    tmp_path: Path,
+) -> None:
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
+    for index, row in enumerate(scoreboard, start=1):
+        row["RiotPlatformGameId"] = f"oe-{index}"
+        row["DateTime UTC"] = f"2026-07-0{index} 01:00:00"
+        row["Team1"] = f"Renamed Alpha {index}"
+        row["Team2"] = f"Renamed Beta {index}"
+    schedule[0]["DateTime UTC"] = "2026-07-01 00:00:00"
+    schedule[0]["Team1"] = "Renamed Alpha"
+    schedule[0]["Team2"] = "Renamed Beta"
+    payloads = {
+        "oe": oe,
+        "scoreboardgames": scoreboard,
+        "matchschedule": schedule,
+        "tournaments": tournaments,
+    }
+    records, _ = _refresh_records(records, raw, payloads)
+    records = _write_source_files(tmp_path / "direct-source-files", payloads, records)
+
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+    )
+
+    assert result["status"] == "complete_authoritative_coverage"
+    assert [row["scoreboard_riot_platform_game_id"] for row in result["assignments"]] == [
+        "oe-1",
+        "oe-2",
+    ]
+    assert {
+        row["assignment_method"] for row in result["assignments"]
+    } == {"exact_riot_platform_game_id_then_exact_game_id_prefix"}
+    assert all(
+        row["evidence"]["schedule"]["timestamp_bound_used_for_identity"] is False
+        for row in result["assignments"]
+    )
+    verify_crosswalk(result)
+
+    result["assignments"][0]["scoreboard_riot_platform_game_id"] = "forged"
+    result["assignment_sha256"] = hashlib.sha256(
+        _canonical(
+            sorted(result["assignments"], key=lambda row: str(row["oe_game_id"]))
+        )
+    ).hexdigest()
+    result.pop("crosswalk_sha256")
+    result["crosswalk_sha256"] = hashlib.sha256(_canonical(result)).hexdigest()
+    with pytest.raises(CrosswalkError, match="game identity changed"):
+        verify_crosswalk(result)
+
+
+def test_direct_riot_platform_identity_keeps_patch_mismatch_as_diagnostic(
+    tmp_path: Path,
+) -> None:
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
+    for index, row in enumerate(scoreboard, start=1):
+        row["RiotPlatformGameId"] = f"oe-{index}"
+        row["Patch"] = "26.15"
+    schedule[0]["Patch"] = "26.15"
+    payloads = {
+        "oe": oe,
+        "scoreboardgames": scoreboard,
+        "matchschedule": schedule,
+        "tournaments": tournaments,
+    }
+    records, raw = _refresh_records(records, raw, payloads)
+    records = _write_source_files(tmp_path / "direct-patch-source-files", payloads, records)
+
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+    )
+
+    assert result["status"] == "complete_authoritative_coverage"
+    assert all(
+        row["evidence"]["patch"]["matched"] is False
+        and row["evidence"]["patch"]["identity_gate_enforced"] is False
+        and row["evidence"]["schedule"]["patch"]["matched"] is False
+        and row["evidence"]["schedule"]["patch"]["identity_gate_enforced"] is False
+        for row in result["assignments"]
+    )
+    verify_crosswalk(result)
+
+
+def test_duplicate_direct_riot_id_selects_only_unique_schedule_prefix(
+    tmp_path: Path,
+) -> None:
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
+    scoreboard[0]["RiotPlatformGameId"] = "oe-1"
+    scoreboard[1]["RiotPlatformGameId"] = "oe-2"
+    duplicate = dict(scoreboard[0])
+    duplicate["GameId"] = "match-other_1"
+    scoreboard.append(duplicate)
+    payloads = {
+        "oe": oe,
+        "scoreboardgames": scoreboard,
+        "matchschedule": schedule,
+        "tournaments": tournaments,
+    }
+    records, raw = _refresh_records(records, raw, payloads)
+    records = _write_source_files(tmp_path / "direct-duplicate-source-files", payloads, records)
+
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+    )
+
+    first = next(row for row in result["assignments"] if row["oe_game_id"] == "oe-1")
+    assert result["status"] == "complete_authoritative_coverage"
+    assert first["scoreboard_game_id"] == "match-1_1"
+    assert first["assignment_method"] == (
+        "exact_riot_platform_game_id_disambiguated_by_unique_"
+        "matchschedule_prefix_then_exact_game_id_prefix"
+    )
+    assert first["evidence"]["identity_disambiguation"]["eligible_game_id_prefix"] == "match-1"
+    verify_crosswalk(result)
+
+
+def test_duplicate_direct_riot_id_stays_ambiguous_when_each_prefix_has_schedule(
+    tmp_path: Path,
+) -> None:
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
+    scoreboard[0]["RiotPlatformGameId"] = "oe-1"
+    scoreboard[1]["RiotPlatformGameId"] = "oe-2"
+    duplicate = dict(scoreboard[0])
+    duplicate["GameId"] = "match-other_1"
+    scoreboard.append(duplicate)
+    schedule.append(dict(schedule[0], MatchId="match-other"))
+    payloads = {
+        "oe": oe,
+        "scoreboardgames": scoreboard,
+        "matchschedule": schedule,
+        "tournaments": tournaments,
+    }
+    records, raw = _refresh_records(records, raw, payloads)
+    records = _write_source_files(tmp_path / "direct-ambiguous-source-files", payloads, records)
+
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+        allow_partial=True,
+    )
+
+    assert result["status"] == "partial_authoritative_coverage"
+    assert [row["oe_game_id"] for row in result["assignments"]] == ["oe-2"]
+    assert any(
+        issue["kind"] == "riot_platform_identity_ambiguous"
+        and issue["eligible_candidate_count"] == 2
+        for issue in result["issues"]
+    )
+    verify_crosswalk(result)
+
+
 def test_resealed_embedded_outcome_field_fails_verification(tmp_path: Path) -> None:
     result = _build_verifiable(tmp_path)
     result["raw_sources"]["matchschedule"][0]["Winner"] = "forged"

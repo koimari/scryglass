@@ -30,7 +30,7 @@ from lol_kills.etl.aliases import normalize_team
 from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
 
 
-SCHEMA_VERSION = "scryglass:oe-leaguepedia-series-crosswalk:v1"
+SCHEMA_VERSION = "scryglass:oe-leaguepedia-series-crosswalk:v2"
 SOURCE_RECORD_LABELS = ("oe", "scoreboardgames", "matchschedule", "tournaments")
 DEFAULT_MAX_GAME_TIME_DELTA_SECONDS = 300
 DEFAULT_MAX_FIRST_GAME_SCHEDULE_DELTA_SECONDS = 6 * 60 * 60
@@ -50,6 +50,11 @@ _OUTCOME_FREE_PROJECTION = {
     "scope": "all_embedded_raw_source_rows",
     "policy": "remove_top_level_outcome_result_winner_and_win_fields",
     "original_file_bytes_bound_separately": True,
+}
+_SCOREBOARD_IDENTITY = {
+    "primary": "exact_OE.gameid_equals_ScoreboardGames.RiotPlatformGameId",
+    "fallback": "verified_alias_team_set_competition_patch_and_bounded_timestamp",
+    "direct_identity_uses_team_or_timestamp": False,
 }
 _TOURNAMENT_BINDING = {
     "source": "ScoreboardGames.Tournament",
@@ -304,6 +309,23 @@ def _scoreboard_game_id(row: Mapping[str, Any]) -> str:
     return value
 
 
+def _scoreboard_riot_platform_game_id(row: Mapping[str, Any]) -> str:
+    value = _first(
+        row,
+        (
+            "RiotPlatformGameId",
+            "riot_platform_game_id",
+            "riotplatformgameid",
+        ),
+    )
+    if not value:
+        return ""
+    values = canonical_game_ids((value,))
+    if len(values) != 1:
+        raise CrosswalkError("ScoreboardGames RiotPlatformGameId is invalid")
+    return values[0]
+
+
 def _schedule_match_id(row: Mapping[str, Any]) -> str:
     value = _first(row, ("MatchId", "match_id", "series_id"))
     if not value:
@@ -395,10 +417,18 @@ def _patch_matches(
     section: Mapping[str, Any],
 ) -> tuple[bool, dict[str, Any]]:
     if not source_patch:
-        return True, {"source_patch_available": False, "row_patch_available": False}
+        return True, {
+            "source_patch_available": False,
+            "row_patch_available": False,
+            "matched": True,
+        }
     row_patch = _norm(_first(row, ("Patch", "patch", "patch_version")))
     if not row_patch:
-        return True, {"source_patch_available": True, "row_patch_available": False}
+        return True, {
+            "source_patch_available": True,
+            "row_patch_available": False,
+            "matched": True,
+        }
     patch_map = section.get("patches", section.get("patch_map", {}))
     if not patch_map and isinstance(section.get("scoreboard"), Mapping):
         scoreboard_section = section["scoreboard"]
@@ -419,6 +449,7 @@ def _patch_matches(
         "source_patch": _norm(source_patch),
         "row_patch": row_patch,
         "allowed_row_patches": list(allowed),
+        "matched": matched,
     }
 
 
@@ -593,8 +624,9 @@ def _prepared_scoreboard_rows(rows: Sequence[Mapping[str, Any]], issues: list[di
             teams = _row_team_set(row, label=f"scoreboard[{index}]")
             stamp = _timestamp(row, label=f"scoreboard[{index}]")
             tournament = _first(row, ("Tournament", "tournament"))
+            riot_platform_game_id = _scoreboard_riot_platform_game_id(row)
             seen.add(game_id)
-            prepared.append({**row, "_game_id": game_id, "_prefix": prefix, "_order": order, "_teams": teams, "_stamp": stamp, "_tournament": tournament})
+            prepared.append({**row, "_game_id": game_id, "_riot_platform_game_id": riot_platform_game_id, "_prefix": prefix, "_order": order, "_teams": teams, "_stamp": stamp, "_tournament": tournament})
         except CrosswalkError as error:
             issues.append({"kind": "invalid_scoreboard_row", "index": index, "error": str(error)})
     return prepared
@@ -790,6 +822,13 @@ def build_oe_leaguepedia_series_crosswalk(
         raw_source_bytes,
     )
     scoreboard = _prepared_scoreboard_rows(scoreboard_rows, issues)
+    scoreboard_by_riot_platform_game_id: dict[str, list[dict[str, Any]]] = {}
+    for row in scoreboard:
+        riot_platform_game_id = str(row.get("_riot_platform_game_id") or "")
+        if riot_platform_game_id:
+            scoreboard_by_riot_platform_game_id.setdefault(
+                riot_platform_game_id, []
+            ).append(row)
     schedule = _prepared_schedule_rows(schedule_rows, issues)
     tournaments = _prepared_tournament_rows(tournaments_rows or (), issues)
     schedules_by_match: dict[str, list[dict[str, Any]]] = {}
@@ -817,31 +856,131 @@ def build_oe_leaguepedia_series_crosswalk(
             continue
         scoreboard_section = _mapping_section(mapping, "scoreboard")
         schedule_section = _mapping_section(mapping, "schedule")
-        candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
-        for candidate in scoreboard:
-            if candidate["_teams"] != oe["_teams"]:
+        direct_candidates = scoreboard_by_riot_platform_game_id.get(
+            oe["_game_id"], []
+        )
+        direct_disambiguation: dict[str, Any] | None = None
+        if len(direct_candidates) > 1:
+            schedule_unique_candidates = [
+                candidate
+                for candidate in direct_candidates
+                if len(schedules_by_match.get(candidate["_prefix"], [])) == 1
+            ]
+            if len(schedule_unique_candidates) == 1:
+                direct_candidates = schedule_unique_candidates
+                direct_disambiguation = {
+                    "policy": "select_only_one_exact_RiotPlatformGameId_candidate_with_one_MatchSchedule_row_for_its_GameId_prefix",
+                    "candidate_count": len(
+                        scoreboard_by_riot_platform_game_id[oe["_game_id"]]
+                    ),
+                    "eligible_candidate_count": 1,
+                    "eligible_scoreboard_game_id": direct_candidates[0]["_game_id"],
+                    "eligible_game_id_prefix": direct_candidates[0]["_prefix"],
+                }
+            else:
+                issues.append(
+                    {
+                        "kind": "riot_platform_identity_ambiguous",
+                        "oe_game_id": oe["_game_id"],
+                        "candidate_count": len(direct_candidates),
+                        "eligible_candidate_count": len(schedule_unique_candidates),
+                        "candidate_game_ids": sorted(
+                            candidate["_game_id"] for candidate in direct_candidates
+                        ),
+                    }
+                )
                 continue
-            delta = abs((candidate["_stamp"] - oe["_stamp"]).total_seconds())
-            if delta > max_game_time_delta_seconds:
-                continue
+        assignment_method: str
+        if len(direct_candidates) == 1:
+            selected = direct_candidates[0]
             competition_ok, competition_evidence = _competition_matches(
-                candidate, scoreboard_section, require_constraint=True
+                selected, scoreboard_section, require_constraint=True
             )
             if not competition_ok:
+                issues.append(
+                    {
+                        "kind": "riot_platform_identity_competition_mismatch",
+                        "oe_game_id": oe["_game_id"],
+                        "scoreboard_game_id": selected["_game_id"],
+                    }
+                )
                 continue
-            patch_ok, patch_evidence = _patch_matches(oe["_patch"], candidate, mapping)
-            if not patch_ok:
+            _patch_ok, patch_evidence = _patch_matches(
+                oe["_patch"], selected, mapping
+            )
+            evidence = {
+                "identity": {
+                    "source_field": "OE.gameid",
+                    "target_field": "ScoreboardGames.RiotPlatformGameId",
+                    "value": oe["_game_id"],
+                    "exact": True,
+                },
+                "competition": competition_evidence,
+                "patch": {
+                    **patch_evidence,
+                    "identity_gate": "exact_riot_platform_game_id",
+                    "identity_gate_enforced": False,
+                },
+            }
+            if direct_disambiguation is not None:
+                evidence["identity_disambiguation"] = direct_disambiguation
+            assignment_method = "exact_riot_platform_game_id_then_exact_game_id_prefix"
+            if direct_disambiguation is not None:
+                assignment_method = (
+                    "exact_riot_platform_game_id_disambiguated_by_unique_"
+                    "matchschedule_prefix_then_exact_game_id_prefix"
+                )
+        else:
+            candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
+            for candidate in scoreboard:
+                if candidate["_teams"] != oe["_teams"]:
+                    continue
+                delta = abs(
+                    (candidate["_stamp"] - oe["_stamp"]).total_seconds()
+                )
+                if delta > max_game_time_delta_seconds:
+                    continue
+                competition_ok, competition_evidence = _competition_matches(
+                    candidate, scoreboard_section, require_constraint=True
+                )
+                if not competition_ok:
+                    continue
+                patch_ok, patch_evidence = _patch_matches(
+                    oe["_patch"], candidate, mapping
+                )
+                if not patch_ok:
+                    continue
+                candidates.append(
+                    (
+                        candidate,
+                        {
+                            "timestamp_delta_seconds": delta,
+                            "competition": competition_evidence,
+                            "patch": patch_evidence,
+                        },
+                    )
+                )
+            if len(candidates) != 1:
+                issues.append(
+                    {
+                        "kind": (
+                            "scoreboard_identity_ambiguous"
+                            if len(candidates) > 1
+                            else "scoreboard_identity_missing"
+                        ),
+                        "oe_game_id": oe["_game_id"],
+                        "candidate_count": len(candidates),
+                        "candidate_game_ids": [
+                            candidate["_game_id"] for candidate, _ in candidates
+                        ],
+                    }
+                )
                 continue
-            candidates.append((candidate, {"timestamp_delta_seconds": delta, "competition": competition_evidence, "patch": patch_evidence}))
-        if len(candidates) != 1:
-            issues.append({
-                "kind": "scoreboard_identity_ambiguous" if len(candidates) > 1 else "scoreboard_identity_missing",
-                "oe_game_id": oe["_game_id"],
-                "candidate_count": len(candidates),
-                "candidate_game_ids": [candidate["_game_id"] for candidate, _ in candidates],
-            })
-            continue
-        selected, evidence = candidates[0]
+            selected, evidence = candidates[0]
+            assignment_method = (
+                "exact_team_set_competition_patch_bounded_timestamp_then_"
+                "exact_game_id_prefix"
+            )
         scoreboard_id = selected["_game_id"]
         if scoreboard_id in used_scoreboard_ids:
             issues.append({"kind": "duplicate_source_assignment", "oe_game_id": oe["_game_id"], "scoreboard_game_id": scoreboard_id})
@@ -897,8 +1036,14 @@ def build_oe_leaguepedia_series_crosswalk(
         match_id = selected["_prefix"]
         match_candidates = schedules_by_match.get(match_id, [])
         schedule_candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        direct_scoreboard_identity = assignment_method.startswith(
+            "exact_riot_platform_game_id"
+        )
         for schedule_row in match_candidates:
-            if schedule_row["_teams"] != oe["_teams"]:
+            if (
+                not direct_scoreboard_identity
+                and schedule_row["_teams"] != oe["_teams"]
+            ):
                 continue
             competition_ok, schedule_competition_evidence = _competition_matches(
                 schedule_row, schedule_section, require_constraint=True
@@ -906,7 +1051,7 @@ def build_oe_leaguepedia_series_crosswalk(
             if not competition_ok:
                 continue
             patch_ok, schedule_patch_evidence = _patch_matches(oe["_patch"], schedule_row, mapping)
-            if not patch_ok:
+            if not patch_ok and not direct_scoreboard_identity:
                 continue
             schedule_delta = (oe["_stamp"] - schedule_row["_stamp"]).total_seconds()
             order = int(selected["_order"])
@@ -915,13 +1060,35 @@ def build_oe_leaguepedia_series_crosswalk(
                 if order == 1
                 else max_later_game_schedule_age_seconds
             )
-            if abs(schedule_delta) > schedule_bound:
+            if not direct_scoreboard_identity and abs(schedule_delta) > schedule_bound:
                 continue
-            schedule_candidates.append((schedule_row, {
-                "series_timestamp_delta_seconds": schedule_delta,
-                "competition": schedule_competition_evidence,
-                "patch": schedule_patch_evidence,
-            }))
+            schedule_candidates.append(
+                (
+                    schedule_row,
+                    {
+                        "identity": {
+                            "source_field": "ScoreboardGames.GameId prefix",
+                            "target_field": "MatchSchedule.MatchId",
+                            "value": match_id,
+                            "exact": True,
+                        },
+                        "series_timestamp_delta_seconds": schedule_delta,
+                        "team_set_consistent": schedule_row["_teams"]
+                        == oe["_teams"],
+                        "timestamp_bound_used_for_identity": not direct_scoreboard_identity,
+                        "competition": schedule_competition_evidence,
+                        "patch": {
+                            **schedule_patch_evidence,
+                            "identity_gate": (
+                                "exact_riot_platform_game_id"
+                                if direct_scoreboard_identity
+                                else "team_set_competition_patch_timestamp"
+                            ),
+                            "identity_gate_enforced": not direct_scoreboard_identity,
+                        },
+                    },
+                )
+            )
         if len(schedule_candidates) != 1:
             issues.append({
                 "kind": "schedule_identity_ambiguous" if len(schedule_candidates) > 1 else "schedule_identity_missing",
@@ -936,6 +1103,9 @@ def build_oe_leaguepedia_series_crosswalk(
         assignments.append({
             "oe_game_id": oe["_game_id"],
             "scoreboard_game_id": scoreboard_id,
+            "scoreboard_riot_platform_game_id": (
+                selected.get("_riot_platform_game_id") or None
+            ),
             "scoreboard_game_order": int(selected["_order"]),
             "series_id": match_id,
             "normalized_team_set": sorted(oe["_source_teams"]),
@@ -953,7 +1123,7 @@ def build_oe_leaguepedia_series_crosswalk(
                 "tournament": tournament_evidence,
             },
             "outcome_used": False,
-            "assignment_method": "exact_team_set_competition_patch_bounded_timestamp_then_exact_game_id_prefix",
+            "assignment_method": assignment_method,
         })
 
     assignments.sort(key=lambda row: (row["oe_timestamp"], row["oe_game_id"]))
@@ -1070,9 +1240,13 @@ def build_oe_leaguepedia_series_crosswalk(
             "tournaments": _outcome_free_rows(tournaments_rows or ()),
         },
         "join_contract": {
+            "scoreboard_identity": dict(_SCOREBOARD_IDENTITY),
             "team_identity": "verified_alias_normalized_unordered_two_team_set_for_join; original_OE_team_set_for_assignment_binding",
             "competition_mapping": "explicit_source_league_to_scoreboard_and_schedule_values",
-            "patch_identity": "match_when_both_source_and_target_patch_are_available",
+            "patch_identity": {
+                "fallback": "required_when_both_source_and_target_patch_are_available",
+                "exact_riot_platform_game_id": "diagnostic_only_when_both_source_and_target_patch_are_available",
+            },
             "timestamp_bounds": {
                 "game_seconds": max_game_time_delta_seconds,
                 "first_game_schedule_absolute_seconds": max_first_game_schedule_delta_seconds,
@@ -1082,7 +1256,10 @@ def build_oe_leaguepedia_series_crosswalk(
             "game_id_prefix_to_match_id": "exact",
             "one_to_one": True,
             "ambiguity_policy": "reject",
-            "duplicate_policy": "reject",
+            "duplicate_policy": {
+                "default": "reject",
+                "exact_riot_platform_game_id": "accept_only_one_candidate_with_exactly_one_MatchSchedule_row_for_its_GameId_prefix",
+            },
             "unmatched_policy": "reject_assignment_and_record_issue",
             "outcome_used": False,
             "outcome_policy": "ignored_and_never_used_for_matching",
@@ -1276,6 +1453,8 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                 not isinstance(join_contract, Mapping)
                 or join_contract.get("raw_source_projection")
                 != _OUTCOME_FREE_PROJECTION
+                or join_contract.get("scoreboard_identity")
+                != _SCOREBOARD_IDENTITY
             ):
                 raise CrosswalkError("crosswalk raw source projection is invalid")
 
@@ -1332,6 +1511,24 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                     raise CrosswalkError(
                         "crosswalk raw ScoreboardGames identity is invalid"
                     ) from error
+            oe_by_id: dict[str, list[dict[str, Any]]] = {}
+            for raw in raw_sources["oe"]:
+                row = dict(raw)
+                try:
+                    oe_by_id.setdefault(_oe_game_id(row), []).append(row)
+                except CrosswalkError as error:
+                    raise CrosswalkError(
+                        "crosswalk raw OE identity is invalid"
+                    ) from error
+            schedule_by_id: dict[str, list[dict[str, Any]]] = {}
+            for raw in raw_sources["matchschedule"]:
+                row = dict(raw)
+                try:
+                    schedule_by_id.setdefault(_schedule_match_id(row), []).append(
+                        row
+                    )
+                except CrosswalkError:
+                    continue
             tournament_issues: list[dict[str, Any]] = []
             tournaments_by_name = _prepared_tournament_rows(
                 raw_sources["tournaments"], tournament_issues
@@ -1364,6 +1561,148 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                         "crosswalk assignment ScoreboardGames evidence is invalid"
                     )
                 scoreboard_row = scoreboard_candidates[0]
+                oe_game_id = str(assignment.get("oe_game_id") or "").strip()
+                if len(oe_by_id.get(oe_game_id, [])) != 1:
+                    raise CrosswalkError(
+                        "crosswalk assignment OE evidence is invalid"
+                    )
+                try:
+                    riot_platform_game_id = _scoreboard_riot_platform_game_id(
+                        scoreboard_row
+                    )
+                    game_prefix, game_order = _game_prefix_and_order(
+                        scoreboard_game_id
+                    )
+                except CrosswalkError as error:
+                    raise CrosswalkError(
+                        "crosswalk assignment direct identity is invalid"
+                    ) from error
+                if (
+                    str(
+                        assignment.get("scoreboard_riot_platform_game_id") or ""
+                    ).strip()
+                    != riot_platform_game_id
+                    or assignment.get("scoreboard_game_id_prefix") != game_prefix
+                    or assignment.get("series_id") != game_prefix
+                    or assignment.get("scoreboard_game_order") != game_order
+                ):
+                    raise CrosswalkError(
+                        "crosswalk assignment game identity changed"
+                    )
+                method = str(assignment.get("assignment_method") or "")
+                allowed_methods = {
+                    "exact_riot_platform_game_id_then_exact_game_id_prefix",
+                    (
+                        "exact_riot_platform_game_id_disambiguated_by_unique_"
+                        "matchschedule_prefix_then_exact_game_id_prefix"
+                    ),
+                    (
+                        "exact_team_set_competition_patch_bounded_timestamp_then_"
+                        "exact_game_id_prefix"
+                    ),
+                }
+                if method not in allowed_methods:
+                    raise CrosswalkError(
+                        "crosswalk assignment method is invalid"
+                    )
+                evidence = assignment.get("evidence")
+                if not isinstance(evidence, Mapping):
+                    raise CrosswalkError(
+                        "crosswalk assignment evidence is invalid"
+                    )
+                if method.startswith("exact_riot_platform_game_id"):
+                    expected_identity = {
+                        "source_field": "OE.gameid",
+                        "target_field": "ScoreboardGames.RiotPlatformGameId",
+                        "value": oe_game_id,
+                        "exact": True,
+                    }
+                    if (
+                        riot_platform_game_id != oe_game_id
+                        or evidence.get("identity") != expected_identity
+                    ):
+                        raise CrosswalkError(
+                            "crosswalk direct Riot game identity changed"
+                        )
+                    direct_candidates = []
+                    for raw_scoreboard in raw_sources["scoreboardgames"]:
+                        try:
+                            candidate_riot_id = _scoreboard_riot_platform_game_id(
+                                raw_scoreboard
+                            )
+                        except CrosswalkError as error:
+                            raise CrosswalkError(
+                                "crosswalk raw ScoreboardGames identity is invalid"
+                            ) from error
+                        if candidate_riot_id == oe_game_id:
+                            direct_candidates.append(raw_scoreboard)
+                    if len(direct_candidates) == 0:
+                        raise CrosswalkError(
+                            "crosswalk direct Riot game identity is missing"
+                        )
+                    if len(direct_candidates) > 1:
+                        eligible_candidates = []
+                        for candidate in direct_candidates:
+                            try:
+                                candidate_prefix, _candidate_order = (
+                                    _game_prefix_and_order(_scoreboard_game_id(candidate))
+                                )
+                            except CrosswalkError as error:
+                                raise CrosswalkError(
+                                    "crosswalk direct Riot game candidate identity is invalid"
+                                ) from error
+                            if len(schedule_by_id.get(candidate_prefix, [])) == 1:
+                                eligible_candidates.append(
+                                    (candidate, candidate_prefix)
+                                )
+                        if (
+                            len(eligible_candidates) != 1
+                            or _scoreboard_game_id(eligible_candidates[0][0])
+                            != scoreboard_game_id
+                            or method
+                            != (
+                                "exact_riot_platform_game_id_disambiguated_by_unique_"
+                                "matchschedule_prefix_then_exact_game_id_prefix"
+                            )
+                        ):
+                            raise CrosswalkError(
+                                "crosswalk direct Riot game identity ambiguity changed"
+                            )
+                        expected_disambiguation = {
+                            "policy": "select_only_one_exact_RiotPlatformGameId_candidate_with_one_MatchSchedule_row_for_its_GameId_prefix",
+                            "candidate_count": len(direct_candidates),
+                            "eligible_candidate_count": 1,
+                            "eligible_scoreboard_game_id": scoreboard_game_id,
+                            "eligible_game_id_prefix": eligible_candidates[0][1],
+                        }
+                        if evidence.get("identity_disambiguation") != expected_disambiguation:
+                            raise CrosswalkError(
+                                "crosswalk direct Riot game disambiguation evidence changed"
+                            )
+                    elif "identity_disambiguation" in evidence:
+                        raise CrosswalkError(
+                            "crosswalk direct Riot game disambiguation is unexpected"
+                        )
+                schedule_candidates = schedule_by_id.get(game_prefix, [])
+                if len(schedule_candidates) != 1:
+                    raise CrosswalkError(
+                        "crosswalk assignment MatchSchedule evidence is invalid"
+                    )
+                schedule_evidence = evidence.get("schedule")
+                expected_schedule_identity = {
+                    "source_field": "ScoreboardGames.GameId prefix",
+                    "target_field": "MatchSchedule.MatchId",
+                    "value": game_prefix,
+                    "exact": True,
+                }
+                if (
+                    not isinstance(schedule_evidence, Mapping)
+                    or schedule_evidence.get("identity")
+                    != expected_schedule_identity
+                ):
+                    raise CrosswalkError(
+                        "crosswalk schedule identity evidence changed"
+                    )
                 scoreboard_tournament = _first(
                     scoreboard_row, ("Tournament", "tournament")
                 )
@@ -1400,12 +1739,55 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                     raise CrosswalkError(
                         "crosswalk assignment tournament mapping is invalid"
                     )
+                oe_row = oe_by_id[oe_game_id][0]
+                _score_patch_ok, expected_score_patch = _patch_matches(
+                    _first(oe_row, ("patch", "Patch", "patch_version")),
+                    scoreboard_row,
+                    mapping,
+                )
+                observed_score_patch = evidence.get("patch")
+                if method.startswith("exact_riot_platform_game_id"):
+                    expected_score_patch = {
+                        **expected_score_patch,
+                        "identity_gate": "exact_riot_platform_game_id",
+                        "identity_gate_enforced": False,
+                    }
+                if observed_score_patch != expected_score_patch:
+                    raise CrosswalkError(
+                        "crosswalk scoreboard patch evidence changed"
+                    )
+                schedule_row = schedule_candidates[0]
+                _schedule_patch_ok, expected_schedule_patch = _patch_matches(
+                    _first(oe_row, ("patch", "Patch", "patch_version")),
+                    schedule_row,
+                    mapping,
+                )
+                observed_schedule_patch = (
+                    schedule_evidence.get("patch")
+                    if isinstance(schedule_evidence, Mapping)
+                    else None
+                )
+                if method.startswith("exact_riot_platform_game_id"):
+                    expected_schedule_patch = {
+                        **expected_schedule_patch,
+                        "identity_gate": "exact_riot_platform_game_id",
+                        "identity_gate_enforced": False,
+                    }
+                else:
+                    expected_schedule_patch = {
+                        **expected_schedule_patch,
+                        "identity_gate": "team_set_competition_patch_timestamp",
+                        "identity_gate_enforced": True,
+                    }
+                if observed_schedule_patch != expected_schedule_patch:
+                    raise CrosswalkError(
+                        "crosswalk schedule patch evidence changed"
+                    )
                 tournament_ok, expected_evidence = _tournament_matches_competition(
                     tournament_candidates[0],
                     scoreboard_row,
                     _mapping_section(mapping, "scoreboard"),
                 )
-                evidence = assignment.get("evidence")
                 observed_evidence = (
                     evidence.get("tournament")
                     if isinstance(evidence, Mapping)
