@@ -11,6 +11,7 @@ from benchmarks.future_value_four_variant_bundle import (
     FourVariantBundleError,
     _derive_inner_fold_spec,
     _prepare_inner_output_root,
+    _without_frame_attrs,
     build_bundle,
 )
 
@@ -79,6 +80,18 @@ def test_nested_output_root_fails_closed_when_reused(tmp_path: Path) -> None:
     (root / "stale.json").write_text("{}", encoding="utf-8")
     with pytest.raises(FourVariantBundleError, match="must be empty"):
         _prepare_inner_output_root(root)
+
+
+def test_nested_producer_frames_drop_only_attrs() -> None:
+    frame = _model_frame()
+    frame.attrs["verified_crosswalk_binding"] = {
+        "source_records": ["large"] * 20
+    }
+
+    result = _without_frame_attrs(frame)
+
+    assert result.attrs == {}
+    pd.testing.assert_frame_equal(result, frame, check_exact=True)
 
 
 def test_bundle_requires_complete_crosswalk_binding(tmp_path: Path) -> None:

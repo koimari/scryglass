@@ -75,6 +75,14 @@ def _sha256_path(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _without_frame_attrs(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return the same frame values without producer-irrelevant metadata."""
+
+    result = frame.copy(deep=False)
+    result.attrs = {}
+    return result
+
+
 def _verify_manifest(manifest: Mapping[str, Any], label: str) -> dict[str, Any]:
     payload = dict(manifest)
     claimed = payload.pop("manifest_sha256", None)
@@ -288,11 +296,14 @@ def _build_inner_fold_artifacts(
     )
     fit_window_end = str(inner_fold["validation_start"])
     output_ids = tuple(sorted((*train_ids, *validation_ids)))
+    producer_maps = _without_frame_attrs(maps)
+    producer_players = _without_frame_attrs(players)
+    producer_teams = _without_frame_attrs(teams)
 
     current, current_native = build_fold_current_rating_feature_ledger(
-        maps,
-        players,
-        teams,
+        producer_maps,
+        producer_players,
+        producer_teams,
         source_receipt=source_receipt,
         train_game_ids=train_ids,
         validation_game_ids=validation_ids,
@@ -309,7 +320,11 @@ def _build_inner_fold_artifacts(
         train_game_ids=train_ids,
         validation_game_ids=validation_ids,
         fit_window_end=fit_window_end,
-        source_frames={"maps": maps, "players": players, "teams": teams},
+        source_frames={
+            "maps": producer_maps,
+            "players": producer_players,
+            "teams": producer_teams,
+        },
     )
     current_path = current_root / "current-rating-feature-ledger.parquet"
     current_native_path = current_root / "current-rating-feature-ledger.receipt.json"
@@ -333,9 +348,9 @@ def _build_inner_fold_artifacts(
     )
 
     scaling_native, scaling_native_receipt = build_scaling_feature_ledger(
-        maps,
-        players,
-        teams,
+        producer_maps,
+        producer_players,
+        producer_teams,
         source_receipt=source_receipt,
         source_receipt_sha256=str(source_receipt["receipt_sha256"]),
         train_game_ids=train_ids,
