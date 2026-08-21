@@ -51,6 +51,7 @@ def build_from_paths(
     proxy_path: Path = DEFAULT_PROXY,
     leaguepedia_crosswalk_path: Path | None = None,
     leaguepedia_crosswalk_receipt_path: Path | None = None,
+    leaguepedia_crosswalk_expected_receipt_file_sha256: str | None = None,
     variant_bundle_path: Path | None = None,
     output_path: Path = DEFAULT_OUTPUT,
 ) -> dict[str, Any]:
@@ -107,6 +108,9 @@ def build_from_paths(
         leaguepedia_crosswalk_receipt=crosswalk_receipt,
         leaguepedia_crosswalk_artifact_file=crosswalk_record,
         leaguepedia_crosswalk_receipt_file=crosswalk_receipt_record,
+        leaguepedia_crosswalk_expected_receipt_file_sha256=(
+            leaguepedia_crosswalk_expected_receipt_file_sha256
+        ),
         variant_bundle=variant_bundle,
         variant_bundle_file=variant_bundle_record,
     )
@@ -124,6 +128,10 @@ def main() -> int:
     parser.add_argument("--proxy", type=Path, default=DEFAULT_PROXY)
     parser.add_argument("--leaguepedia-crosswalk", type=Path)
     parser.add_argument("--leaguepedia-crosswalk-receipt", type=Path)
+    parser.add_argument(
+        "--leaguepedia-crosswalk-expected-receipt-file-sha256",
+        help="independently recorded SHA-256 of the exact crosswalk receipt file",
+    )
     parser.add_argument("--variant-bundle", type=Path)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
@@ -134,6 +142,9 @@ def main() -> int:
         proxy_path=args.proxy,
         leaguepedia_crosswalk_path=args.leaguepedia_crosswalk,
         leaguepedia_crosswalk_receipt_path=args.leaguepedia_crosswalk_receipt,
+        leaguepedia_crosswalk_expected_receipt_file_sha256=(
+            args.leaguepedia_crosswalk_expected_receipt_file_sha256
+        ),
         variant_bundle_path=args.variant_bundle,
         output_path=args.output,
     )
