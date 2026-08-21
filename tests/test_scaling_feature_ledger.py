@@ -169,6 +169,44 @@ def test_census_deletion_and_bound_source_value_drift_fail_closed() -> None:
         _build(maps[maps["game_uid"] != "g2"], players, teams)
 
 
+def test_excluded_source_maps_are_bound_then_filtered() -> None:
+    maps, players, teams = _frames()
+    extra_maps: list[dict[str, object]] = []
+    extra_players: list[dict[str, object]] = []
+    extra_teams: list[dict[str, object]] = []
+    for index in range(4, 10):
+        game_id = f"excluded-{index}"
+        extra_maps.append({"game_uid": game_id, "date": "2026-01-03T00:00:00Z"})
+        for side, team in (("Blue", f"b-{game_id}"), ("Red", f"r-{game_id}")):
+            extra_teams.append(
+                {"gameid": game_id, "side": side, "teamid": f"oe:team:{team}"}
+            )
+            for role in ROLES:
+                row = {
+                    "gameid": game_id,
+                    "side": side,
+                    "position": role,
+                    "playerid": f"oe:player:{side.casefold()}-{role}-{game_id}",
+                    "teamid": f"oe:team:{team}",
+                    "champion": f"champion-{role}",
+                }
+                for checkpoint in (10, 15, 20, 25):
+                    row[f"golddiffat{checkpoint}"] = 1.0
+                    row[f"xpdiffat{checkpoint}"] = 1.0
+                extra_players.append(row)
+    maps = pd.concat([maps, pd.DataFrame(extra_maps)], ignore_index=True)
+    players = pd.concat([players, pd.DataFrame(extra_players)], ignore_index=True)
+    teams = pd.concat([teams, pd.DataFrame(extra_teams)], ignore_index=True)
+
+    ledger, receipt = _build(maps, players, teams)
+    assert list(ledger["game_id"]) == list(IDS)
+    assert receipt["excluded_extra_game_count"] == 6
+    assert receipt["source_extra_game_ids"]["maps"] == [f"excluded-{index}" for index in range(4, 10)]
+    assert receipt["excluded_extra_identity_sha256"] == identity_sha256(
+        [f"excluded-{index}" for index in range(4, 10)]
+    )
+
+
 def test_receipt_binds_source_identity_and_implementation() -> None:
     maps, players, teams = _frames()
     ledger, receipt = _build(maps, players, teams)

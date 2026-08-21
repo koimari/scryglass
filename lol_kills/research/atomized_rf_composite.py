@@ -1859,21 +1859,25 @@ def build_scaling_feature_ledger(
     players_frame = add_game_id(players_frame, "players")
     teams_frame = add_game_id(teams_frame, "teams")
     accepted_set = set(accepted_ids)
+    source_extra_game_ids: dict[str, list[str]] = {}
     for label, frame in (("maps", maps_frame), ("players", players_frame), ("teams", teams_frame)):
         ids = set(frame["_game_id"].astype(str))
-        if ids != accepted_set:
-            missing = sorted(accepted_set - ids)
-            extra = sorted(ids - accepted_set)
+        missing = sorted(accepted_set - ids)
+        if missing:
             raise AtomizedResearchError(
-                f"{label} census mismatch missing={len(missing)} extra={len(extra)}"
+                f"{label} census mismatch missing={len(missing)}"
             )
-    if len(maps_frame) != len(accepted_ids) or maps_frame["_game_id"].duplicated().any():
-        raise AtomizedResearchError("maps must contain exactly one row per accepted game")
-    maps_frame["date"] = pd.to_datetime(maps_frame.get("date"), utc=True, errors="coerce")
-    if maps_frame["date"].isna().any() or maps_frame["date"].gt(cutoff).any():
+        source_extra_game_ids[label] = sorted(ids - accepted_set)
+    if "date" not in maps_frame.columns:
+        raise AtomizedResearchError("maps have no date column")
+    maps_frame["date"] = pd.to_datetime(maps_frame["date"], utc=True, errors="coerce")
+    accepted_map_rows = maps_frame[maps_frame["_game_id"].isin(accepted_set)]
+    if accepted_map_rows["date"].isna().any() or accepted_map_rows["date"].gt(cutoff).any():
         raise AtomizedResearchError("maps contain an invalid or post-census date")
-    # Player and team dates are bound to the map date.  Their source dates are
-    # not used for ordering and cannot silently create a second chronology.
+    if len(accepted_map_rows) != len(accepted_ids) or accepted_map_rows["_game_id"].duplicated().any():
+        raise AtomizedResearchError("maps must contain exactly one row per accepted game")
+    # Hash the full frozen source before selecting the accepted census.  The
+    # source may contain explicitly excluded maps, which stay in provenance.
     map_dates = maps_frame.set_index("_game_id")["date"]
     players_frame["date"] = players_frame["_game_id"].map(map_dates)
     teams_frame["date"] = teams_frame["_game_id"].map(map_dates)
@@ -1893,6 +1897,23 @@ def build_scaling_feature_ledger(
         if label in expected_frame_digests
     ):
         raise AtomizedResearchError("scaling source frame values differ from the receipt")
+
+    # Only accepted rows enter the sequential history.  Extra rows remain
+    # represented by source_extra_game_ids and cannot alter forecasts.
+    maps_frame = accepted_map_rows.copy()
+    players_frame = players_frame[players_frame["_game_id"].isin(accepted_set)].copy()
+    teams_frame = teams_frame[teams_frame["_game_id"].isin(accepted_set)].copy()
+    if len(players_frame) != len(accepted_ids) * 10:
+        raise AtomizedResearchError("accepted players do not contain exactly ten rows per map")
+    if len(teams_frame) != len(accepted_ids) * 2:
+        raise AtomizedResearchError("accepted teams do not contain exactly two rows per map")
+    if maps_frame["_game_id"].duplicated().any():
+        raise AtomizedResearchError("maps must contain exactly one row per accepted game")
+    # Player and team dates are bound to the accepted map dates.  Their source
+    # dates are not used for ordering and cannot create a second chronology.
+    map_dates = maps_frame.set_index("_game_id")["date"]
+    players_frame["date"] = players_frame["_game_id"].map(map_dates)
+    teams_frame["date"] = teams_frame["_game_id"].map(map_dates)
 
     players_by_game = {str(key): value for key, value in players_frame.groupby("_game_id", sort=False)}
     teams_by_game = {str(key): value for key, value in teams_frame.groupby("_game_id", sort=False)}
@@ -2032,6 +2053,13 @@ def build_scaling_feature_ledger(
         "implementation_sha256": implementation_sha,
         "source_frame_sha256": source_frame_digests,
         "source_row_value_sha256": source_row_digest,
+        "source_extra_game_ids": source_extra_game_ids,
+        "excluded_extra_game_count": len(
+            set().union(*(set(values) for values in source_extra_game_ids.values()))
+        ),
+        "excluded_extra_identity_sha256": identity_sha256(
+            set().union(*(set(values) for values in source_extra_game_ids.values()))
+        ),
         "row_value_digest_sha256": row_value_digest,
         "same_timestamp_policy": RATING_BATCH_POLICY,
         "same_timestamp_batching": "score_all_maps_then_update_all_maps",
