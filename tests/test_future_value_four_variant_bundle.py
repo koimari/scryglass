@@ -11,6 +11,7 @@ from benchmarks.future_value_four_variant_bundle import (
     FourVariantBundleError,
     _derive_inner_fold_spec,
     _prepare_inner_output_root,
+    _scope_series_audit_to_eligible,
     _without_frame_attrs,
     build_bundle,
 )
@@ -92,6 +93,32 @@ def test_nested_producer_frames_drop_only_attrs() -> None:
 
     assert result.attrs == {}
     pd.testing.assert_frame_equal(result, frame, check_exact=True)
+
+
+def test_series_audit_is_scoped_to_model_eligible_rows() -> None:
+    frame = pd.DataFrame(
+        {
+            "game_id": ["g1", "g2", "g3"],
+            "series_id": ["leaguepedia:s1", "leaguepedia:s1", "proxy:p2"],
+        }
+    )
+    audit = _scope_series_audit_to_eligible(
+        frame,
+        base_audit={"source": "mixed", "map_count": 10},
+        assignments=(
+            {"oe_game_id": "g1", "series_id": "s1"},
+            {"oe_game_id": "g2", "series_id": "s1"},
+            {"oe_game_id": "outside", "series_id": "s2"},
+        ),
+    )
+
+    assert audit["scope"] == "model_eligible_census"
+    assert audit["map_count"] == 3
+    assert audit["full_source_map_count"] == 10
+    assert audit["mapped_game_count"] == 2
+    assert audit["mapped_series_count"] == 1
+    assert audit["promoted_game_count"] == 2
+    assert audit["retained_proxy_game_count"] == 1
 
 
 def test_bundle_requires_complete_crosswalk_binding(tmp_path: Path) -> None:

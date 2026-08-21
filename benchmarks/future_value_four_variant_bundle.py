@@ -12,7 +12,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -26,6 +26,7 @@ from lol_kills.research.future_value_rating import (
     bind_rating_feature_ledger,
     build_rating_feature_producer_manifest,
     chronological_whole_series_folds,
+    load_verified_leaguepedia_series_crosswalk,
     rating_variant_config_receipt,
     validate_future_value_source_receipt_payload,
     write_rating_feature_producer_receipt,
@@ -81,6 +82,50 @@ def _without_frame_attrs(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy(deep=False)
     result.attrs = {}
     return result
+
+
+def _scope_series_audit_to_eligible(
+    frame: pd.DataFrame,
+    *,
+    base_audit: Mapping[str, Any],
+    assignments: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Report the mixed series partition on the eligible model census."""
+
+    game_ids = set(frame["game_id"].astype(str))
+    assignment_rows = [
+        row for row in assignments if str(row.get("oe_game_id")) in game_ids
+    ]
+    mapped_ids = {str(row["oe_game_id"]) for row in assignment_rows}
+    mapped_series = {str(row["series_id"]) for row in assignment_rows}
+    series = frame["series_id"].astype(str)
+    cluster_sizes = series.value_counts(sort=False)
+    colliding = cluster_sizes.gt(1)
+    promoted = series.str.startswith("leaguepedia:")
+    proxy_series = series.loc[~promoted]
+    scoped = dict(base_audit)
+    scoped.update(
+        {
+            "scope": "model_eligible_census",
+            "map_count": int(len(frame)),
+            "mapped_game_count": int(len(mapped_ids)),
+            "unmatched_game_count": int(len(frame) - len(mapped_ids)),
+            "mapped_series_count": int(len(mapped_series)),
+            "promoted_game_count": int(promoted.sum()),
+            "promoted_series_count": int(series.loc[promoted].nunique()),
+            "retained_proxy_game_count": int((~promoted).sum()),
+            "retained_proxy_cluster_count": int(proxy_series.nunique()),
+            "partial_series_blocker": bool((~promoted).any()),
+            "cluster_count": int(len(cluster_sizes)),
+            "colliding_cluster_count": int(colliding.sum()),
+            "collision_extra_map_count": int(
+                cluster_sizes.loc[colliding].sub(1).sum()
+            ),
+            "max_cluster_size": int(cluster_sizes.max()),
+            "full_source_map_count": int(base_audit.get("map_count") or 0),
+        }
+    )
+    return scoped
 
 
 def _verify_manifest(manifest: Mapping[str, Any], label: str) -> dict[str, Any]:
@@ -518,6 +563,7 @@ def build_bundle(
     maps = pd.read_parquet(source_root / "maps.parquet")
     players = pd.read_parquet(source_root / "oe_player_games.parquet")
     teams = pd.read_parquet(source_root / "oe_team_games.parquet")
+    crosswalk_assignments: Sequence[Mapping[str, Any]] = ()
     if crosswalk_path is not None and crosswalk_receipt_path is not None:
         maps = bind_verified_leaguepedia_series_crosswalk(
             maps,
@@ -534,12 +580,26 @@ def build_bundle(
                 crosswalk_receipt_file_sha256
             ),
         )
+        crosswalk_binding = load_verified_leaguepedia_series_crosswalk(
+            crosswalk_path,
+            crosswalk_receipt_path,
+            source_receipt=source_receipt,
+            expected_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+            expected_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+        )
+        crosswalk_assignments = tuple(crosswalk_binding["assignments"])
     else:
         model_frame = _map_model_frame(maps)
     eligible_ids = tuple(sorted(str(value) for value in source_receipt["model_eligible_game_ids"]))
     model_frame = model_frame[model_frame["game_id"].astype(str).isin(eligible_ids)].copy()
     if tuple(sorted(model_frame["game_id"].astype(str))) != eligible_ids:
         raise FourVariantBundleError("model frame does not match the eligible census")
+    if crosswalk_assignments:
+        model_frame.attrs["series_cluster_audit"] = _scope_series_audit_to_eligible(
+            model_frame,
+            base_audit=dict(model_frame.attrs.get("series_cluster_audit") or {}),
+            assignments=crosswalk_assignments,
+        )
     identity = model_frame[["game_id", "date", "series_id"]].copy()
     nested_root = _prepare_inner_output_root(
         folds_root / "nested-inner-v1"
