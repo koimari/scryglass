@@ -3,9 +3,11 @@
 This command is a research receipt builder.  It joins one frozen atomized
 Draft Score artifact with the current-rating, future-player-form, and scaling
 ledgers.  It fits a small zero-intercept logit model only when every fold has
-strict-prior training rows.  The feature ledger uses producer-level group
-coordinates for future form and scaling.  It records that projection so the
-result cannot be mistaken for the wider public Draft Score contract.
+strict-prior training rows.  The fit uses a fixed ridge penalty and scales
+columns from the training rows in each fold.  The feature ledger uses
+producer-level group coordinates for future form and scaling.  It records that
+projection so the result cannot be mistaken for the wider public Draft Score
+contract.
 
 The strict path reads one frozen atom and player-form ledger per outer fold.
 Each validation window uses state from its effective training rows only.
@@ -38,7 +40,7 @@ from lol_kills.research.atomized_rf_composite import (
 )
 
 
-SCHEMA_VERSION = "scryglass:future-value-draft-score-fourway:v1"
+SCHEMA_VERSION = "scryglass:future-value-draft-score-fourway:v2"
 STRICT_ATOM_SCHEMA = "scryglass:strict-prior-composition-atoms:v1"
 STRICT_FORM_SCHEMA = "scryglass:strict-prior-player-form:v1"
 TRUST_ROOT_SCHEMA = "scryglass:future-value-draft-score-freeze:v1"
@@ -51,6 +53,12 @@ BOOTSTRAP_COMPARISONS = {
     "v4_vs_v1": ("both", "current_only"),
     "v4_vs_v2": ("both", "future_player_form"),
 }
+# This value is fixed by the research protocol.  It is not selected from an
+# outer validation window.  The penalty applies to coefficients in the
+# training-derived feature units after per-column max-absolute scaling.
+LOGIT_L2_PENALTY = 0.01
+LOGIT_MAX_ITERATIONS = 100
+LOGIT_GRADIENT_TOLERANCE = 1e-10
 STATIC_COMPONENTS = (
     "base",
     "ally_synergy",
@@ -1468,6 +1476,128 @@ def _sigmoid(values: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(values, -40.0, 40.0)))
 
 
+def _fit_zero_intercept_log_loss(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    l2_penalty: float = LOGIT_L2_PENALTY,
+    max_iterations: int = LOGIT_MAX_ITERATIONS,
+    gradient_tolerance: float = LOGIT_GRADIENT_TOLERANCE,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Fit a training-only, zero-intercept logistic model with fixed ridge.
+
+    The objective is mean log loss plus ``l2_penalty / 2`` times the squared
+    coefficient norm.  The penalty applies after column scaling.  Scaling is
+    learned from the supplied training matrix only.  Newton steps with
+    backtracking make the fit deterministic without a third-party estimator.
+    """
+
+    if x.ndim != 2 or y.ndim != 1 or x.shape[0] != y.shape[0] or x.shape[0] == 0:
+        raise FourWayDraftScoreError("log-loss fit matrix is invalid")
+    if not np.isfinite(x).all() or not np.isfinite(y).all():
+        raise FourWayDraftScoreError("log-loss fit matrix is not finite")
+    if not np.isfinite(l2_penalty) or l2_penalty <= 0.0:
+        raise FourWayDraftScoreError("log-loss ridge penalty is invalid")
+    if int(max_iterations) <= 0 or not np.isfinite(gradient_tolerance) or gradient_tolerance <= 0.0:
+        raise FourWayDraftScoreError("log-loss fit controls are invalid")
+    if not np.isin(y, (0.0, 1.0)).all():
+        raise FourWayDraftScoreError("log-loss targets must be binary")
+
+    feature_scale = np.maximum(np.max(np.abs(x), axis=0), 1.0)
+    normalized = x / feature_scale
+    identity = np.eye(normalized.shape[1], dtype=float)
+    sample_count = float(x.shape[0])
+
+    def objective(weights: np.ndarray) -> float:
+        with np.errstate(all="ignore"):
+            logits = normalized @ weights
+            value = np.mean(np.logaddexp(0.0, logits) - y * logits) + (
+                float(l2_penalty) / 2.0
+            ) * np.dot(weights, weights)
+        return float(value) if np.isfinite(value) else float("inf")
+
+    def gradient(weights: np.ndarray) -> np.ndarray:
+        with np.errstate(all="ignore"):
+            probabilities = _sigmoid(normalized @ weights)
+            value = normalized.T @ (probabilities - y) / sample_count + float(l2_penalty) * weights
+        if not np.isfinite(value).all():
+            raise FourWayDraftScoreError("log-loss fit gradient is not finite")
+        return value
+
+    weights = np.zeros(normalized.shape[1], dtype=float)
+    iterations = 0
+    converged = False
+    gradient_inf_norm = float("inf")
+    for iteration in range(1, int(max_iterations) + 1):
+        current_gradient = gradient(weights)
+        gradient_inf_norm = float(np.max(np.abs(current_gradient)))
+        if gradient_inf_norm <= float(gradient_tolerance):
+            converged = True
+            iterations = iteration - 1
+            break
+        with np.errstate(all="ignore"):
+            probabilities = _sigmoid(normalized @ weights)
+            hessian = (
+                normalized.T @ (normalized * (probabilities * (1.0 - probabilities))[:, None])
+                / sample_count
+                + float(l2_penalty) * identity
+            )
+        if not np.isfinite(hessian).all():
+            raise FourWayDraftScoreError("log-loss fit Hessian is not finite")
+        try:
+            step = np.linalg.solve(hessian, current_gradient)
+        except np.linalg.LinAlgError as error:
+            raise FourWayDraftScoreError("log-loss fit Hessian is singular") from error
+        directional_derivative = float(np.dot(current_gradient, step))
+        if not np.isfinite(directional_derivative) or directional_derivative <= 0.0:
+            raise FourWayDraftScoreError("log-loss fit Newton direction is invalid")
+        current_objective = objective(weights)
+        step_size = 1.0
+        accepted = False
+        while step_size >= 1e-10:
+            candidate = weights - step_size * step
+            candidate_objective = objective(candidate)
+            if candidate_objective <= current_objective - 1e-4 * step_size * directional_derivative:
+                weights = candidate
+                accepted = True
+                break
+            step_size *= 0.5
+        if not accepted:
+            raise FourWayDraftScoreError("log-loss fit line search failed")
+        iterations = iteration
+    if not converged:
+        gradient_inf_norm = float(np.max(np.abs(gradient(weights))))
+        if gradient_inf_norm <= float(gradient_tolerance):
+            converged = True
+        else:
+            raise FourWayDraftScoreError("log-loss fit did not converge")
+
+    coefficients = weights / feature_scale
+    with np.errstate(all="ignore"):
+        fitted_logits = x @ coefficients
+    if not np.isfinite(coefficients).all() or not np.isfinite(fitted_logits).all():
+        raise FourWayDraftScoreError("log-loss fit predictions are not finite")
+    fitted_probability = _sigmoid(fitted_logits)
+    fitted_clipped = np.clip(fitted_probability, 1e-15, 1.0 - 1e-15)
+    train_log_loss = float(
+        -np.mean(y * np.log(fitted_clipped) + (1.0 - y) * np.log1p(-fitted_clipped))
+    )
+    return coefficients, {
+        "method": "zero_intercept_log_loss_ridge_v1",
+        "objective": "mean_log_loss_plus_l2",
+        "intercept": 0.0,
+        "l2_penalty": float(l2_penalty),
+        "max_iterations": int(max_iterations),
+        "iterations": int(iterations),
+        "converged": bool(converged),
+        "gradient_inf_norm": gradient_inf_norm,
+        "feature_scales": [float(value) for value in feature_scale],
+        "train_log_loss": train_log_loss,
+        "train_logit_rmse": float(np.sqrt(np.mean((fitted_logits - y) ** 2))),
+        "train_objective": objective(weights),
+    }
+
+
 def _metrics(target: np.ndarray, probability: np.ndarray) -> dict[str, float]:
     clipped = np.clip(probability, 1e-15, 1.0 - 1e-15)
     log_loss = float(-np.mean(target * np.log(clipped) + (1.0 - target) * np.log1p(-clipped)))
@@ -1601,6 +1731,16 @@ def _paired_cluster_bootstrap(
         }
     rows, blockers = _paired_common_prediction_rows(variant_reports)
     input_hash = _sha_bytes(_canonical_bytes(rows)) if rows else None
+    identity_rows = [
+        {
+            "fold": int(row["fold"]),
+            "game_id": str(row["game_id"]),
+            "series_id": str(row["series_id"]),
+            "target": int(row["target"]),
+        }
+        for row in rows
+    ]
+    identity_hash = _sha_bytes(_canonical_bytes(identity_rows)) if rows else None
     result: dict[str, Any] = {
         "schema_version": "scryglass:future-value-draft-score-paired-bootstrap:v1",
         "status": "blocked" if blockers or not rows else "evaluated",
@@ -1616,6 +1756,7 @@ def _paired_cluster_bootstrap(
         "input": {
             "row_count": len(rows),
             "rows_sha256": input_hash,
+            "row_identity_sha256": identity_hash,
             "cluster_assignment": "fold + series_id",
             "fold_row_counts": {
                 str(fold): sum(int(row["fold"]) == fold for row in rows)
@@ -2090,7 +2231,7 @@ def build_report(
                 continue
             x_train = train[list(feature_names)].to_numpy(dtype=float)
             y_train = train["target"].to_numpy(dtype=float)
-            coefficients, fit_meta = _fit_zero_intercept(x_train, y_train)
+            coefficients, fit_meta = _fit_zero_intercept_log_loss(x_train, y_train)
             x_validation = validation[list(feature_names)].to_numpy(dtype=float)
             with np.errstate(all="ignore"):
                 logits = x_validation @ coefficients
@@ -2183,6 +2324,14 @@ def build_report(
         "schema_version": SCHEMA_VERSION,
         "status": "research_only",
         "authority": AUTHORITY,
+        "trainer": {
+            "method": "zero_intercept_log_loss_ridge_v1",
+            "objective": "mean_log_loss_plus_l2",
+            "l2_penalty": float(LOGIT_L2_PENALTY),
+            "penalty_selection": "fixed_protocol_constant_not_fit_to_outer_validation",
+            "feature_scaling": "per-fold training-row max-absolute value with minimum one",
+            "outer_fold": "chronological whole-series fold",
+        },
         "source": {
             "source_as_of": source["source_as_of"],
             "source_game_count": source["source_game_count"],

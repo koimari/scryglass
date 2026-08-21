@@ -16,6 +16,7 @@ from benchmarks.future_value_draft_score_fourway import (
     VARIANTS,
     _canonical_bytes,
     _fit_zero_intercept,
+    _fit_zero_intercept_log_loss,
     _load_current,
     _load_future,
     _load_scaling,
@@ -516,6 +517,29 @@ def test_zero_intercept_and_side_swap_are_exact() -> None:
     assert evidence["max_logit_error"] == 0.0
 
 
+def test_regularized_log_loss_fit_is_deterministic_and_zero_intercept() -> None:
+    frame = np.array([[-2.0, 0.5], [-1.0, 0.25], [1.0, -0.25], [2.0, -0.5]])
+    target = np.array([0.0, 0.0, 1.0, 1.0])
+    coefficients_a, fit_a = _fit_zero_intercept_log_loss(frame, target)
+    coefficients_b, fit_b = _fit_zero_intercept_log_loss(frame, target)
+    np.testing.assert_array_equal(coefficients_a, coefficients_b)
+    assert fit_a == fit_b
+    assert fit_a["method"] == "zero_intercept_log_loss_ridge_v1"
+    assert fit_a["objective"] == "mean_log_loss_plus_l2"
+    assert fit_a["intercept"] == 0.0
+    assert fit_a["l2_penalty"] == 0.01
+    assert fit_a["converged"] is True
+    assert fit_a["gradient_inf_norm"] <= 1e-10
+
+
+def test_regularized_log_loss_rejects_non_binary_targets() -> None:
+    with pytest.raises(FourWayDraftScoreError, match="targets must be binary"):
+        _fit_zero_intercept_log_loss(
+            np.array([[-1.0], [1.0]]),
+            np.array([0.0, 0.5]),
+        )
+
+
 def test_fourway_evaluation_fits_all_variants_on_complete_fixture(tmp_path: Path) -> None:
     game_ids = [f"g{i}" for i in range(1, 7)]
     source_path, source_root = _source(tmp_path, game_ids)
@@ -548,6 +572,7 @@ def test_fourway_evaluation_fits_all_variants_on_complete_fixture(tmp_path: Path
     assert bootstrap["draws"] == 2000
     assert bootstrap["input"]["row_count"] == 12
     assert len(bootstrap["input"]["rows_sha256"]) == 64
+    assert len(bootstrap["input"]["row_identity_sha256"]) == 64
     assert set(bootstrap["comparisons"]) == {
         "v2_vs_v1",
         "v3_vs_v1",
