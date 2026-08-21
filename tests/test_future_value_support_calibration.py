@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 
 import pytest
 
@@ -18,6 +20,15 @@ SOURCE = {
     "source_game_count": 60,
     "source_identity_sha256": "a" * 64,
 }
+SOURCE["receipt_sha256"] = hashlib.sha256(
+    json.dumps(
+        SOURCE,
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+).hexdigest()
 
 
 def _folds(rows_per_fold: int = 20) -> list[dict[str, object]]:
@@ -70,7 +81,7 @@ def _artifact(**kwargs: object) -> dict[str, object]:
 def test_support_calibration_is_strict_prior_monotonic_and_receipted() -> None:
     artifact = _artifact()
 
-    assert artifact["status"] == "research_only"
+    assert artifact["status"] == "research_only_partial"
     assert artifact["coverage"]["complete_enough"] is True  # type: ignore[index]
     assert artifact["folds"][0]["status"] == "blocked"  # type: ignore[index]
     assert "calibration_prior_validation_folds_missing" in artifact["blockers"]  # type: ignore[operator]

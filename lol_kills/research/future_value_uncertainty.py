@@ -1485,7 +1485,14 @@ def build_strict_prior_support_calibration(
         raise FutureValueUncertaintyError("unsupported support calibration target")
     if not folds:
         raise FutureValueUncertaintyError("support calibration folds are missing")
+    claimed_source_hash = source_receipt.get("receipt_sha256")
+    if not isinstance(claimed_source_hash, str) or SHA256_RE.fullmatch(claimed_source_hash) is None:
+        raise FutureValueUncertaintyError(
+            "support calibration source receipt must carry a verified receipt hash"
+        )
     source_hash = _source_receipt_hash(source_receipt)
+    if source_hash != claimed_source_hash.lower():
+        raise FutureValueUncertaintyError("support calibration source receipt hash does not match payload")
     if SHA256_RE.fullmatch(source_hash) is None:
         raise FutureValueUncertaintyError("support calibration source receipt hash is invalid")
     coverage_threshold = float(minimum_coverage)
@@ -1621,7 +1628,11 @@ def build_strict_prior_support_calibration(
         blockers.append("support_calibration_coverage_below_threshold")
     artifact_payload: dict[str, Any] = {
         "schema_version": SUPPORT_CALIBRATION_SCHEMA_VERSION,
-        "status": "research_only" if complete_enough else "research_only_partial",
+        # The first fold is intentionally blocked because no prior outcome
+        # history exists.  Keep the complete-enough flag separate from the
+        # artifact status so callers cannot mistake later-fold coverage for a
+        # fully calibrated chronological evaluation.
+        "status": "research_only_partial",
         "variant": variant,
         "source": {
             "source_receipt_sha256": source_hash,
