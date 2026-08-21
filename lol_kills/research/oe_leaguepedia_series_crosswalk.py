@@ -34,6 +34,21 @@ DEFAULT_MAX_GAME_TIME_DELTA_SECONDS = 300
 DEFAULT_MAX_FIRST_GAME_SCHEDULE_DELTA_SECONDS = 6 * 60 * 60
 DEFAULT_MAX_LATER_GAME_SCHEDULE_AGE_SECONDS = 6 * 60 * 60
 _HEX64 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+_OUTCOME_FIELD_TOKENS = {
+    "outcome",
+    "result",
+    "victor",
+    "victory",
+    "win",
+    "winner",
+    "winning",
+    "won",
+}
+_OUTCOME_FREE_PROJECTION = {
+    "scope": "all_embedded_raw_source_rows",
+    "policy": "remove_top_level_outcome_result_winner_and_win_fields",
+    "original_file_bytes_bound_separately": True,
+}
 _TOURNAMENT_BINDING = {
     "source": "ScoreboardGames.Tournament",
     "assignment_field": "scoreboard_tournament",
@@ -76,6 +91,28 @@ def _sha256_bytes(value: bytes) -> str:
 def _payload_hash(value: Sequence[Mapping[str, Any]]) -> tuple[str, int]:
     raw = _canonical_json_bytes([dict(row) for row in value])
     return _sha256_bytes(raw), len(raw)
+
+
+def _field_tokens(value: object) -> tuple[str, ...]:
+    text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(value))
+    return tuple(
+        token
+        for token in re.sub(r"[^0-9A-Za-z]+", "_", text).casefold().split("_")
+        if token
+    )
+
+
+def _is_outcome_field(value: object) -> bool:
+    return bool(set(_field_tokens(value)) & _OUTCOME_FIELD_TOKENS)
+
+
+def _outcome_free_rows(
+    value: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {str(key): item for key, item in row.items() if not _is_outcome_field(key)}
+        for row in value
+    ]
 
 
 def _assignment_rows(
@@ -453,20 +490,33 @@ def _read_and_verify_source_record(
         raise CrosswalkError(f"source file hash does not match: {label}")
     if isinstance(expected_bytes, bool) or not isinstance(expected_bytes, int) or expected_bytes != len(source_bytes):
         raise CrosswalkError(f"source file byte count does not match: {label}")
-    payload_hash, payload_bytes = _payload_hash(payload)
+    source_payload_hash, source_payload_bytes = _payload_hash(payload)
     claimed_payload_hash = str(record.get("payload_sha256") or "").lower()
     claimed_payload_bytes = record.get("payload_bytes")
-    if claimed_payload_hash != payload_hash or claimed_payload_bytes != payload_bytes:
+    if (
+        claimed_payload_hash != source_payload_hash
+        or claimed_payload_bytes != source_payload_bytes
+    ):
         raise CrosswalkError(f"source payload hash does not match: {label}")
-    return {
+    projected_payload_hash, projected_payload_bytes = _payload_hash(
+        _outcome_free_rows(payload)
+    )
+    normalized = {
         "locator": locator,
         "retrieved_at": _parse_timestamp(retrieved_at, field="retrieved_at").isoformat().replace("+00:00", "Z"),
         "sha256": actual_hash,
         "bytes": len(source_bytes),
-        "payload_sha256": payload_hash,
-        "payload_bytes": payload_bytes,
+        "source_payload_sha256": source_payload_hash,
+        "source_payload_bytes": source_payload_bytes,
+        "payload_sha256": projected_payload_hash,
+        "payload_bytes": projected_payload_bytes,
+        "payload_projection": dict(_OUTCOME_FREE_PROJECTION),
         "integrity_verified": True,
     }
+    path_text = _first(record, ("path",))
+    if path_text:
+        normalized["path"] = str(Path(path_text).resolve())
+    return normalized
 
 
 def _validate_source_records(
@@ -970,10 +1020,10 @@ def build_oe_leaguepedia_series_crosswalk(
             for key, value in competition_mapping.items()
         },
         "raw_sources": {
-            "oe": [dict(row) for row in oe_rows],
-            "scoreboardgames": [dict(row) for row in scoreboard_rows],
-            "matchschedule": [dict(row) for row in schedule_rows],
-            "tournaments": [dict(row) for row in tournaments_rows or ()],
+            "oe": _outcome_free_rows(oe_rows),
+            "scoreboardgames": _outcome_free_rows(scoreboard_rows),
+            "matchschedule": _outcome_free_rows(schedule_rows),
+            "tournaments": _outcome_free_rows(tournaments_rows or ()),
         },
         "join_contract": {
             "team_identity": "verified_alias_normalized_unordered_two_team_set_for_join; original_OE_team_set_for_assignment_binding",
@@ -992,6 +1042,7 @@ def build_oe_leaguepedia_series_crosswalk(
             "unmatched_policy": "reject_assignment_and_record_issue",
             "outcome_used": False,
             "outcome_policy": "ignored_and_never_used_for_matching",
+            "raw_source_projection": dict(_OUTCOME_FREE_PROJECTION),
             "tournament_binding": dict(_TOURNAMENT_BINDING),
         },
         "coverage": coverage,
@@ -1129,15 +1180,87 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                     raise CrosswalkError(
                         f"crosswalk raw source evidence is invalid: {label}"
                     )
+                if _outcome_free_rows(rows) != rows:
+                    raise CrosswalkError(
+                        f"crosswalk raw source projection contains outcome fields: {label}"
+                    )
                 payload_hash, payload_bytes = _payload_hash(rows)
                 if (
                     record.get("integrity_verified") is not True
                     or record.get("payload_sha256") != payload_hash
                     or record.get("payload_bytes") != payload_bytes
+                    or record.get("payload_projection")
+                    != _OUTCOME_FREE_PROJECTION
                 ):
                     raise CrosswalkError(
                         f"crosswalk raw source payload binding changed: {label}"
                     )
+                if (
+                    not _HEX64.fullmatch(str(record.get("sha256") or ""))
+                    or isinstance(record.get("bytes"), bool)
+                    or not isinstance(record.get("bytes"), int)
+                    or record.get("bytes", 0) < 0
+                    or not _HEX64.fullmatch(
+                        str(record.get("source_payload_sha256") or "")
+                    )
+                    or isinstance(record.get("source_payload_bytes"), bool)
+                    or not isinstance(record.get("source_payload_bytes"), int)
+                    or record.get("source_payload_bytes", 0) < 0
+                ):
+                    raise CrosswalkError(
+                        f"crosswalk original source binding is invalid: {label}"
+                    )
+
+            if (
+                not isinstance(join_contract, Mapping)
+                or join_contract.get("raw_source_projection")
+                != _OUTCOME_FREE_PROJECTION
+            ):
+                raise CrosswalkError("crosswalk raw source projection is invalid")
+
+            capture_binding = payload.get("capture_manifest_binding")
+            if capture_binding is not None:
+                assembled = (
+                    capture_binding.get("assembled")
+                    if isinstance(capture_binding, Mapping)
+                    else None
+                )
+                if not isinstance(assembled, Mapping) or set(assembled) != {
+                    "ScoreboardGames",
+                    "MatchSchedule",
+                    "Tournaments",
+                }:
+                    raise CrosswalkError(
+                        "crosswalk capture manifest assembled binding is invalid"
+                    )
+                capture_labels = {
+                    "scoreboardgames": "ScoreboardGames",
+                    "matchschedule": "MatchSchedule",
+                    "tournaments": "Tournaments",
+                }
+                for source_label, capture_label in capture_labels.items():
+                    capture_record = assembled.get(capture_label)
+                    source_record = source_records.get(source_label)
+                    if not isinstance(capture_record, Mapping) or not isinstance(
+                        source_record, Mapping
+                    ):
+                        raise CrosswalkError(
+                            "crosswalk capture manifest source binding is missing"
+                        )
+                    capture_path = str(capture_record.get("path") or "")
+                    source_path = str(source_record.get("path") or "")
+                    if (
+                        not Path(capture_path).is_absolute()
+                        or capture_path != str(Path(capture_path).resolve())
+                        or source_path != capture_path
+                        or capture_record.get("bytes")
+                        != source_record.get("bytes")
+                        or capture_record.get("sha256")
+                        != source_record.get("sha256")
+                    ):
+                        raise CrosswalkError(
+                            f"crosswalk capture manifest differs from source record: {capture_label}"
+                        )
 
             scoreboard_by_id: dict[str, list[dict[str, Any]]] = {}
             for raw in raw_sources["scoreboardgames"]:

@@ -82,6 +82,19 @@ def _source_record(
 ) -> tuple[dict[str, Any], bytes]:
     raw = path.read_bytes()
     metadata = dict(_source_metadata(manifest, label))
+    claimed_path = metadata.get("path")
+    if claimed_path is not None:
+        try:
+            metadata_path = Path(str(claimed_path)).resolve(strict=True)
+            supplied_path = path.resolve(strict=True)
+        except OSError as error:
+            raise CrosswalkError(
+                f"source record path cannot be resolved: {label}"
+            ) from error
+        if metadata_path != supplied_path:
+            raise CrosswalkError(
+                f"source record path differs from supplied build file: {label}"
+            )
     locator = str(metadata.get("url") or metadata.get("locator") or path)
     retrieved_at = str(
         metadata.get("retrieved_at")
@@ -203,6 +216,41 @@ def _capture_binding(path: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _verify_capture_inputs(
+    capture_binding: Mapping[str, Any],
+    paths: Mapping[str, Path],
+    records: Mapping[str, Mapping[str, Any]],
+) -> None:
+    assembled = capture_binding.get("assembled")
+    if not isinstance(assembled, Mapping):
+        raise CrosswalkError("capture manifest assembled binding is missing")
+    labels = {
+        "scoreboardgames": "ScoreboardGames",
+        "matchschedule": "MatchSchedule",
+        "tournaments": "Tournaments",
+    }
+    for source_label, capture_label in labels.items():
+        expected = assembled.get(capture_label)
+        record = records.get(source_label)
+        if not isinstance(expected, Mapping) or not isinstance(record, Mapping):
+            raise CrosswalkError(
+                f"capture manifest source binding is missing: {capture_label}"
+            )
+        supplied_path = str(paths[source_label].resolve(strict=True))
+        record_path = str(Path(str(record.get("path") or "")).resolve(strict=True))
+        if supplied_path != expected.get("path") or record_path != supplied_path:
+            raise CrosswalkError(
+                f"supplied build file differs from capture manifest: {capture_label}"
+            )
+        if (
+            record.get("bytes") != expected.get("bytes")
+            or record.get("sha256") != expected.get("sha256")
+        ):
+            raise CrosswalkError(
+                f"supplied build bytes differ from capture manifest: {capture_label}"
+            )
+
+
 def _alias_lookup(binding: Mapping[str, Any]) -> dict[str, str]:
     lookup: dict[str, str] = {}
     for entry in binding.get("entries", ()):
@@ -304,6 +352,8 @@ def main(argv: list[str] | None = None) -> int:
             if manifest.get("manifest_sha256") is not None
             else None
         )
+        if capture_binding is not None:
+            _verify_capture_inputs(capture_binding, paths, records)
         aliases: dict[str, str] = {}
         alias_binding: dict[str, Any] = {}
         if args.alias_artifact is not None:

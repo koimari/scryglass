@@ -129,7 +129,29 @@ def test_complete_crosswalk_binds_exact_prefix_and_keeps_outcomes_out() -> None:
     assert [row["scoreboard_game_order"] for row in result["assignments"]] == [1, 2]
     assert all(row["outcome_used"] is False for row in result["assignments"])
     assert result["source_records"]["oe"]["integrity_verified"] is True
+    assert "result" not in result["raw_sources"]["oe"][0]
+    assert "Winner" not in result["raw_sources"]["scoreboardgames"][0]
+    assert "Winner" not in result["raw_sources"]["matchschedule"][0]
+    assert (
+        result["source_records"]["matchschedule"]["source_payload_sha256"]
+        != result["source_records"]["matchschedule"]["payload_sha256"]
+    )
     verify_crosswalk(result)
+
+
+def test_resealed_embedded_outcome_field_fails_verification() -> None:
+    result = _build()
+    result["raw_sources"]["matchschedule"][0]["Winner"] = "forged"
+    projected = _canonical(result["raw_sources"]["matchschedule"])
+    result["source_records"]["matchschedule"]["payload_sha256"] = hashlib.sha256(
+        projected
+    ).hexdigest()
+    result["source_records"]["matchschedule"]["payload_bytes"] = len(projected)
+    result.pop("crosswalk_sha256")
+    result["crosswalk_sha256"] = hashlib.sha256(_canonical(result)).hexdigest()
+
+    with pytest.raises(CrosswalkError, match="contains outcome fields"):
+        verify_crosswalk(result)
 
 
 def test_missing_scoreboard_tournament_is_unmapped_and_fail_closed() -> None:
@@ -571,3 +593,119 @@ def test_cli_reads_downloaded_json_and_never_needs_network(tmp_path: Path) -> No
     emitted = json.loads(output.read_text())
     assert emitted["status"] == "complete_authoritative_coverage"
     assert emitted["source_records"]["oe"]["integrity_verified"] is True
+
+
+def test_cli_rejects_forged_tournaments_outside_genuine_capture(
+    tmp_path: Path,
+) -> None:
+    oe, scoreboard, schedule, tournaments, receipt, mapping, _records, _raw = _fixture()
+    capture_root = tmp_path / "capture"
+    assembled_root = capture_root / "assembled"
+    responses_root = capture_root / "responses"
+    assembled_root.mkdir(parents=True)
+    responses_root.mkdir()
+    assembled_rows = {
+        "ScoreboardGames": scoreboard,
+        "MatchSchedule": schedule,
+        "Tournaments": tournaments,
+    }
+    assembled: dict[str, dict[str, object]] = {}
+    for label, rows in assembled_rows.items():
+        path = assembled_root / f"{label}.json"
+        path.write_bytes(_canonical(rows))
+        assembled[label] = {
+            "path": f"assembled/{label}.json",
+            "bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    response_path = responses_root / "response.json"
+    response_path.write_bytes(b"{}")
+    response_records = [
+        {
+            "path": "responses/response.json",
+            "bytes": 2,
+            "sha256": hashlib.sha256(b"{}").hexdigest(),
+        }
+    ]
+    manifest: dict[str, object] = {
+        "captured_at": "2026-08-15T00:00:00Z",
+        "sources": {
+            label: {
+                "url": f"https://example.test/{label}.json",
+                "retrieved_at": "2026-08-15T00:00:00Z",
+            }
+            for label in ("oe", "scoreboardgames", "matchschedule", "tournaments")
+        },
+        "assembled": assembled,
+        "response_records": response_records,
+    }
+    manifest["manifest_sha256"] = hashlib.sha256(_canonical(manifest)).hexdigest()
+    manifest_path = capture_root / "capture-manifest.json"
+    manifest_path.write_bytes(_canonical(manifest))
+
+    oe_path = tmp_path / "oe.json"
+    oe_path.write_bytes(_canonical(oe))
+    forged_tournaments = tmp_path / "forged-tournaments.json"
+    forged_tournaments.write_bytes(_canonical(tournaments))
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_bytes(_canonical(receipt))
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_bytes(_canonical(mapping))
+    source_paths = {
+        "oe": oe_path,
+        "scoreboardgames": assembled_root / "ScoreboardGames.json",
+        "matchschedule": assembled_root / "MatchSchedule.json",
+        "tournaments": forged_tournaments,
+    }
+    source_rows = {
+        "oe": oe,
+        "scoreboardgames": scoreboard,
+        "matchschedule": schedule,
+        "tournaments": tournaments,
+    }
+    source_records_path = tmp_path / "source-records.json"
+    source_records_path.write_bytes(
+        _canonical(
+            {
+                "source_records": {
+                    label: {
+                        "path": str(path.resolve()),
+                        "locator": str(path.resolve()),
+                        "retrieved_at": "2026-08-15T00:00:00Z",
+                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                        "bytes": path.stat().st_size,
+                        "payload_sha256": hashlib.sha256(
+                            _canonical(source_rows[label])
+                        ).hexdigest(),
+                        "payload_bytes": len(_canonical(source_rows[label])),
+                    }
+                    for label, path in source_paths.items()
+                }
+            }
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        build_crosswalk_cli(
+            [
+                "--oe",
+                str(oe_path),
+                "--scoreboardgames",
+                str(assembled_root / "ScoreboardGames.json"),
+                "--matchschedule",
+                str(assembled_root / "MatchSchedule.json"),
+                "--tournaments",
+                str(forged_tournaments),
+                "--capture-manifest",
+                str(manifest_path),
+                "--source-records",
+                str(source_records_path),
+                "--source-receipt",
+                str(receipt_path),
+                "--competition-map",
+                str(mapping_path),
+                "--output",
+                str(tmp_path / "crosswalk.json"),
+            ]
+        )
+    assert exc_info.value.code == 2
