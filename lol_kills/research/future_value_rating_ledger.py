@@ -55,6 +55,7 @@ from lol_kills.research.future_value_rating import (
     _sha256_path,
     _utc_text,
     _utc_timestamp,
+    _map_model_frame,
     validate_future_value_source_receipt_payload,
 )
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
@@ -222,15 +223,34 @@ def _implementation_hash() -> str:
 
 
 def _series_ids(frame: pd.DataFrame, game_ids: pd.Series) -> pd.Series:
-    source = next(
-        (column for column in ("series_id", "seriesid", "match_id", "matchid") if column in frame.columns),
-        None,
+    """Use the evaluator's conservative partition for every gate-grade fold.
+
+    A raw OE map row does not carry a verified series assignment.  The
+    evaluator therefore uses league, tournament, and the unordered team pair
+    as a conservative proxy.  A map-ID fallback would make a split series look
+    safe, so this producer rejects it.
+    """
+
+    model_frame = _map_model_frame(frame)
+    source = model_frame.attrs.get("series_cluster_source")
+    if source != "conservative_series_superset":
+        raise CurrentRatingLedgerError(
+            "maps have no safe conservative series partition"
+        )
+    if "game_id" not in model_frame.columns or "series_id" not in model_frame.columns:
+        raise CurrentRatingLedgerError("conservative series partition is incomplete")
+    by_game = pd.Series(
+        model_frame["series_id"].astype("string").to_numpy(),
+        index=model_frame["game_id"].astype(str),
     )
-    if source is None:
-        return game_ids.map(lambda value: f"map:{value}").astype(str)
-    result = frame[source].astype("string").str.strip()
-    if result.isna().any() or result.eq("").any() or result.str.casefold().isin({"nan", "none", "<na>"}).any():
-        raise CurrentRatingLedgerError("maps contain an incomplete series identity")
+    requested = game_ids.astype(str)
+    if not set(requested).issubset(set(by_game.index)):
+        raise CurrentRatingLedgerError(
+            "conservative series partition is missing map identities"
+        )
+    result = requested.map(by_game)
+    if result.isna().any() or result.str.strip().eq("").any():
+        raise CurrentRatingLedgerError("conservative series identity is incomplete")
     return result.astype(str)
 
 
@@ -834,7 +854,8 @@ def build_fold_current_rating_feature_ledger(
         raise CurrentRatingLedgerError("training and validation IDs are outside the eligible census")
     if not output_ids:
         raise CurrentRatingLedgerError("training and validation IDs do not cover a fold")
-    raw_map_ids = set(_game_ids(maps, "maps").astype(str))
+    raw_map_ids_series = _game_ids(maps, "maps").astype(str)
+    raw_map_ids = set(raw_map_ids_series)
     raw_player_ids = set(_game_ids(players, "players").astype(str))
     raw_team_ids = set(_game_ids(teams, "teams").astype(str))
     if not eligible_set.issubset(raw_map_ids) or not eligible_set.issubset(raw_player_ids) or not eligible_set.issubset(raw_team_ids):
@@ -862,9 +883,13 @@ def build_fold_current_rating_feature_ledger(
     map_frame, player_frame, team_frame = _validate_source_frames(
         maps, players, teams, eligible_ids, output_ids
     )
-    map_frame["series_id"] = _series_ids(
-        map_frame, map_frame["__game_id"].astype(str)
-    ).to_numpy()
+    full_series_by_id = pd.Series(
+        _series_ids(maps, raw_map_ids_series).astype(str).to_numpy(),
+        index=raw_map_ids_series,
+    )
+    map_frame["series_id"] = full_series_by_id.loc[
+        map_frame["__game_id"].astype(str)
+    ].to_numpy()
     series_by_id = pd.Series(
         map_frame["series_id"].astype(str).to_numpy(),
         index=map_frame["__game_id"].astype(str),
@@ -935,6 +960,12 @@ def build_fold_current_rating_feature_ledger(
         "validation_series_count": len(validation_series_ids),
         "validation_series_identity_sha256": identity_sha256(validation_series_ids),
         "series_disjoint": True,
+        "series_partition_source": "conservative_series_superset",
+        "series_partition_key_fields": [
+            "league",
+            "tournament",
+            "unordered_team_pair",
+        ],
         "state_key_policy": dict(_RECEIPT_STATE_KEY_POLICY),
         "fit_window_end": _utc_text(cutoff),
         "strict_prior_timing": "train_outcomes_only_strictly_before_cutoff",
@@ -1015,6 +1046,7 @@ def validate_fold_current_rating_feature_ledger(
         "train_series_ids", "train_series_count", "train_series_identity_sha256",
         "validation_series_ids", "validation_series_count",
         "validation_series_identity_sha256", "series_disjoint", "state_key_policy",
+        "series_partition_source", "series_partition_key_fields",
         "strict_prior_timing", "same_timestamp_policy", "masked_nontraining_map_columns",
         "masked_nontraining_player_columns", "source_frame_sha256", "feature_names",
         "ledger_rows_sha256", "implementation_locator", "implementation_sha256", "artifact",
@@ -1063,6 +1095,12 @@ def validate_fold_current_rating_feature_ledger(
         raise CurrentRatingLedgerError("current rating feature names changed")
     if receipt.get("state_key_policy") != _RECEIPT_STATE_KEY_POLICY:
         raise CurrentRatingLedgerError("current rating state key policy changed")
+    if (
+        receipt.get("series_partition_source") != "conservative_series_superset"
+        or tuple(receipt.get("series_partition_key_fields", ()))
+        != ("league", "tournament", "unordered_team_pair")
+    ):
+        raise CurrentRatingLedgerError("current rating series partition changed")
     authority = receipt.get("authority")
     if not isinstance(authority, Mapping) or authority.get("research_only") is not True or any(authority.get(key) is not False for key in ("public_player_rating", "public_team_rating", "public_probability", "promotion", "merge", "deployment", "betting")):
         raise CurrentRatingLedgerError("current rating receipt authority is not research-only")

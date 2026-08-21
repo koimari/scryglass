@@ -232,10 +232,29 @@ def test_receipt_validation_recomputes_source_frame_hashes(tmp_path: Path) -> No
         )
 
 
-def test_train_and_validation_series_must_be_disjoint() -> None:
+def test_no_series_source_uses_conservative_proxy_and_rejects_series_split() -> None:
     maps, players, teams, receipt = _source()
-    maps = maps.copy()
-    maps.loc[maps["game_uid"].eq("g4"), "series_id"] = "series-g1"
+    maps = maps.drop(columns=["series_id"]).copy()
+    players = players.copy()
+    teams = teams.copy()
+    maps.loc[maps["game_uid"].eq("g3"), ["blue_team", "red_team"]] = maps.loc[
+        maps["game_uid"].eq("g1"), ["blue_team", "red_team"]
+    ].to_numpy()[0]
+    for side in ("Blue", "Red"):
+        player_team_id = players.loc[
+            players["game_uid"].eq("g1") & players["side"].eq(side), "teamid"
+        ].iloc[0]
+        team_name = players.loc[
+            players["game_uid"].eq("g1") & players["side"].eq(side), "teamname"
+        ].iloc[0]
+        players.loc[
+            players["game_uid"].eq("g3") & players["side"].eq(side),
+            ["teamid", "teamname"],
+        ] = [player_team_id, team_name]
+        teams.loc[
+            teams["game_uid"].eq("g3") & teams["side"].eq(side),
+            ["teamid", "teamname"],
+        ] = [player_team_id, team_name]
     with pytest.raises(CurrentRatingLedgerError, match="series overlap"):
         _build(maps, players, teams, receipt)
 
@@ -246,7 +265,8 @@ def test_validation_rechecks_series_disjointness_after_receipt_reseal(
     maps, players, teams, receipt = _source()
     ledger, good_receipt = _build(maps, players, teams, receipt, tmp_path)
     bad_ledger = ledger.copy()
-    bad_ledger.loc[bad_ledger["game_id"].eq("g4"), "series_id"] = "series-g1"
+    g1_series = ledger.loc[ledger["game_id"].eq("g1"), "series_id"].iloc[0]
+    bad_ledger.loc[bad_ledger["game_id"].eq("g4"), "series_id"] = g1_series
     bad_receipt = json.loads(json.dumps(good_receipt))
     bad_receipt["ledger_rows_sha256"] = _artifact_digest(
         bad_ledger,
