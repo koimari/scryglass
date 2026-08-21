@@ -77,6 +77,46 @@ CHECKPOINTS = (10, 15, 20, 25)
 ROLES = ("top", "jungle", "mid", "bot", "support")
 SIDES = ("blue", "red")
 
+SOURCE_RECEIPT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "status",
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "accepted_game_ids",
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
+        "model_eligible_game_ids",
+        "source_rows",
+        "source_extra_game_ids",
+        "identity_coverage",
+        "checkpoint_coverage",
+        "model_exclusions",
+        "source_files",
+        "model_contract",
+        "authority",
+        "receipt_sha256",
+    }
+)
+SOURCE_RECEIPT_AUTHORITY = MappingProxyType(
+    {
+        "research_only": True,
+        "public_player_rating": False,
+        "public_team_rating": False,
+        "public_probability": False,
+        "promotion": False,
+        "merge": False,
+        "deployment": False,
+    }
+)
+SOURCE_RECEIPT_REQUIRED_FILES = frozenset(
+    {"maps", "players", "teams", "accepted_census"}
+)
+SOURCE_FILE_RECORD_FIELDS = frozenset(
+    {"path", "locator", "bytes", "sha256", "year"}
+)
+
 
 class RatingVariant(str, Enum):
     """The four frozen feature contracts for future-value development."""
@@ -188,49 +228,7 @@ def _validate_verified_source_receipt(
 ) -> tuple[str, ...]:
     """Validate the source receipt before using a fit or evaluation frame."""
 
-    if not isinstance(receipt, Mapping):
-        raise FutureValueSourceError("verified source receipt is required")
-    required = (
-        "source_as_of",
-        "source_game_count",
-        "source_identity_sha256",
-        "accepted_game_ids",
-        "model_eligible_game_count",
-        "model_eligible_identity_sha256",
-        "model_eligible_game_ids",
-        "source_files",
-        "receipt_sha256",
-    )
-    if any(field not in receipt for field in required):
-        raise FutureValueSourceError("verified source receipt is incomplete")
-    receipt_hash = receipt.get("receipt_sha256")
-    if not isinstance(receipt_hash, str) or re.fullmatch(r"[0-9a-f]{64}", receipt_hash, re.I) is None:
-        raise FutureValueSourceError("verified source receipt hash is invalid")
-    payload = dict(receipt)
-    payload.pop("receipt_sha256", None)
-    if hashlib.sha256(_canonical_json_bytes(payload)).hexdigest() != receipt_hash:
-        raise FutureValueSourceError("verified source receipt hash does not match payload")
-    accepted_ids = tuple(str(value) for value in receipt["accepted_game_ids"])
-    eligible_ids = tuple(str(value) for value in receipt["model_eligible_game_ids"])
-    if (
-        not accepted_ids
-        or tuple(canonical_game_ids(accepted_ids)) != accepted_ids
-        or int(receipt["source_game_count"]) != len(accepted_ids)
-        or str(receipt["source_identity_sha256"]) != identity_sha256(accepted_ids)
-        or int(receipt["model_eligible_game_count"]) != len(eligible_ids)
-        or tuple(canonical_game_ids(eligible_ids)) != eligible_ids
-        or str(receipt["model_eligible_identity_sha256"]) != identity_sha256(eligible_ids)
-    ):
-        raise FutureValueSourceError("verified source receipt census identity is invalid")
-    _utc_timestamp(receipt["source_as_of"], "source_as_of")
-    source_files = receipt["source_files"]
-    if not isinstance(source_files, Mapping) or not source_files:
-        raise FutureValueSourceError("verified source receipt has no source file hashes")
-    for label, record in source_files.items():
-        if not isinstance(record, Mapping) or not isinstance(record.get("bytes"), int):
-            raise FutureValueSourceError(f"verified source file record is invalid: {label}")
-        if re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256") or ""), re.I) is None:
-            raise FutureValueSourceError(f"verified source file hash is invalid: {label}")
+    accepted_ids, eligible_ids = validate_future_value_source_receipt_payload(receipt)
     map_ids = tuple(sorted(map_frame["game_id"].astype(str)))
     eligible_set = set(eligible_ids)
     if not set(map_ids).issubset(eligible_set):
@@ -246,6 +244,82 @@ def _validate_verified_source_receipt(
             raise FutureValueSourceError("fit IDs are outside the verified model frame")
         return train_ids
     return eligible_ids
+
+
+def validate_future_value_source_receipt_payload(
+    receipt: Mapping[str, Any] | None,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Validate the complete canonical research source receipt."""
+
+    if not isinstance(receipt, Mapping):
+        raise FutureValueSourceError("verified source receipt is required")
+    if set(receipt) != set(SOURCE_RECEIPT_FIELDS):
+        raise FutureValueSourceError("verified source receipt schema is not canonical")
+    if receipt.get("schema_version") != SCHEMA_VERSION or receipt.get(
+        "status"
+    ) != "accepted_source_bound_development_only":
+        raise FutureValueSourceError("verified source receipt status is invalid")
+    if dict(receipt.get("authority") or {}) != dict(SOURCE_RECEIPT_AUTHORITY):
+        raise FutureValueSourceError("verified source receipt authority is invalid")
+    receipt_hash = receipt.get("receipt_sha256")
+    if not isinstance(receipt_hash, str) or re.fullmatch(
+        r"[0-9a-f]{64}", receipt_hash, re.I
+    ) is None:
+        raise FutureValueSourceError("verified source receipt hash is invalid")
+    payload = dict(receipt)
+    payload.pop("receipt_sha256", None)
+    if hashlib.sha256(_canonical_json_bytes(payload)).hexdigest() != receipt_hash:
+        raise FutureValueSourceError("verified source receipt hash does not match payload")
+    accepted_ids = tuple(str(value) for value in receipt["accepted_game_ids"])
+    eligible_ids = tuple(str(value) for value in receipt["model_eligible_game_ids"])
+    if (
+        not accepted_ids
+        or tuple(canonical_game_ids(accepted_ids)) != accepted_ids
+        or int(receipt["source_game_count"]) != len(accepted_ids)
+        or str(receipt["source_identity_sha256"]) != identity_sha256(accepted_ids)
+        or int(receipt["model_eligible_game_count"]) != len(eligible_ids)
+        or tuple(canonical_game_ids(eligible_ids)) != eligible_ids
+        or str(receipt["model_eligible_identity_sha256"]) != identity_sha256(eligible_ids)
+        or not set(eligible_ids).issubset(set(accepted_ids))
+    ):
+        raise FutureValueSourceError("verified source receipt census identity is invalid")
+    _utc_timestamp(receipt["source_as_of"], "source_as_of")
+    source_files = receipt["source_files"]
+    if not isinstance(source_files, Mapping) or not SOURCE_RECEIPT_REQUIRED_FILES.issubset(
+        source_files
+    ):
+        raise FutureValueSourceError("verified source receipt file bindings are incomplete")
+    for label, record in source_files.items():
+        if (
+            not isinstance(label, str)
+            or not label.strip()
+            or not isinstance(record, Mapping)
+            or not set(record).issubset(SOURCE_FILE_RECORD_FIELDS)
+            or not isinstance(record.get("bytes"), int)
+            or isinstance(record.get("bytes"), bool)
+            or int(record["bytes"]) <= 0
+        ):
+            raise FutureValueSourceError(f"verified source file record is invalid: {label}")
+        locators = (record.get("path"), record.get("locator"))
+        if sum(isinstance(value, str) and bool(value.strip()) for value in locators) != 1:
+            raise FutureValueSourceError(f"verified source file locator is invalid: {label}")
+        if re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256") or ""), re.I) is None:
+            raise FutureValueSourceError(f"verified source file hash is invalid: {label}")
+        if "year" in record and (
+            isinstance(record["year"], bool) or not isinstance(record["year"], int)
+        ):
+            raise FutureValueSourceError(f"verified source file year is invalid: {label}")
+    structured = (
+        "source_rows",
+        "source_extra_game_ids",
+        "identity_coverage",
+        "checkpoint_coverage",
+        "model_exclusions",
+        "model_contract",
+    )
+    if any(not isinstance(receipt.get(field), Mapping) for field in structured):
+        raise FutureValueSourceError("verified source receipt evidence is incomplete")
+    return accepted_ids, eligible_ids
 
 
 def _side(value: Any) -> str | None:
@@ -1460,7 +1534,7 @@ _TRUSTED_FEATURE_PRODUCER_SPECS = MappingProxyType(
                 name="strict_prior_atomized_scaling",
                 feature_family="scaling_curve",
                 feature_names=SCALING_CURVE_SIGNED_MAP_FEATURES,
-                implementation_locator="lol_kills/research/future_phase_curve.py",
+                implementation_locator="lol_kills/research/atomized_rf_composite.py",
                 implementation_version="strict-prior-scaling-v1",
             )
         ),
@@ -1499,50 +1573,8 @@ def _verified_source_receipt_for_ledger(
 ) -> tuple[str, str]:
     """Verify the canonical source receipt without trusting ledger metadata."""
 
-    if not isinstance(receipt, Mapping):
-        raise FutureValueSourceError("verified source receipt is required for rating ledger")
-    required = {
-        "source_as_of",
-        "source_game_count",
-        "source_identity_sha256",
-        "accepted_game_ids",
-        "model_eligible_game_count",
-        "model_eligible_identity_sha256",
-        "model_eligible_game_ids",
-        "source_files",
-        "receipt_sha256",
-    }
-    if not required.issubset(receipt):
-        raise FutureValueSourceError("verified source receipt is incomplete")
-    claimed = receipt.get("receipt_sha256")
-    if not isinstance(claimed, str) or re.fullmatch(r"[0-9a-f]{64}", claimed, re.I) is None:
-        raise FutureValueSourceError("verified source receipt hash is invalid")
-    payload = dict(receipt)
-    payload.pop("receipt_sha256", None)
-    if hashlib.sha256(_canonical_json_bytes(payload)).hexdigest() != claimed:
-        raise FutureValueSourceError("verified source receipt hash does not match payload")
-    accepted = tuple(str(value) for value in receipt["accepted_game_ids"])
-    eligible = tuple(str(value) for value in receipt["model_eligible_game_ids"])
-    if (
-        not accepted
-        or tuple(canonical_game_ids(accepted)) != accepted
-        or int(receipt["source_game_count"]) != len(accepted)
-        or str(receipt["source_identity_sha256"]) != identity_sha256(accepted)
-        or int(receipt["model_eligible_game_count"]) != len(eligible)
-        or tuple(canonical_game_ids(eligible)) != eligible
-        or str(receipt["model_eligible_identity_sha256"]) != identity_sha256(eligible)
-    ):
-        raise FutureValueSourceError("verified source receipt census identity is invalid")
-    _utc_timestamp(receipt["source_as_of"], "source_as_of")
-    source_files = receipt["source_files"]
-    if not isinstance(source_files, Mapping) or not source_files:
-        raise FutureValueSourceError("verified source receipt has no source file hashes")
-    for label, record in source_files.items():
-        if not isinstance(record, Mapping) or not isinstance(record.get("bytes"), int):
-            raise FutureValueSourceError(f"verified source file record is invalid: {label}")
-        if re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256") or ""), re.I) is None:
-            raise FutureValueSourceError(f"verified source file hash is invalid: {label}")
-    return str(receipt["source_identity_sha256"]), claimed
+    validate_future_value_source_receipt_payload(receipt)
+    return str(receipt["source_identity_sha256"]), str(receipt["receipt_sha256"])
 
 
 def _verified_producer_adapters(

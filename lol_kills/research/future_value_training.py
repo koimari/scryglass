@@ -30,6 +30,7 @@ from lol_kills.research.future_value_rating import (
     bind_accepted_future_value_source,
     evaluate_future_value,
     rating_variant_config_receipt,
+    validate_future_value_source_receipt_payload,
     write_source_receipt,
 )
 from lol_kills.v2.tierlists.accepted_census import (
@@ -419,49 +420,10 @@ def _load_json_mapping(path: Path, label: str) -> dict[str, Any]:
 def _validate_source_receipt_mapping(receipt: Mapping[str, Any]) -> None:
     """Verify the source receipt payload before any training binding."""
 
-    required = {
-        "source_as_of",
-        "source_game_count",
-        "source_identity_sha256",
-        "accepted_game_ids",
-        "model_eligible_game_count",
-        "model_eligible_identity_sha256",
-        "model_eligible_game_ids",
-        "source_files",
-        "receipt_sha256",
-    }
-    if not required.issubset(receipt):
-        raise FutureValueTrainingError("source receipt is incomplete")
-    claimed = str(receipt.get("receipt_sha256") or "")
-    payload = dict(receipt)
-    payload.pop("receipt_sha256", None)
-    if len(claimed) != 64 or hashlib.sha256(_canonical_bytes(payload)).hexdigest() != claimed:
-        raise FutureValueTrainingError("source receipt canonical hash changed")
-    accepted = tuple(str(value) for value in receipt["accepted_game_ids"])
-    eligible = tuple(str(value) for value in receipt["model_eligible_game_ids"])
-    if (
-        tuple(canonical_game_ids(accepted)) != accepted
-        or int(receipt["source_game_count"]) != len(accepted)
-        or str(receipt["source_identity_sha256"]) != identity_sha256(accepted)
-        or tuple(canonical_game_ids(eligible)) != eligible
-        or int(receipt["model_eligible_game_count"]) != len(eligible)
-        or str(receipt["model_eligible_identity_sha256"]) != identity_sha256(eligible)
-    ):
-        raise FutureValueTrainingError("source receipt census identity changed")
     try:
-        stamp = pd.Timestamp(receipt["source_as_of"])
-    except (TypeError, ValueError) as error:
-        raise FutureValueTrainingError("source receipt as-of is invalid") from error
-    if pd.isna(stamp) or stamp.tzinfo is None:
-        raise FutureValueTrainingError("source receipt as-of must include a timezone")
-    source_files = receipt["source_files"]
-    if not isinstance(source_files, Mapping) or not source_files:
-        raise FutureValueTrainingError("source receipt file bindings are missing")
-    for label, record in source_files.items():
-        if not isinstance(record, Mapping) or not isinstance(record.get("bytes"), int):
-            raise FutureValueTrainingError(f"source receipt file binding is invalid: {label}")
-        if len(str(record.get("sha256") or "")) != 64:
-            raise FutureValueTrainingError(f"source receipt file hash is invalid: {label}")
+        validate_future_value_source_receipt_payload(receipt)
+    except FutureValueSourceError as error:
+        raise FutureValueTrainingError(str(error)) from error
 
 
 def verify_variant_input_binding(
@@ -474,6 +436,40 @@ def verify_variant_input_binding(
 
     binding = _load_json_mapping(binding_path, "variant input binding")
     _validate_source_receipt_mapping(source_receipt)
+    expected_fields = {
+        "schema_version",
+        "status",
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "source_receipt_sha256",
+        "evaluation_game_count",
+        "evaluation_game_identity_sha256",
+        "evaluation_game_ids",
+        "producer_contract",
+        "files",
+        "authority",
+        "receipt_sha256",
+    }
+    if set(binding) != expected_fields:
+        raise FutureValueTrainingError("variant input binding schema is not canonical")
+    if binding.get("schema_version") != "scryglass:future-value-variant-input-binding:v1" or binding.get(
+        "status"
+    ) != "frozen_research_input":
+        raise FutureValueTrainingError("variant input binding status is invalid")
+    expected_authority = {
+        "research_only": True,
+        "public": False,
+        "probability": False,
+        "odds": False,
+        "ev": False,
+        "recommendation": False,
+        "betting": False,
+        "promotion": False,
+        "deployment": False,
+    }
+    if dict(binding.get("authority") or {}) != expected_authority:
+        raise FutureValueTrainingError("variant input binding authority is invalid")
     claimed_binding_hash = binding.get("receipt_sha256")
     if not isinstance(claimed_binding_hash, str) or hashlib.sha256(
         _canonical_bytes({key: value for key, value in binding.items() if key != "receipt_sha256"})
@@ -483,13 +479,26 @@ def verify_variant_input_binding(
         raise FutureValueTrainingError("variant input binding source receipt changed")
     if binding.get("source_identity_sha256") != source_receipt.get("source_identity_sha256"):
         raise FutureValueTrainingError("variant input binding source identity changed")
-    expected_ids = tuple(sorted(str(value) for value in (expected_game_ids or ())))
-    if expected_ids:
-        bound_ids = tuple(sorted(str(value) for value in binding.get("evaluation_game_ids", ())))
-        if bound_ids != expected_ids or binding.get("evaluation_game_identity_sha256") != identity_sha256(
-            bound_ids
-        ):
-            raise FutureValueTrainingError("variant input evaluation census changed")
+    if (
+        binding.get("source_as_of") != source_receipt.get("source_as_of")
+        or binding.get("source_game_count") != source_receipt.get("source_game_count")
+    ):
+        raise FutureValueTrainingError("variant input source census changed")
+    raw_bound_ids = binding.get("evaluation_game_ids")
+    if not isinstance(raw_bound_ids, list):
+        raise FutureValueTrainingError("variant input evaluation IDs are invalid")
+    bound_ids = tuple(str(value) for value in raw_bound_ids)
+    if (
+        not bound_ids
+        or tuple(canonical_game_ids(bound_ids)) != bound_ids
+        or int(binding.get("evaluation_game_count") or -1) != len(bound_ids)
+        or binding.get("evaluation_game_identity_sha256") != identity_sha256(bound_ids)
+        or not set(bound_ids).issubset(set(map(str, source_receipt["model_eligible_game_ids"])))
+    ):
+        raise FutureValueTrainingError("variant input evaluation census changed")
+    expected_ids = tuple(canonical_game_ids(str(value) for value in (expected_game_ids or ())))
+    if expected_ids and bound_ids != expected_ids:
+        raise FutureValueTrainingError("variant input evaluation IDs do not match runtime")
     producer_contract = binding.get("producer_contract")
     if not isinstance(producer_contract, Mapping):
         raise FutureValueTrainingError("variant input producer contract is missing")
@@ -501,7 +510,13 @@ def verify_variant_input_binding(
     if dict(producer_contract) != expected_contract:
         raise FutureValueTrainingError("variant input producer contract changed")
     files = binding.get("files")
-    if not isinstance(files, Mapping) or not files:
+    required_files = {
+        "source_receipt",
+        "current_rating_base",
+        "atomized_matrix",
+        "atomized_manifest",
+    }
+    if not isinstance(files, Mapping) or set(files) != required_files:
         raise FutureValueTrainingError("variant input file receipts are missing")
     verified_files: dict[str, dict[str, Any]] = {}
     for label, record in files.items():
@@ -531,17 +546,34 @@ def verify_variant_input_binding(
         raise FutureValueTrainingError("variant input source receipt file is missing")
     source_path = Path(source_file["path"])
     source_payload = _load_json_mapping(source_path, "variant input source receipt")
-    if source_payload.get("receipt_sha256") != source_receipt.get("receipt_sha256"):
+    if source_payload != dict(source_receipt):
         raise FutureValueTrainingError("variant input source receipt payload changed")
+    rating_file = verified_files.get("current_rating_base")
     matrix_file = verified_files.get("atomized_matrix")
     manifest_file = verified_files.get("atomized_manifest")
-    if matrix_file is None or manifest_file is None:
+    if rating_file is None or matrix_file is None or manifest_file is None:
         raise FutureValueTrainingError("atomized producer files are incomplete")
     manifest = _load_json_mapping(Path(manifest_file["path"]), "atomized producer manifest")
     if manifest.get("matrix_sha256") != matrix_file["sha256"]:
         raise FutureValueTrainingError("atomized matrix manifest hash changed")
     if int(manifest.get("rows") or -1) != int(binding.get("evaluation_game_count") or -2):
         raise FutureValueTrainingError("atomized matrix row count changed")
+    for label, record in (("current rating", rating_file), ("atomized matrix", matrix_file)):
+        path = Path(record["path"])
+        try:
+            columns = set(pd.read_parquet(path, columns=None).columns)
+            game_column = next(
+                name for name in ("game_id", "game_uid", "gameid") if name in columns
+            )
+            frame_ids = tuple(
+                canonical_game_ids(
+                    pd.read_parquet(path, columns=[game_column])[game_column].astype(str)
+                )
+            )
+        except (OSError, ValueError, StopIteration) as error:
+            raise FutureValueTrainingError(f"{label} identity cannot be read") from error
+        if frame_ids != bound_ids:
+            raise FutureValueTrainingError(f"{label} game IDs changed")
     return {
         "schema_version": binding.get("schema_version"),
         "receipt_sha256": claimed_binding_hash,
@@ -582,6 +614,7 @@ def _code_hashes(repo_root: Path) -> dict[str, str]:
         "lol_kills/research/future_value_rating.py",
         "lol_kills/research/future_value_training.py",
         "lol_kills/research/future_phase_curve.py",
+        "lol_kills/research/atomized_rf_composite.py",
         "lol_kills/research/future_value_draft_score.py",
     )
     output: dict[str, str] = {}
@@ -688,6 +721,7 @@ def run_model_evaluation(
         input_binding = verify_variant_input_binding(
             input_binding_path,
             source_receipt=source_receipt,
+            expected_game_ids=source_receipt["model_eligible_game_ids"],
         )
 
     paths = {

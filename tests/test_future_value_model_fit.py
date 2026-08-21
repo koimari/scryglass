@@ -121,7 +121,13 @@ def _manual_form(game_count: int = 24) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def _source_receipt(game_ids: list[str], source_as_of: str = "2026-01-24T00:00:00Z") -> dict:
     game_ids = sorted(game_ids)
+    source_files = {
+        label: {"bytes": 1, "sha256": "0" * 64, "locator": f"fixture/{label}"}
+        for label in ("maps", "players", "teams", "accepted_census")
+    }
     payload = {
+        "schema_version": "scryglass:future-value-rating-source:v1",
+        "status": "accepted_source_bound_development_only",
         "source_as_of": source_as_of,
         "source_game_count": len(game_ids),
         "source_identity_sha256": identity_sha256(game_ids),
@@ -129,7 +135,22 @@ def _source_receipt(game_ids: list[str], source_as_of: str = "2026-01-24T00:00:0
         "model_eligible_game_count": len(game_ids),
         "model_eligible_identity_sha256": identity_sha256(game_ids),
         "model_eligible_game_ids": game_ids,
-        "source_files": {"fixture": {"bytes": 1, "sha256": "0" * 64}},
+        "source_rows": {},
+        "source_extra_game_ids": {},
+        "identity_coverage": {},
+        "checkpoint_coverage": {},
+        "model_exclusions": {},
+        "source_files": source_files,
+        "model_contract": {},
+        "authority": {
+            "research_only": True,
+            "public_player_rating": False,
+            "public_team_rating": False,
+            "public_probability": False,
+            "promotion": False,
+            "merge": False,
+            "deployment": False,
+        },
     }
     payload["receipt_sha256"] = hashlib.sha256(
         json.dumps(payload, allow_nan=False, separators=(",", ":"), sort_keys=True).encode()
@@ -473,7 +494,7 @@ def test_evaluation_cross_binds_series_receipt_to_validated_source() -> None:
             forged_source, separators=(",", ":"), sort_keys=True
         ).encode()
     ).hexdigest()
-    with pytest.raises(FutureValueSourceError, match="does not bind maps"):
+    with pytest.raises(FutureValueSourceError, match="file bindings are incomplete"):
         evaluate_future_value(
             maps,
             players,
