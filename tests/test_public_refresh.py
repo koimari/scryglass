@@ -52,6 +52,43 @@ def _with_receipt_paths(config: public_refresh.RefreshConfig) -> public_refresh.
     )
 
 
+def test_future_value_shadow_failure_cannot_interrupt_public_refresh(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    state_path = config.sync.state_path
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps({"published_game_ids": ["game-1", "game-2"]}),
+        encoding="utf-8",
+    )
+    ratings = {
+        "status": "published",
+        "pack_id": "v2026.08.21.120000",
+        "source_game_count": 2,
+        "source_identity_sha256": source_identity_sha256(["game-1", "game-2"]),
+        "source_observed_through": "2026-08-21T12:00:00Z",
+    }
+
+    with patch.object(
+        public_refresh,
+        "run_future_value_refresh_shadow",
+        side_effect=RuntimeError("fixture shadow failure"),
+    ):
+        result = public_refresh._run_future_value_shadow(
+            config,
+            ratings=ratings,
+            accepted_inputs=None,
+            checked_at=NOW,
+        )
+
+    assert result["status"] == "research_only_blocked"
+    assert result["blockers"] == ["shadow_adapter_failed"]
+    assert result["authority"]["promotion"] is False
+    assert result["writes_public_artifacts"] is False
+    assert result["stage_or_activation"] is False
+
+
 def test_tier_publication_binds_runtime_payload_to_accepted_source(tmp_path: Path) -> None:
     config = replace(_config(tmp_path), publication_backend="supabase")
     payload_path = (

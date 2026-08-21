@@ -37,6 +37,8 @@ from lol_kills.postgame_sync import (
     validate_live_source,
 )
 from lol_kills.research.future_value_refresh_shadow import (
+    AUTHORITY as FUTURE_VALUE_SHADOW_AUTHORITY,
+    SCHEMA_VERSION as FUTURE_VALUE_SHADOW_SCHEMA_VERSION,
     FutureValueShadowPromotionError,
     reject_unauthorized_promotion,
     run_future_value_refresh_shadow,
@@ -693,18 +695,47 @@ def _run_future_value_shadow(
             source_payload = None
         if isinstance(source_payload, Mapping):
             source_receipt_sha256 = source_payload.get("receipt_canonical_sha256")
-    return run_future_value_refresh_shadow(
-        runtime_root=config.runtime_root,
-        source_as_of=source_as_of,
-        source_game_ids=source_ids,
-        source_game_count=source_count,
-        source_identity_sha256=source_identity,
-        source_receipt_sha256=source_receipt_sha256,
-        accepted_source_receipt_path=source_receipt_path,
-        current_ratings=ratings,
-        artifacts=_future_value_shadow_artifacts(),
-        checked_at=checked_at,
-    )
+    try:
+        return run_future_value_refresh_shadow(
+            runtime_root=config.runtime_root,
+            source_as_of=source_as_of,
+            source_game_ids=source_ids,
+            source_game_count=source_count,
+            source_identity_sha256=source_identity,
+            source_receipt_sha256=source_receipt_sha256,
+            accepted_source_receipt_path=source_receipt_path,
+            current_ratings=ratings,
+            artifacts=_future_value_shadow_artifacts(),
+            checked_at=checked_at,
+        )
+    except Exception as error:  # noqa: BLE001
+        # The unified public refresh persists this object in its run receipt.
+        # A research shadow failure cannot interrupt current ratings, Tier
+        # Lists, pack staging, activation, or rollback.
+        return {
+            "schema_version": FUTURE_VALUE_SHADOW_SCHEMA_VERSION,
+            "status": "research_only_blocked",
+            "checked_at": _iso(checked_at),
+            "source": {
+                "source_as_of": source_as_of,
+                "source_game_count": source_count,
+                "source_identity_sha256": source_identity,
+                "source_receipt_sha256": source_receipt_sha256,
+            },
+            "current_ratings": {
+                "status": ratings.get("status"),
+                "pack_id": ratings.get("pack_id"),
+            },
+            "artifacts": {},
+            "coverage": {},
+            "blockers": ["shadow_adapter_failed"],
+            "error": f"{type(error).__name__}: {str(error)[:300]}",
+            "authority": dict(FUTURE_VALUE_SHADOW_AUTHORITY),
+            "writes_public_artifacts": False,
+            "stage_or_activation": False,
+            "receipt_path": None,
+            "write_error": "shadow result is preserved by the unified refresh receipt",
+        }
 
 
 def _run_tier_refresh(

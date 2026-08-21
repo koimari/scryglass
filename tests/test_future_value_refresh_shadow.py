@@ -161,6 +161,19 @@ def test_tampered_accepted_source_receipt_is_blocked(tmp_path: Path) -> None:
     assert "accepted_source_receipt_unavailable" in result["blockers"]
 
 
+def test_duplicate_source_ids_are_rejected_without_silent_deduplication(
+    tmp_path: Path,
+) -> None:
+    values = _inputs(tmp_path)
+    values["source_game_ids"] = ["game-1", "game-1", "game-2"]
+    values["source_game_count"] = 3
+
+    result = run_future_value_refresh_shadow(runtime_root=tmp_path, **values)
+
+    assert result["status"] == "research_only_blocked"
+    assert "accepted_source_census_duplicate_ids" in result["blockers"]
+
+
 def test_explicit_promotion_is_rejected_before_any_shadow_work() -> None:
     with pytest.raises(FutureValueShadowPromotionError, match="independent authorization"):
         reject_unauthorized_promotion("future_player_form")

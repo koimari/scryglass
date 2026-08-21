@@ -106,11 +106,16 @@ def _utc_text(value: object) -> str | None:
     return stamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _safe_ids(values: object) -> tuple[str, ...]:
+def _safe_ids(values: object) -> tuple[tuple[str, ...], bool, bool]:
     if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
-        return ()
+        return (), False, True
     raw = [canonical_source_game_key(value) for value in values]
-    return tuple(canonical_game_ids(value for value in raw if value))
+    nonempty = [value for value in raw if value]
+    return (
+        tuple(canonical_game_ids(nonempty)),
+        len(nonempty) != len(set(nonempty)),
+        len(nonempty) != len(raw),
+    )
 
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
@@ -205,7 +210,7 @@ def _source_binding(
     accepted_source_receipt_path: Path | None,
     blockers: list[str],
 ) -> dict[str, Any]:
-    ids = _safe_ids(source_game_ids)
+    ids, duplicate_ids, invalid_ids = _safe_ids(source_game_ids)
     claimed_count = source_game_count
     if isinstance(claimed_count, bool):
         claimed_count = None
@@ -217,6 +222,10 @@ def _source_binding(
     claimed_identity = _hash(source_identity_sha256, "source identity")
     if not ids:
         blockers.append("accepted_source_census_missing")
+    if duplicate_ids:
+        blockers.append("accepted_source_census_duplicate_ids")
+    if invalid_ids:
+        blockers.append("accepted_source_census_invalid_ids")
     if count != len(ids):
         blockers.append("accepted_source_game_count_mismatch")
     if claimed_identity is None:
