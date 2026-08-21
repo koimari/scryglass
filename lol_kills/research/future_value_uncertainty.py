@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
+from sklearn.isotonic import IsotonicRegression
 
 
 SCHEMA_VERSION = "scryglass:future-value-uncertainty:v1"
@@ -35,6 +36,32 @@ MIN_ACCEPTED_FRACTION = 0.99
 MIN_ACCEPTED_DRAWS = 1000
 SIDE_SWAP_TOLERANCE = 1e-12
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+
+# This contract is separate from the point-model probability calibration above.
+# It maps observed support to an expected out-of-sample residual.  The mapping
+# is research-only until a later fold has enough prior rows.
+SUPPORT_CALIBRATION_SCHEMA_VERSION = "scryglass:future-value-support-calibration:v1"
+SUPPORT_CALIBRATION_RECEIPT_SCHEMA_VERSION = (
+    "scryglass:future-value-support-calibration-receipt:v1"
+)
+SUPPORT_CALIBRATION_MINIMUM_COVERAGE = 1.0
+SUPPORT_CALIBRATION_DEFAULT_MINIMUM_ROWS = 20
+SUPPORT_CALIBRATION_DEFAULT_MINIMUM_BIN_ROWS = 5
+SUPPORT_CALIBRATION_DEFAULT_MINIMUM_BINS = 2
+SUPPORT_CALIBRATION_DEFAULT_MAXIMUM_BINS = 10
+
+SUPPORT_CALIBRATION_AUTHORITY = {
+    "research_only": True,
+    "public_player_value": False,
+    "public_team_value": False,
+    "public_probability": False,
+    "odds": False,
+    "expected_value": False,
+    "recommendation": False,
+    "betting": False,
+    "promotion": False,
+    "deployment": False,
+}
 
 
 class FutureValueUncertaintyError(ValueError):
@@ -1115,6 +1142,715 @@ def verify_uncertainty_receipt(artifact: Mapping[str, Any]) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# Strict-prior support calibration
+# ---------------------------------------------------------------------------
+
+
+def _support_value(row: Mapping[str, Any], support_column: str) -> float:
+    candidates = (support_column, "minimum_effective_support", "effective_support", "support")
+    for name in candidates:
+        if name not in row:
+            continue
+        try:
+            value = float(row[name])
+        except (TypeError, ValueError) as error:
+            raise FutureValueUncertaintyError("support value is invalid") from error
+        if not math.isfinite(value) or value < 0.0:
+            raise FutureValueUncertaintyError("support value must be finite and non-negative")
+        return value
+    raise FutureValueUncertaintyError("support value is missing")
+
+
+def _support_prediction(row: Mapping[str, Any]) -> tuple[float, float]:
+    """Read one out-of-sample probability or logit and return both forms."""
+
+    logit_names = (
+        "prediction_logit",
+        "candidate_raw_logit",
+        "raw_logit",
+        "logit",
+    )
+    probability_names = (
+        "prediction_probability",
+        "candidate_raw_probability",
+        "raw_probability",
+        "probability",
+        "prediction",
+        "candidate",
+    )
+    logit_value: float | None = None
+    for name in logit_names:
+        if name in row:
+            try:
+                logit_value = float(row[name])
+            except (TypeError, ValueError) as error:
+                raise FutureValueUncertaintyError("prediction logit is invalid") from error
+            break
+    probability_value: float | None = None
+    for name in probability_names:
+        if name in row:
+            try:
+                probability_value = float(row[name])
+            except (TypeError, ValueError) as error:
+                raise FutureValueUncertaintyError("prediction probability is invalid") from error
+            break
+    if logit_value is None and probability_value is None:
+        raise FutureValueUncertaintyError("support calibration prediction is missing")
+    if logit_value is not None:
+        if not math.isfinite(logit_value):
+            raise FutureValueUncertaintyError("prediction logit is non-finite")
+        derived_probability = float(_sigmoid(np.asarray([logit_value], dtype=float))[0])
+        if probability_value is not None:
+            if not math.isfinite(probability_value) or not 0.0 < probability_value < 1.0:
+                raise FutureValueUncertaintyError("prediction probability must be between zero and one")
+            if not math.isclose(probability_value, derived_probability, rel_tol=1e-8, abs_tol=1e-10):
+                raise FutureValueUncertaintyError("prediction logit and probability disagree")
+        probability_value = derived_probability
+    assert probability_value is not None
+    if not math.isfinite(probability_value) or not 0.0 < probability_value < 1.0:
+        raise FutureValueUncertaintyError("prediction probability must be between zero and one")
+    if logit_value is None:
+        logit_value = float(math.log(probability_value / (1.0 - probability_value)))
+    return float(logit_value), float(probability_value)
+
+
+def _support_residual_target(
+    target: float,
+    probability: float,
+    logit: float,
+    *,
+    target_kind: str,
+) -> float:
+    if target not in (0.0, 1.0):
+        raise FutureValueUncertaintyError("support calibration target must be binary")
+    if target_kind == "log_loss":
+        # Per-row log loss is the proper scoring residual.  It is evaluated
+        # on a held-out fold and never used to fit that fold's mapping.
+        value = -(
+            target * math.log(max(probability, 1e-15))
+            + (1.0 - target) * math.log(max(1.0 - probability, 1e-15))
+        )
+    elif target_kind == "absolute_logit_residual":
+        # This is an explicit diagnostic target.  The binary outcome is coded
+        # as a signed unit logit target because a binary zero/one target has no
+        # finite logit.  It is not presented as a probability calibration.
+        value = abs(logit - (2.0 * target - 1.0))
+    elif target_kind == "absolute_probability_residual":
+        value = abs(probability - target)
+    else:
+        raise FutureValueUncertaintyError(
+            "unsupported support calibration target; use log_loss, "
+            "absolute_logit_residual, or absolute_probability_residual"
+        )
+    if not math.isfinite(value) or value < 0.0:
+        raise FutureValueUncertaintyError("support calibration residual is invalid")
+    return float(value)
+
+
+def _support_date(row: Mapping[str, Any], label: str) -> pd.Timestamp:
+    value = row.get("date", row.get("timestamp"))
+    if value is None:
+        raise FutureValueUncertaintyError(f"{label} date is missing")
+    timestamp = pd.to_datetime(value, utc=True, errors="coerce")
+    if pd.isna(timestamp):
+        raise FutureValueUncertaintyError(f"{label} date is invalid")
+    return pd.Timestamp(timestamp)
+
+
+def _support_fold_rows(
+    fold: Mapping[str, Any],
+    *,
+    source_hash: str,
+    variant: str,
+    target_kind: str,
+    support_column: str,
+) -> dict[str, Any]:
+    fold_id = fold.get("fold_id", fold.get("fold"))
+    if fold_id is None or not str(fold_id).strip():
+        raise FutureValueUncertaintyError("support calibration fold ID is missing")
+    train_end_value = fold.get("train_end", fold.get("fit_window_end"))
+    validation_start_value = fold.get("validation_start", fold.get("validation_interval_start"))
+    validation_end_value = fold.get("validation_end", fold.get("validation_interval_end"))
+    if train_end_value is None or validation_start_value is None or validation_end_value is None:
+        raise FutureValueUncertaintyError("support calibration fold cutoffs are incomplete")
+    train_end = pd.to_datetime(train_end_value, utc=True, errors="coerce")
+    validation_start = pd.to_datetime(validation_start_value, utc=True, errors="coerce")
+    validation_end = pd.to_datetime(validation_end_value, utc=True, errors="coerce")
+    if any(pd.isna(value) for value in (train_end, validation_start, validation_end)):
+        raise FutureValueUncertaintyError("support calibration fold cutoffs are invalid")
+    train_end = pd.Timestamp(train_end)
+    validation_start = pd.Timestamp(validation_start)
+    validation_end = pd.Timestamp(validation_end)
+    if not train_end < validation_start <= validation_end:
+        raise FutureValueUncertaintyError("support calibration fold cutoffs are not strictly chronological")
+    fold_source = fold.get("source_receipt_sha256")
+    if fold_source is not None and str(fold_source).lower() != source_hash:
+        raise FutureValueUncertaintyError("support calibration source drift across folds")
+    fold_variant = fold.get("variant")
+    if fold_variant is not None and str(fold_variant) != variant:
+        raise FutureValueUncertaintyError("support calibration variant drift across folds")
+    raw_rows = fold.get("rows", fold.get("predictions", fold.get("ledger_rows")))
+    if isinstance(raw_rows, pd.DataFrame):
+        raw_rows = raw_rows.to_dict("records")
+    if not isinstance(raw_rows, list) or not raw_rows:
+        raise FutureValueUncertaintyError("support calibration fold rows are missing")
+    normalized: list[dict[str, Any]] = []
+    seen_games: set[str] = set()
+    for index, raw in enumerate(raw_rows):
+        if not isinstance(raw, Mapping):
+            raise FutureValueUncertaintyError("support calibration row is invalid")
+        game_id_value = raw.get("game_id", raw.get("game_uid", raw.get("match_id")))
+        if game_id_value is None or not str(game_id_value).strip():
+            raise FutureValueUncertaintyError("support calibration game ID is missing")
+        game_id = str(game_id_value)
+        if game_id in seen_games:
+            raise FutureValueUncertaintyError("support calibration game IDs are not unique")
+        seen_games.add(game_id)
+        series_value = raw.get("series_id", raw.get("series"))
+        if series_value is None or not str(series_value).strip():
+            raise FutureValueUncertaintyError("support calibration series ID is missing")
+        series_id = str(series_value)
+        date = _support_date(raw, f"support calibration row {game_id}")
+        if date < validation_start or date > validation_end:
+            raise FutureValueUncertaintyError("support calibration row is outside its validation window")
+        target_value = raw.get("target")
+        try:
+            target = float(target_value)
+        except (TypeError, ValueError) as error:
+            raise FutureValueUncertaintyError("support calibration target is missing") from error
+        logit, probability = _support_prediction(raw)
+        support = _support_value(raw, support_column)
+        residual = _support_residual_target(
+            target,
+            probability,
+            logit,
+            target_kind=target_kind,
+        )
+        row_source = raw.get("source_receipt_sha256")
+        if row_source is not None and str(row_source).lower() != source_hash:
+            raise FutureValueUncertaintyError("support calibration row source drift")
+        row_variant = raw.get("variant")
+        if row_variant is not None and str(row_variant) != variant:
+            raise FutureValueUncertaintyError("support calibration row variant drift")
+        normalized.append(
+            {
+                "fold": str(fold_id),
+                "game_id": game_id,
+                "series_id": series_id,
+                "date": _date_text(date),
+                "support": support,
+                "prediction_logit": logit,
+                "prediction_probability": probability,
+                "residual_target": residual,
+            }
+        )
+    normalized.sort(key=lambda row: row["game_id"])
+    rows_hash = _sha256_json(normalized)
+    claimed_rows_hash = fold.get("rows_sha256", fold.get("prediction_rows_sha256"))
+    if claimed_rows_hash is not None and str(claimed_rows_hash).lower() != rows_hash:
+        raise FutureValueUncertaintyError("support calibration fold rows hash does not match")
+    return {
+        "fold_id": str(fold_id),
+        "train_end": _date_text(train_end),
+        "validation_start": _date_text(validation_start),
+        "validation_end": _date_text(validation_end),
+        "source_receipt_sha256": source_hash,
+        "variant": variant,
+        "rows": normalized,
+        "rows_sha256": rows_hash,
+    }
+
+
+def _fit_support_bins(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    minimum_rows: int,
+    minimum_bin_rows: int,
+    minimum_bins: int,
+    maximum_bins: int,
+) -> dict[str, Any]:
+    if len(rows) < int(minimum_rows):
+        raise FutureValueUncertaintyError("support calibration has insufficient prior rows")
+    if minimum_bin_rows < 1 or minimum_bins < 2 or maximum_bins < minimum_bins:
+        raise FutureValueUncertaintyError("support calibration bin thresholds are invalid")
+    support = np.asarray([float(row["support"]) for row in rows], dtype=float)
+    residual = np.asarray([float(row["residual_target"]) for row in rows], dtype=float)
+    if not np.isfinite(support).all() or not np.isfinite(residual).all():
+        raise FutureValueUncertaintyError("support calibration bin inputs are non-finite")
+    unique_support = np.unique(support)
+    if unique_support.size < int(minimum_bins):
+        raise FutureValueUncertaintyError("support calibration has insufficient support values")
+    bin_count = min(int(maximum_bins), len(rows) // int(minimum_bin_rows))
+    if bin_count < int(minimum_bins):
+        raise FutureValueUncertaintyError("support calibration has insufficient rows per bin")
+    order = np.argsort(support, kind="stable")
+    raw_bins: list[np.ndarray] = []
+    for indexes in np.array_split(order, bin_count):
+        if len(indexes):
+            raw_bins.append(np.asarray(indexes, dtype=int))
+    # Merge adjacent bins with the same support center.  Isotonic regression
+    # needs a stable non-decreasing support coordinate.
+    bins: list[np.ndarray] = []
+    for indexes in raw_bins:
+        if bins and float(np.mean(support[bins[-1]])) == float(np.mean(support[indexes])):
+            bins[-1] = np.concatenate((bins[-1], indexes))
+        else:
+            bins.append(indexes)
+    if len(bins) < int(minimum_bins):
+        raise FutureValueUncertaintyError("support calibration has insufficient distinct bins")
+    centers = np.asarray([float(np.mean(support[indexes])) for indexes in bins], dtype=float)
+    means = np.asarray([float(np.mean(residual[indexes])) for indexes in bins], dtype=float)
+    counts = np.asarray([len(indexes) for indexes in bins], dtype=float)
+    if (counts < int(minimum_bin_rows)).any():
+        raise FutureValueUncertaintyError("support calibration has an undersized support bin")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        model = IsotonicRegression(increasing=False, out_of_bounds="clip")
+        fitted = np.asarray(model.fit_transform(centers, means, sample_weight=counts), dtype=float)
+    if not np.isfinite(fitted).all() or (fitted < 0.0).any():
+        raise FutureValueUncertaintyError("support calibration mapping is non-finite")
+    if len(fitted) > 1 and (np.diff(fitted) > 1e-12).any():
+        raise FutureValueUncertaintyError("support calibration mapping is not monotonic")
+    bin_rows = []
+    for indexes, center, mean, fitted_value in zip(bins, centers, means, fitted):
+        bin_rows.append(
+            {
+                "lower_support": float(np.min(support[indexes])),
+                "upper_support": float(np.max(support[indexes])),
+                "center_support": float(center),
+                "rows": int(len(indexes)),
+                "mean_residual": float(mean),
+                "fitted_residual": float(fitted_value),
+            }
+        )
+    return {
+        "method": "weighted_decreasing_isotonic_support_bins",
+        "monotonic": "non_increasing_with_support",
+        "target_scale": "expected_out_of_sample_residual",
+        "minimum_support": float(np.min(support)),
+        "maximum_support": float(np.max(support)),
+        "training_rows": int(len(rows)),
+        "training_game_ids": sorted(str(row["game_id"]) for row in rows),
+        "training_game_identity_sha256": _identity_sha256(row["game_id"] for row in rows),
+        "bins": bin_rows,
+        "mapping_sha256": _sha256_json(bin_rows),
+    }
+
+
+def _apply_support_mapping(support: Sequence[float], mapping: Mapping[str, Any]) -> np.ndarray:
+    values = np.asarray([float(value) for value in support], dtype=float)
+    bins = mapping.get("bins")
+    if not isinstance(bins, list) or len(bins) < 2:
+        raise FutureValueUncertaintyError("support calibration mapping bins are missing")
+    centers = np.asarray([float(row["center_support"]) for row in bins], dtype=float)
+    fitted = np.asarray([float(row["fitted_residual"]) for row in bins], dtype=float)
+    if not np.isfinite(values).all() or not np.isfinite(centers).all() or not np.isfinite(fitted).all():
+        raise FutureValueUncertaintyError("support calibration mapping is non-finite")
+    if np.any(np.diff(centers) <= 0.0) or np.any(np.diff(fitted) > 1e-12):
+        raise FutureValueUncertaintyError("support calibration mapping is not canonical monotonic")
+    output = np.interp(values, centers, fitted, left=fitted[0], right=fitted[-1])
+    if not np.isfinite(output).all() or (output < 0.0).any():
+        raise FutureValueUncertaintyError("support calibration output is invalid")
+    return output
+
+
+def build_strict_prior_support_calibration(
+    folds: Sequence[Mapping[str, Any]],
+    *,
+    source_receipt: Mapping[str, Any],
+    variant: str,
+    target_kind: str = "log_loss",
+    support_column: str = "minimum_effective_support",
+    minimum_training_rows: int = SUPPORT_CALIBRATION_DEFAULT_MINIMUM_ROWS,
+    minimum_bin_rows: int = SUPPORT_CALIBRATION_DEFAULT_MINIMUM_BIN_ROWS,
+    minimum_bins: int = SUPPORT_CALIBRATION_DEFAULT_MINIMUM_BINS,
+    maximum_bins: int = SUPPORT_CALIBRATION_DEFAULT_MAXIMUM_BINS,
+    minimum_coverage: float = SUPPORT_CALIBRATION_MINIMUM_COVERAGE,
+) -> dict[str, Any]:
+    """Fit a support-to-residual map from earlier validation folds only.
+
+    Each input fold contains out-of-sample predictions.  The first fold has no
+    earlier residual history and is marked blocked.  Later folds use only
+    rows from earlier validation windows.  The default residual is per-row
+    log loss, which is a proper scoring residual.  No current-fold target
+    enters its own mapping.
+    """
+
+    if not isinstance(source_receipt, Mapping):
+        raise FutureValueUncertaintyError("support calibration source receipt is required")
+    if not isinstance(variant, str) or not variant.strip():
+        raise FutureValueUncertaintyError("support calibration variant is missing")
+    if target_kind not in {"log_loss", "absolute_logit_residual", "absolute_probability_residual"}:
+        raise FutureValueUncertaintyError("unsupported support calibration target")
+    if not folds:
+        raise FutureValueUncertaintyError("support calibration folds are missing")
+    source_hash = _source_receipt_hash(source_receipt)
+    if SHA256_RE.fullmatch(source_hash) is None:
+        raise FutureValueUncertaintyError("support calibration source receipt hash is invalid")
+    coverage_threshold = float(minimum_coverage)
+    if not math.isfinite(coverage_threshold) or not 0.0 <= coverage_threshold <= 1.0:
+        raise FutureValueUncertaintyError("support calibration coverage threshold is invalid")
+    normalized_folds = [
+        _support_fold_rows(
+            fold,
+            source_hash=source_hash,
+            variant=variant,
+            target_kind=target_kind,
+            support_column=support_column,
+        )
+        for fold in folds
+    ]
+    if len({fold["fold_id"] for fold in normalized_folds}) != len(normalized_folds):
+        raise FutureValueUncertaintyError("support calibration fold IDs are not unique")
+    previous_end: pd.Timestamp | None = None
+    seen_games: set[str] = set()
+    seen_series: set[str] = set()
+    for fold in normalized_folds:
+        start = pd.Timestamp(fold["validation_start"])
+        end = pd.Timestamp(fold["validation_end"])
+        if previous_end is not None and not previous_end < start:
+            raise FutureValueUncertaintyError("support calibration validation windows overlap")
+        row_games = {str(row["game_id"]) for row in fold["rows"]}
+        row_series = {str(row["series_id"]) for row in fold["rows"]}
+        if seen_games & row_games:
+            raise FutureValueUncertaintyError("support calibration game IDs overlap across folds")
+        if seen_series & row_series:
+            raise FutureValueUncertaintyError("support calibration series IDs overlap across folds")
+        seen_games.update(row_games)
+        seen_series.update(row_series)
+        previous_end = end
+
+    output_folds: list[dict[str, Any]] = []
+    output_rows: list[dict[str, Any]] = []
+    available_folds = 0
+    eligible_rows = 0
+    calibrated_rows = 0
+    blockers: list[str] = []
+    prior_rows: list[dict[str, Any]] = []
+    for fold_index, fold in enumerate(normalized_folds):
+        rows = list(fold["rows"])
+        eligible = fold_index > 0
+        mapping: dict[str, Any] | None = None
+        fold_blockers: list[str] = []
+        if not eligible:
+            fold_blockers.append("calibration_prior_validation_folds_missing")
+        else:
+            eligible_rows += len(rows)
+            prior_end = pd.Timestamp(normalized_folds[fold_index - 1]["validation_end"])
+            current_start = pd.Timestamp(fold["validation_start"])
+            if not prior_end < current_start:
+                raise FutureValueUncertaintyError("support calibration prior cutoff is not strict")
+            try:
+                mapping = _fit_support_bins(
+                    prior_rows,
+                    minimum_rows=int(minimum_training_rows),
+                    minimum_bin_rows=int(minimum_bin_rows),
+                    minimum_bins=int(minimum_bins),
+                    maximum_bins=int(maximum_bins),
+                )
+            except FutureValueUncertaintyError as error:
+                fold_blockers.append(str(error).replace("support calibration ", "calibration_"))
+            if mapping is not None:
+                available_folds += 1
+        # Bind the prior population even when the fit is blocked by an
+        # insufficient-support threshold.  This makes the reason for the
+        # blocked fold auditable and prevents an empty list from hiding a
+        # chronology or source mismatch.
+        calibration_training_ids = [
+            str(row["game_id"])
+            for prior_fold in normalized_folds[:fold_index]
+            for row in prior_fold["rows"]
+        ]
+        calibration_training_hash = _identity_sha256(calibration_training_ids)
+        for row in rows:
+            calibrated = None if mapping is None else float(_apply_support_mapping([row["support"]], mapping)[0])
+            if calibrated is not None:
+                calibrated_rows += 1
+            output_rows.append(
+                {
+                    "fold": fold["fold_id"],
+                    "game_id": row["game_id"],
+                    "series_id": row["series_id"],
+                    "date": row["date"],
+                    "support": float(row["support"]),
+                    "raw_uncertainty_proxy": float(1.0 / math.sqrt(1.0 + float(row["support"]))),
+                    "calibrated_uncertainty": calibrated,
+                    "calibration_status": "available" if calibrated is not None else "blocked",
+                }
+            )
+        output_folds.append(
+            {
+                "fold": fold["fold_id"],
+                "validation_start": fold["validation_start"],
+                "validation_end": fold["validation_end"],
+                "train_end": fold["train_end"],
+                "source_receipt_sha256": source_hash,
+                "variant": variant,
+                "input_rows": len(rows),
+                "input_rows_sha256": fold["rows_sha256"],
+                "status": "available" if mapping is not None else "blocked",
+                "blockers": sorted(set(fold_blockers)),
+                "calibration_training_game_count": len(calibration_training_ids),
+                "calibration_training_game_ids": calibration_training_ids,
+                "calibration_training_game_identity_sha256": calibration_training_hash,
+                "mapping": mapping,
+            }
+        )
+        blockers.extend(fold_blockers)
+        prior_rows.extend(rows)
+
+    eligible_fold_count = max(0, len(normalized_folds) - 1)
+    row_fraction = calibrated_rows / eligible_rows if eligible_rows else 0.0
+    complete_enough = bool(
+        eligible_fold_count > 0
+        and available_folds == eligible_fold_count
+        and row_fraction >= coverage_threshold
+    )
+    coverage = {
+        "eligible_fold_count": eligible_fold_count,
+        "available_fold_count": available_folds,
+        "eligible_row_count": eligible_rows,
+        "calibrated_row_count": calibrated_rows,
+        "calibrated_row_fraction": float(row_fraction),
+        "minimum_coverage_threshold": coverage_threshold,
+        "complete_enough": complete_enough,
+        "first_fold_without_history": True,
+    }
+    if not complete_enough:
+        blockers.append("support_calibration_coverage_below_threshold")
+    artifact_payload: dict[str, Any] = {
+        "schema_version": SUPPORT_CALIBRATION_SCHEMA_VERSION,
+        "status": "research_only" if complete_enough else "research_only_partial",
+        "variant": variant,
+        "source": {
+            "source_receipt_sha256": source_hash,
+            "source_as_of": source_receipt.get("source_as_of"),
+            "source_game_count": source_receipt.get("source_game_count"),
+            "source_identity_sha256": source_receipt.get("source_identity_sha256"),
+        },
+        "target": {
+            "kind": target_kind,
+            "description": (
+                "per-row held-out log loss, a proper scoring residual"
+                if target_kind == "log_loss"
+                else "absolute residual from the signed unit outcome logit"
+                if target_kind == "absolute_logit_residual"
+                else "absolute held-out probability residual"
+            ),
+            "uses_current_validation_targets_for_fit": False,
+        },
+        "support": {
+            "column": support_column,
+            "raw_proxy": "1/sqrt(1+support)",
+            "mapping": "decreasing_isotonic_support_bins",
+            "minimum_training_rows": int(minimum_training_rows),
+            "minimum_bin_rows": int(minimum_bin_rows),
+            "minimum_bins": int(minimum_bins),
+            "maximum_bins": int(maximum_bins),
+        },
+        "coverage": coverage,
+        "folds": output_folds,
+        "rows": sorted(output_rows, key=lambda row: (str(row["fold"]), str(row["game_id"]))),
+        "blockers": sorted(set(blockers)),
+        "authority": dict(SUPPORT_CALIBRATION_AUTHORITY),
+    }
+    artifact_hash = _sha256_json(artifact_payload)
+    receipt_payload: dict[str, Any] = {
+        "schema_version": SUPPORT_CALIBRATION_RECEIPT_SCHEMA_VERSION,
+        "status": artifact_payload["status"],
+        "variant": variant,
+        "source_receipt_sha256": source_hash,
+        "artifact_sha256": artifact_hash,
+        "folds_sha256": _sha256_json(output_folds),
+        "rows_sha256": _sha256_json(artifact_payload["rows"]),
+        "coverage": coverage,
+        "calibration_training_game_ids": sorted(
+            {
+                str(game_id)
+                for fold in output_folds
+                for game_id in fold["calibration_training_game_ids"]
+            }
+        ),
+        "authority": dict(SUPPORT_CALIBRATION_AUTHORITY),
+    }
+    receipt_payload["receipt_sha256"] = _sha256_json(receipt_payload)
+    artifact = dict(artifact_payload)
+    artifact["artifact_sha256"] = artifact_hash
+    artifact["receipt"] = receipt_payload
+    artifact["receipt_sha256"] = receipt_payload["receipt_sha256"]
+    return artifact
+
+
+def verify_support_calibration_artifact(
+    artifact: Mapping[str, Any],
+    *,
+    expected_source_receipt_sha256: str | None = None,
+    expected_variant: str | None = None,
+) -> bool:
+    """Verify hashes, source binding, dates, fold isolation, and mappings."""
+
+    if not isinstance(artifact, Mapping):
+        raise FutureValueUncertaintyError("support calibration artifact is invalid")
+    claimed_artifact = artifact.get("artifact_sha256")
+    if not isinstance(claimed_artifact, str) or SHA256_RE.fullmatch(claimed_artifact) is None:
+        raise FutureValueUncertaintyError("support calibration artifact hash is invalid")
+    artifact_payload = dict(artifact)
+    artifact_payload.pop("artifact_sha256", None)
+    artifact_payload.pop("receipt", None)
+    artifact_payload.pop("receipt_sha256", None)
+    if _sha256_json(artifact_payload) != claimed_artifact.lower():
+        raise FutureValueUncertaintyError("support calibration artifact hash does not match")
+    if artifact.get("schema_version") != SUPPORT_CALIBRATION_SCHEMA_VERSION:
+        raise FutureValueUncertaintyError("support calibration artifact schema is invalid")
+    receipt = artifact.get("receipt")
+    if not isinstance(receipt, Mapping):
+        raise FutureValueUncertaintyError("support calibration receipt is missing")
+    claimed_receipt = receipt.get("receipt_sha256")
+    if not isinstance(claimed_receipt, str) or SHA256_RE.fullmatch(claimed_receipt) is None:
+        raise FutureValueUncertaintyError("support calibration receipt hash is invalid")
+    receipt_payload = dict(receipt)
+    receipt_payload.pop("receipt_sha256", None)
+    if _sha256_json(receipt_payload) != claimed_receipt.lower() or artifact.get("receipt_sha256") != claimed_receipt:
+        raise FutureValueUncertaintyError("support calibration receipt hash does not match")
+    if receipt.get("artifact_sha256") != claimed_artifact:
+        raise FutureValueUncertaintyError("support calibration receipt does not bind artifact")
+    source = artifact.get("source")
+    source_hash = artifact.get("source", {}).get("source_receipt_sha256") if isinstance(source, Mapping) else None
+    if not isinstance(source_hash, str) or SHA256_RE.fullmatch(source_hash) is None:
+        raise FutureValueUncertaintyError("support calibration source binding is invalid")
+    if expected_source_receipt_sha256 is not None and source_hash != str(expected_source_receipt_sha256).lower():
+        raise FutureValueUncertaintyError("support calibration source receipt does not match expected source")
+    if expected_variant is not None and artifact.get("variant") != expected_variant:
+        raise FutureValueUncertaintyError("support calibration variant does not match expected variant")
+    if artifact.get("variant") != receipt.get("variant") or receipt.get("source_receipt_sha256") != source_hash:
+        raise FutureValueUncertaintyError("support calibration receipt binding is inconsistent")
+    for value in (artifact.get("authority"), receipt.get("authority")):
+        if not isinstance(value, Mapping) or dict(value) != SUPPORT_CALIBRATION_AUTHORITY:
+            raise FutureValueUncertaintyError("support calibration authority grants access")
+    folds = artifact.get("folds")
+    rows = artifact.get("rows")
+    if not isinstance(folds, list) or not isinstance(rows, list) or not folds or not rows:
+        raise FutureValueUncertaintyError("support calibration fold rows are missing")
+    if receipt.get("folds_sha256") != _sha256_json(folds) or receipt.get("rows_sha256") != _sha256_json(rows):
+        raise FutureValueUncertaintyError("support calibration receipt does not bind rows")
+    fold_ids = [str(fold.get("fold")) for fold in folds if isinstance(fold, Mapping)]
+    if len(fold_ids) != len(folds) or len(set(fold_ids)) != len(fold_ids):
+        raise FutureValueUncertaintyError("support calibration fold IDs are invalid")
+    row_by_fold: dict[str, list[Mapping[str, Any]]] = {fold_id: [] for fold_id in fold_ids}
+    for row in rows:
+        if not isinstance(row, Mapping) or str(row.get("fold")) not in row_by_fold:
+            raise FutureValueUncertaintyError("support calibration output row is invalid")
+        row_by_fold[str(row["fold"])].append(row)
+    previous_end: pd.Timestamp | None = None
+    seen_games: set[str] = set()
+    seen_series: set[str] = set()
+    expected_calibration_ids: set[str] = set()
+    for index, fold in enumerate(folds):
+        if not isinstance(fold, Mapping):
+            raise FutureValueUncertaintyError("support calibration fold is invalid")
+        start = pd.to_datetime(fold.get("validation_start"), utc=True, errors="coerce")
+        end = pd.to_datetime(fold.get("validation_end"), utc=True, errors="coerce")
+        train_end = pd.to_datetime(fold.get("train_end"), utc=True, errors="coerce")
+        if any(pd.isna(value) for value in (start, end, train_end)) or not train_end < start <= end:
+            raise FutureValueUncertaintyError("support calibration fold chronology is invalid")
+        start = pd.Timestamp(start)
+        end = pd.Timestamp(end)
+        if previous_end is not None and not previous_end < start:
+            raise FutureValueUncertaintyError("support calibration fold windows overlap")
+        previous_end = end
+        fold_rows = row_by_fold[str(fold["fold"])]
+        if not fold_rows or int(fold.get("input_rows", -1)) != len(fold_rows):
+            raise FutureValueUncertaintyError("support calibration fold row count is invalid")
+        input_hash = fold.get("input_rows_sha256")
+        if not isinstance(input_hash, str) or SHA256_RE.fullmatch(input_hash) is None:
+            raise FutureValueUncertaintyError("support calibration input row hash is missing")
+        for row in fold_rows:
+            date = pd.to_datetime(row.get("date"), utc=True, errors="coerce")
+            if pd.isna(date) or not start <= pd.Timestamp(date) <= end:
+                raise FutureValueUncertaintyError("support calibration output date is outside its fold")
+            game_id = str(row.get("game_id", ""))
+            series_id = str(row.get("series_id", ""))
+            if not game_id or not series_id or game_id in seen_games or series_id in seen_series:
+                raise FutureValueUncertaintyError("support calibration output identities overlap")
+            seen_games.add(game_id)
+            seen_series.add(series_id)
+            support = float(row.get("support", float("nan")))
+            if not math.isfinite(support) or support < 0.0:
+                raise FutureValueUncertaintyError("support calibration output support is invalid")
+        calibration_ids = fold.get("calibration_training_game_ids")
+        if not isinstance(calibration_ids, list):
+            raise FutureValueUncertaintyError("support calibration training IDs are missing")
+        calibration_hash = fold.get("calibration_training_game_identity_sha256")
+        if calibration_hash != _identity_sha256(calibration_ids):
+            raise FutureValueUncertaintyError("support calibration training ID hash is invalid")
+        expected_prior = sorted(
+            str(row["game_id"])
+            for prior_fold in folds[:index]
+            for row in row_by_fold[str(prior_fold["fold"])]
+        )
+        if sorted(str(value) for value in calibration_ids) != expected_prior:
+            raise FutureValueUncertaintyError("support calibration training IDs are not strictly prior")
+        expected_calibration_ids.update(str(value) for value in calibration_ids)
+        mapping = fold.get("mapping")
+        if str(fold.get("status")) == "available":
+            if not isinstance(mapping, Mapping):
+                raise FutureValueUncertaintyError("support calibration mapping is missing")
+            bins = mapping.get("bins")
+            if not isinstance(bins, list) or len(bins) < 2:
+                raise FutureValueUncertaintyError("support calibration mapping bins are invalid")
+            centers = [float(bin_row["center_support"]) for bin_row in bins]
+            fitted = [float(bin_row["fitted_residual"]) for bin_row in bins]
+            if any(not math.isfinite(value) for value in (*centers, *fitted)) or any(
+                right <= left for left, right in zip(centers, centers[1:])
+            ) or any(right > left + 1e-12 for left, right in zip(fitted, fitted[1:])):
+                raise FutureValueUncertaintyError("support calibration mapping is not monotonic")
+        else:
+            if mapping is not None:
+                raise FutureValueUncertaintyError("blocked support calibration fold has a mapping")
+            if any(row.get("calibrated_uncertainty") is not None for row in fold_rows):
+                raise FutureValueUncertaintyError("blocked support calibration fold has calibrated output")
+    if sorted(str(value) for value in receipt.get("calibration_training_game_ids", [])) != sorted(expected_calibration_ids):
+        raise FutureValueUncertaintyError("support calibration receipt training IDs are invalid")
+    coverage = artifact.get("coverage")
+    if not isinstance(coverage, Mapping) or dict(coverage) != dict(receipt.get("coverage", {})):
+        raise FutureValueUncertaintyError("support calibration coverage binding is invalid")
+    return True
+
+
+def apply_strict_prior_support_calibration(
+    artifact: Mapping[str, Any],
+    support: Sequence[float] | pd.Series,
+    *,
+    fold_id: Any,
+    expected_source_receipt_sha256: str | None = None,
+    expected_variant: str | None = None,
+) -> pd.Series:
+    """Apply one later-fold mapping after complete receipt verification."""
+
+    verify_support_calibration_artifact(
+        artifact,
+        expected_source_receipt_sha256=expected_source_receipt_sha256,
+        expected_variant=expected_variant,
+    )
+    wanted = str(fold_id)
+    fold = next((value for value in artifact["folds"] if str(value.get("fold")) == wanted), None)
+    if not isinstance(fold, Mapping) or fold.get("status") != "available" or not isinstance(fold.get("mapping"), Mapping):
+        raise FutureValueUncertaintyError("support calibration has no verified prior mapping for this fold")
+    values = _apply_support_mapping([float(value) for value in support], fold["mapping"])
+    index = support.index if isinstance(support, pd.Series) else None
+    return pd.Series(values, index=index, dtype=float, name="calibrated_support_uncertainty")
+
+
+# Short aliases make the contract easy to find from research notebooks.
+fit_strict_prior_support_calibration = build_strict_prior_support_calibration
+build_support_uncertainty_calibration = build_strict_prior_support_calibration
+verify_strict_prior_support_calibration = verify_support_calibration_artifact
+verify_support_uncertainty_calibration = verify_support_calibration_artifact
+apply_support_uncertainty_calibration = apply_strict_prior_support_calibration
+calibrate_support_uncertainty = apply_strict_prior_support_calibration
+
+
 # A short alias makes the research entry point convenient in notebooks while
 # keeping the descriptive function name available to callers.
 run_future_value_uncertainty = bootstrap_future_value_uncertainty
@@ -1162,9 +1898,21 @@ __all__ = [
     "DEFAULT_REQUESTED_DRAWS",
     "FixedFutureValueTransform",
     "FutureValueUncertaintyError",
+    "SUPPORT_CALIBRATION_AUTHORITY",
+    "SUPPORT_CALIBRATION_SCHEMA_VERSION",
+    "SUPPORT_CALIBRATION_RECEIPT_SCHEMA_VERSION",
+    "apply_strict_prior_support_calibration",
+    "apply_support_uncertainty_calibration",
     "bootstrap_future_value_uncertainty",
     "bootstrap_future_value_model_uncertainty",
+    "build_strict_prior_support_calibration",
+    "build_support_uncertainty_calibration",
+    "calibrate_support_uncertainty",
     "cluster_bootstrap_weights",
+    "fit_strict_prior_support_calibration",
     "run_future_value_uncertainty",
+    "verify_strict_prior_support_calibration",
+    "verify_support_calibration_artifact",
+    "verify_support_uncertainty_calibration",
     "verify_uncertainty_receipt",
 ]

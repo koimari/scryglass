@@ -45,6 +45,11 @@ from lol_kills.research.future_value_rating import (
     build_strict_prior_player_form,
     validate_future_value_source_receipt_payload,
 )
+from lol_kills.research.future_value_uncertainty import (
+    FutureValueUncertaintyError,
+    apply_strict_prior_support_calibration,
+    verify_support_calibration_artifact,
+)
 
 
 SCHEMA_VERSION = "scryglass:future-value-snapshot:v1"
@@ -855,6 +860,9 @@ def _feature_column(feature: str) -> str | None:
 def _player_contributions(
     model: Any,
     form: pd.DataFrame,
+    *,
+    support_calibration: Mapping[str, Any] | None = None,
+    support_calibration_fold_id: Any | None = None,
 ) -> pd.DataFrame:
     if not hasattr(model, "atom_model"):
         raise FutureValueSnapshotError("final model has no rank-3 atom model")
@@ -945,7 +953,28 @@ def _player_contributions(
     output["rank_3_champion_role_atom_support"] = pd.to_numeric(
         work.get("rank_3_champion_role_support", 0), errors="coerce"
     ).fillna(0).astype(int)
-    output["uncertainty_proxy"] = 1.0 / np.sqrt(1.0 + output["minimum_effective_support"])
+    output["uncertainty_proxy_raw"] = 1.0 / np.sqrt(1.0 + output["minimum_effective_support"])
+    output["uncertainty_proxy"] = output["uncertainty_proxy_raw"]
+    output["uncertainty_proxy_calibrated"] = np.nan
+    output["support_uncertainty_status"] = "not_calibrated"
+    if support_calibration is not None:
+        if support_calibration_fold_id is None:
+            raise FutureValueSnapshotError(
+                "support calibration fold ID is required for snapshot application"
+            )
+        try:
+            calibrated = apply_strict_prior_support_calibration(
+                support_calibration,
+                output["minimum_effective_support"],
+                fold_id=support_calibration_fold_id,
+            )
+        except FutureValueUncertaintyError as error:
+            raise FutureValueSnapshotError(
+                f"support calibration cannot be applied: {error}"
+            ) from error
+        output["uncertainty_proxy_calibrated"] = calibrated.to_numpy(dtype=float)
+        output["uncertainty_proxy"] = output["uncertainty_proxy_calibrated"]
+        output["support_uncertainty_status"] = "calibrated_strict_prior"
     output["support_status"] = np.select(
         [
             output["model_feature_missing"],
@@ -1253,6 +1282,8 @@ def build_future_value_snapshots(
     current_rating_inputs: Mapping[str, Any] | None = None,
     as_of: Any | None = None,
     baseline_cache: Any | None = None,
+    support_calibration: Mapping[str, Any] | None = None,
+    support_calibration_fold_id: Any | None = None,
 ) -> FutureValueSnapshotResult:
     """Build one source-bound, research-only player/team snapshot.
 
@@ -1278,6 +1309,31 @@ def build_future_value_snapshots(
             extra_blockers=computation_blockers,
             current_rating_inputs=current_rating_inputs,
         )
+    support_calibration_applied = False
+    if support_calibration is not None:
+        try:
+            expected_variant = (
+                str(bound_model_receipt.get("variant"))
+                if isinstance(bound_model_receipt, Mapping)
+                else None
+            )
+            verify_support_calibration_artifact(
+                support_calibration,
+                expected_source_receipt_sha256=str(source["source_receipt_sha256"]),
+                expected_variant=expected_variant,
+            )
+            if support_calibration_fold_id is None:
+                raise FutureValueSnapshotError(
+                    "support calibration fold ID is required for snapshot application"
+                )
+            support_calibration_applied = True
+        except (FutureValueUncertaintyError, FutureValueSnapshotError) as error:
+            return _blocked_result(
+                source_receipt,
+                auth,
+                extra_blockers=("support_calibration_invalid", str(error)),
+                current_rating_inputs=current_rating_inputs,
+            )
     if model is None:
         return _blocked_result(
             source_receipt,
@@ -1292,8 +1348,18 @@ def build_future_value_snapshots(
     if len(latest) != form["player_id"].nunique():
         raise FutureValueSnapshotError("latest player snapshot is incomplete")
     latest_roster = _latest_team_roster(form)
-    contributions = _player_contributions(model, latest)
-    roster_contributions = _player_contributions(model, latest_roster)
+    contributions = _player_contributions(
+        model,
+        latest,
+        support_calibration=support_calibration if support_calibration_applied else None,
+        support_calibration_fold_id=support_calibration_fold_id,
+    )
+    roster_contributions = _player_contributions(
+        model,
+        latest_roster,
+        support_calibration=support_calibration if support_calibration_applied else None,
+        support_calibration_fold_id=support_calibration_fold_id,
+    )
     player_rows: list[dict[str, Any]] = []
     for row in contributions.to_dict("records"):
         row_status = str(row["support_status"])
@@ -1303,7 +1369,10 @@ def build_future_value_snapshots(
             row_blockers.append("missing_model_feature_value")
         elif row_status == "sparse":
             row_blockers.append("sparse_player_support")
-        if "support_uncertainty_proxy_not_calibrated" in auth.blockers:
+        if (
+            "support_uncertainty_proxy_not_calibrated" in auth.blockers
+            and not support_calibration_applied
+        ):
             row_blockers.append("support_uncertainty_proxy_not_calibrated")
         player_rows.append(
             _json_row(
@@ -1347,7 +1416,14 @@ def build_future_value_snapshots(
                     "rank_3_champion_role_atom_support": row[
                         "rank_3_champion_role_atom_support"
                     ],
+                    "uncertainty_proxy_raw": row["uncertainty_proxy_raw"],
+                    "uncertainty_proxy_calibrated": row[
+                        "uncertainty_proxy_calibrated"
+                    ],
                     "uncertainty_proxy": row["uncertainty_proxy"],
+                    "support_uncertainty_status": row[
+                        "support_uncertainty_status"
+                    ],
                     "model_feature_missing": bool(row["model_feature_missing"]),
                     "champion_dependent_status": row["champion_dependent_status"],
                     "support_status": row_status,
@@ -1436,7 +1512,10 @@ def build_future_value_snapshots(
         team_blockers: list[str] = []
         if team_has_missing:
             team_blockers.append("missing_model_feature_value")
-        if "support_uncertainty_proxy_not_calibrated" in auth.blockers:
+        if (
+            "support_uncertainty_proxy_not_calibrated" in auth.blockers
+            and not support_calibration_applied
+        ):
             team_blockers.append("support_uncertainty_proxy_not_calibrated")
         team_rows.append(
             _json_row(
@@ -1532,11 +1611,19 @@ def build_future_value_snapshots(
                 if team_rank_coverage["status"] == "unavailable"
                 else "current_rating_unmatched"
             )
+    effective_auth_blockers = tuple(
+        blocker
+        for blocker in auth.blockers
+        if not (
+            blocker == "support_uncertainty_proxy_not_calibrated"
+            and support_calibration_applied
+        )
+    )
     blockers = tuple(
         sorted(
             set(
                 (
-                    *auth.blockers,
+                    *effective_auth_blockers,
                     *team_blocker,
                     *player_rank_blockers,
                     *team_rank_blockers,
@@ -1576,6 +1663,17 @@ def build_future_value_snapshots(
     }
     if current_rating_inputs is not None:
         payload["current_rating_inputs"] = dict(current_rating_inputs)
+    if support_calibration is not None:
+        payload["support_calibration"] = {
+            "artifact_sha256": support_calibration.get("artifact_sha256"),
+            "receipt_sha256": support_calibration.get("receipt_sha256"),
+            "fold": str(support_calibration_fold_id),
+            "applied": bool(support_calibration_applied),
+            "complete_enough": bool(
+                isinstance(support_calibration.get("coverage"), Mapping)
+                and support_calibration["coverage"].get("complete_enough") is True
+            ),
+        }
     payload["receipt_sha256"] = _sha256_bytes(_canonical_json_bytes(payload))
     return FutureValueSnapshotResult(
         "research_only" if not blockers else "research_only_partial",
