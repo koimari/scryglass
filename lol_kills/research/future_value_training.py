@@ -458,11 +458,18 @@ def _validate_duplicate_identity_source(
 ) -> dict[str, tuple[str, str]]:
     """Verify a durable crosswalk or closed duplicate-audit artifact."""
 
-    binding = block.get("source_binding")
+    binding = block.get(
+        "source_binding",
+        block.get("crosswalk_binding", block.get("identity_source")),
+    )
     if not isinstance(binding, Mapping):
         raise FutureValueTrainingError("duplicate identity source binding is missing")
     kind = binding.get("kind")
-    if kind not in {"leaguepedia_crosswalk", "duplicate_audit"}:
+    if kind not in {
+        "leaguepedia_crosswalk",
+        "verified_leaguepedia_crosswalk",
+        "duplicate_audit",
+    }:
         raise FutureValueTrainingError("duplicate identity source kind is invalid")
     artifact_record = binding.get("artifact", binding.get("crosswalk_artifact"))
     receipt_record = binding.get("receipt", binding.get("crosswalk_receipt"))
@@ -476,7 +483,10 @@ def _validate_duplicate_identity_source(
     )
     expected_receipt_file_sha = binding.get(
         "expected_receipt_file_sha256",
-        binding.get("crosswalk_receipt_file_sha256"),
+        binding.get(
+            "expected_crosswalk_receipt_file_sha256",
+            binding.get("crosswalk_receipt_file_sha256"),
+        ),
     )
     if (
         not isinstance(expected_receipt_file_sha, str)
@@ -635,7 +645,10 @@ def validate_duplicate_resolution_block(
         evidence = mapping.get("evidence")
         if not isinstance(evidence, Mapping):
             raise FutureValueTrainingError("duplicate resolution evidence is missing")
-        declared_identity = evidence.get("external_identity", evidence.get("identity"))
+        declared_identity = evidence.get(
+            "external_identity",
+            evidence.get("identity", evidence),
+        )
         if not isinstance(declared_identity, Mapping):
             raise FutureValueTrainingError("duplicate resolution external identity is missing")
         declared_scoreboard = str(
