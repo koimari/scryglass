@@ -181,7 +181,7 @@ def _fold_inputs(
             {
                 "game_id": game_ids,
                 "date": pd.date_range("2026-01-01", periods=6, tz="UTC"),
-                "series_id": [f"series-{i}" for i in range(6)],
+                "series_id": ["series-1", "series-1", "series-2", "series-2", "series-3", "series-3"],
                 "base_team_logit": np.linspace(-0.2, 0.2, 6),
                 "team_rating_diff_scaled": np.linspace(0.1, 0.3, 6),
                 "base_player_logit": np.linspace(0.3, -0.2, 6),
@@ -191,6 +191,29 @@ def _fold_inputs(
         current.to_parquet(current_root / "current-rating-feature-ledger.parquet")
         current_artifact = current_root / "current-rating-feature-ledger.parquet"
         current_output = current[["game_id", "date", "series_id", *CURRENT_FEATURES]].copy()
+        partition = {
+            "schema_version": "scryglass:future-value-current-rating-series-partition-receipt:v1",
+            "source_type": "mixed:leaguepedia_crosswalk+conservative_series_superset",
+            "partition_digest": hashlib.sha256(
+                _canonical(
+                    sorted(
+                        [
+                            {"game_id": str(game_id), "series_id": str(series_id)}
+                            for game_id, series_id in zip(current["game_id"], current["series_id"])
+                        ],
+                        key=lambda row: row["game_id"],
+                    )
+                )
+            ).hexdigest(),
+            "partition_game_count": len(game_ids),
+            "partition_game_identity_sha256": identity_sha256(game_ids),
+            "accepted_census_game_count": source["source_game_count"],
+            "accepted_census_identity_sha256": source["source_identity_sha256"],
+            "source_receipt_sha256": source["receipt_sha256"],
+            "conservative": True,
+            "authoritative": False,
+        }
+        partition["receipt_sha256"] = hashlib.sha256(_canonical(partition)).hexdigest()
         current_receipt = {
             "schema_version": "scryglass:future-value-current-rating-ledger-receipt:v2",
             "ledger_schema_version": "scryglass:future-value-current-rating-ledger:v2",
@@ -214,6 +237,8 @@ def _fold_inputs(
             "output_game_count": len(game_ids),
             "train_game_ids": train,
             "validation_game_ids": validation,
+            "series_partition_source": partition["source_type"],
+            "series_partition_receipt": partition,
             "artifact": {
                 "path": str(current_artifact),
                 "bytes": current_artifact.stat().st_size,
@@ -705,7 +730,7 @@ def _write_current_receipt_fixture(tmp_path: Path) -> tuple[Path, list[str], dic
         {
             "game_id": game_ids,
             "date": pd.date_range("2026-01-01", periods=2, tz="UTC"),
-            "series_id": ["s1", "s2"],
+            "series_id": ["s1", "s1"],
             **{feature: [0.1, -0.2] for feature in CURRENT_FEATURES},
         }
     )
@@ -714,6 +739,29 @@ def _write_current_receipt_fixture(tmp_path: Path) -> tuple[Path, list[str], dic
     output = frame[["game_id", "date", "series_id", *CURRENT_FEATURES]].assign(
         game_id=lambda value: value["game_id"].astype(str)
     )
+    partition = {
+        "schema_version": "scryglass:future-value-current-rating-series-partition-receipt:v1",
+        "source_type": "mixed:leaguepedia_crosswalk+conservative_series_superset",
+        "partition_digest": hashlib.sha256(
+            _canonical(
+                sorted(
+                    [
+                        {"game_id": str(game_id), "series_id": str(series_id)}
+                        for game_id, series_id in zip(output["game_id"], output["series_id"])
+                    ],
+                    key=lambda row: row["game_id"],
+                )
+            )
+        ).hexdigest(),
+        "partition_game_count": len(game_ids),
+        "partition_game_identity_sha256": identity_sha256(game_ids),
+        "accepted_census_game_count": len(game_ids),
+        "accepted_census_identity_sha256": identity_sha256(game_ids),
+        "source_receipt_sha256": "a" * 64,
+        "conservative": True,
+        "authoritative": False,
+    }
+    partition["receipt_sha256"] = hashlib.sha256(_canonical(partition)).hexdigest()
     receipt = {
         "schema_version": "scryglass:future-value-current-rating-ledger-receipt:v2",
         "ledger_schema_version": "scryglass:future-value-current-rating-ledger:v2",
@@ -733,6 +781,8 @@ def _write_current_receipt_fixture(tmp_path: Path) -> tuple[Path, list[str], dic
         "output_game_count": len(game_ids),
         "train_game_ids": game_ids,
         "validation_game_ids": [],
+        "series_partition_source": partition["source_type"],
+        "series_partition_receipt": partition,
         "artifact": {
             "path": str(artifact_path),
             "bytes": artifact_path.stat().st_size,
@@ -755,6 +805,89 @@ def test_current_rating_row_mutation_is_rejected_by_receipt(tmp_path: Path) -> N
     frame = pd.read_parquet(root / "current-rating-feature-ledger.parquet")
     frame.loc[0, "base_team_logit"] = 99.0
     frame.to_parquet(root / "current-rating-feature-ledger.parquet")
+    with pytest.raises(FourWayDraftScoreError, match="bytes changed from trust root"):
+        _load_current(
+            root,
+            trust_binding=binding,
+            train_ids=game_ids,
+            cutoff_text="2025-12-31T00:00:00Z",
+            require_receipt=True,
+        )
+
+
+def _reseal_current_series_assignment(root: Path) -> None:
+    artifact_path = root / "current-rating-feature-ledger.parquet"
+    receipt_path = root / "current-rating-feature-ledger.receipt.json"
+    frame = pd.read_parquet(artifact_path)
+    output = frame[["game_id", "date", "series_id", *CURRENT_FEATURES]].assign(
+        game_id=lambda value: value["game_id"].astype(str)
+    )
+    rows = sorted(
+        [
+            {"game_id": str(game_id), "series_id": str(series_id)}
+            for game_id, series_id in zip(output["game_id"], output["series_id"])
+        ],
+        key=lambda row: row["game_id"],
+    )
+    receipt = json.loads(receipt_path.read_text())
+    partition = dict(receipt["series_partition_receipt"])
+    partition["partition_digest"] = hashlib.sha256(_canonical(rows)).hexdigest()
+    partition.pop("receipt_sha256")
+    partition["receipt_sha256"] = hashlib.sha256(_canonical(partition)).hexdigest()
+    receipt["series_partition_receipt"] = partition
+    receipt["ledger_rows_sha256"] = _current_artifact_digest(output, CURRENT_FEATURES)
+    receipt["artifact"] = {
+        "path": str(artifact_path),
+        "bytes": artifact_path.stat().st_size,
+        "sha256": hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
+    }
+    receipt.pop("receipt_sha256")
+    receipt["receipt_sha256"] = hashlib.sha256(_canonical(receipt)).hexdigest()
+    _write_json(receipt_path, receipt)
+
+
+def test_current_rating_unique_per_map_conservative_partition_is_rejected(tmp_path: Path) -> None:
+    root, game_ids, _ = _write_current_receipt_fixture(tmp_path)
+    artifact_path = root / "current-rating-feature-ledger.parquet"
+    frame = pd.read_parquet(artifact_path)
+    frame["series_id"] = [f"unique:{game_id}" for game_id in frame["game_id"]]
+    frame.to_parquet(artifact_path)
+    _reseal_current_series_assignment(root)
+    with pytest.raises(FourWayDraftScoreError, match="map-unique"):
+        _load_current(
+            root,
+            train_ids=game_ids,
+            cutoff_text="2025-12-31T00:00:00Z",
+            require_receipt=False,
+        )
+
+
+def test_current_rating_series_partition_receipt_is_required(tmp_path: Path) -> None:
+    root, game_ids, _ = _write_current_receipt_fixture(tmp_path)
+    receipt_path = root / "current-rating-feature-ledger.receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt.pop("series_partition_receipt")
+    receipt.pop("receipt_sha256")
+    receipt["receipt_sha256"] = hashlib.sha256(_canonical(receipt)).hexdigest()
+    _write_json(receipt_path, receipt)
+    with pytest.raises(FourWayDraftScoreError, match="series partition receipt is required"):
+        _load_current(
+            root,
+            train_ids=game_ids,
+            cutoff_text="2025-12-31T00:00:00Z",
+            require_receipt=False,
+        )
+
+
+def test_current_rating_series_assignment_co_mutation_is_rejected_by_trust_root(
+    tmp_path: Path,
+) -> None:
+    root, game_ids, binding = _write_current_receipt_fixture(tmp_path)
+    artifact_path = root / "current-rating-feature-ledger.parquet"
+    frame = pd.read_parquet(artifact_path)
+    frame.loc[0, "series_id"] = "forged-series"
+    frame.to_parquet(artifact_path)
+    _reseal_current_series_assignment(root)
     with pytest.raises(FourWayDraftScoreError, match="bytes changed from trust root"):
         _load_current(
             root,

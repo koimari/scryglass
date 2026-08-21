@@ -44,6 +44,14 @@ SCHEMA_VERSION = "scryglass:future-value-draft-score-fourway:v2"
 STRICT_ATOM_SCHEMA = "scryglass:strict-prior-composition-atoms:v1"
 STRICT_FORM_SCHEMA = "scryglass:strict-prior-player-form:v1"
 TRUST_ROOT_SCHEMA = "scryglass:future-value-draft-score-freeze:v1"
+CURRENT_SERIES_PARTITION_RECEIPT_SCHEMA = (
+    "scryglass:future-value-current-rating-series-partition-receipt:v1"
+)
+CURRENT_SERIES_PARTITION_SOURCES = {
+    "conservative_series_superset": (True, False),
+    "mixed:leaguepedia_crosswalk+conservative_series_superset": (True, False),
+    "verified_grid_series": (False, True),
+}
 VARIANTS = ("current_only", "future_player_form", "scaling_curve", "both")
 BOOTSTRAP_SEED = 20260821
 BOOTSTRAP_DRAWS = 2000
@@ -788,6 +796,107 @@ def _fold_spec(path: Path, fold: int) -> tuple[tuple[str, ...], tuple[str, ...],
     return train, validation, cutoff
 
 
+def _series_partition_assignment_sha256(frame: pd.DataFrame) -> str:
+    rows = [
+        {"game_id": str(game_id), "series_id": str(series_id)}
+        for game_id, series_id in zip(frame["game_id"], frame["series_id"])
+    ]
+    rows.sort(key=lambda row: row["game_id"])
+    return _sha_bytes(_canonical_bytes(rows))
+
+
+def _verify_current_series_partition(
+    output: pd.DataFrame,
+    receipt: Mapping[str, Any],
+    *,
+    source: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    partition = receipt.get("series_partition_receipt")
+    if not isinstance(partition, Mapping):
+        raise FourWayDraftScoreError("current rating series partition receipt is required")
+    claimed = _require_hash(
+        partition.get("receipt_sha256"),
+        "current rating series partition receipt hash",
+    )
+    unsigned = dict(partition)
+    unsigned.pop("receipt_sha256", None)
+    if _sha_bytes(_canonical_bytes(unsigned)) != claimed:
+        raise FourWayDraftScoreError("current rating series partition receipt self hash changed")
+    required = {
+        "schema_version",
+        "source_type",
+        "partition_digest",
+        "partition_game_count",
+        "partition_game_identity_sha256",
+        "accepted_census_game_count",
+        "accepted_census_identity_sha256",
+        "source_receipt_sha256",
+        "conservative",
+        "authoritative",
+        "receipt_sha256",
+    }
+    if set(partition) != required:
+        raise FourWayDraftScoreError("current rating series partition receipt is incomplete")
+    if partition.get("schema_version") != CURRENT_SERIES_PARTITION_RECEIPT_SCHEMA:
+        raise FourWayDraftScoreError("current rating series partition receipt schema changed")
+    source_type = str(partition.get("source_type") or "")
+    expected_status = CURRENT_SERIES_PARTITION_SOURCES.get(source_type)
+    if expected_status is None:
+        raise FourWayDraftScoreError("current rating series partition source changed")
+    conservative = partition.get("conservative")
+    authoritative = partition.get("authoritative")
+    if (
+        type(conservative) is not bool
+        or type(authoritative) is not bool
+        or (conservative, authoritative) != expected_status
+    ):
+        raise FourWayDraftScoreError("current rating series partition authority changed")
+    output_ids = tuple(sorted(output["game_id"].astype(str)))
+    if (
+        int(partition.get("partition_game_count", -1)) != len(output_ids)
+        or str(partition.get("partition_game_identity_sha256")) != identity_sha256(output_ids)
+    ):
+        raise FourWayDraftScoreError("current rating series partition game census changed")
+    if str(partition.get("partition_digest")) != _series_partition_assignment_sha256(output):
+        raise FourWayDraftScoreError("current rating series partition assignments changed")
+    if source is not None:
+        if (
+            int(partition.get("accepted_census_game_count", -1))
+            != int(source.get("source_game_count", -2))
+            or str(partition.get("accepted_census_identity_sha256"))
+            != str(source.get("source_identity_sha256"))
+            or str(partition.get("source_receipt_sha256"))
+            != str(source.get("receipt_sha256"))
+        ):
+            raise FourWayDraftScoreError("current rating series partition source census changed")
+    else:
+        _require_hash(
+            partition.get("accepted_census_identity_sha256"),
+            "current rating series partition accepted census identity",
+        )
+        _require_hash(
+            partition.get("source_receipt_sha256"),
+            "current rating series partition source receipt hash",
+        )
+    series_ids = output["series_id"].astype("string").str.strip()
+    if series_ids.isna().any() or series_ids.eq("").any():
+        raise FourWayDraftScoreError("current rating series partition assignments are incomplete")
+    if conservative and series_ids.nunique(dropna=True) == len(output):
+        raise FourWayDraftScoreError("current rating conservative series partition is map-unique")
+    if receipt.get("series_partition_source") != source_type:
+        raise FourWayDraftScoreError("current rating series partition source receipt changed")
+    return {
+        "verified": True,
+        "source_type": source_type,
+        "partition_digest": str(partition["partition_digest"]),
+        "accepted_census_game_count": int(partition["accepted_census_game_count"]),
+        "accepted_census_identity_sha256": str(partition["accepted_census_identity_sha256"]),
+        "conservative": conservative,
+        "authoritative": authoritative,
+        "receipt_sha256": claimed,
+    }
+
+
 def _load_current(
     path: Path,
     *,
@@ -833,7 +942,7 @@ def _load_current(
         "receipt_sha256": _sha_path(receipt_path) if receipt_path.is_file() else None,
         "row_values_sha256": None,
     }
-    if require_receipt and not receipt_path.is_file():
+    if not receipt_path.is_file():
         raise FourWayDraftScoreError("current rating receipt is required")
     if receipt_path.is_file():
         receipt = _load_json(receipt_path, "current rating receipt")
@@ -885,12 +994,18 @@ def _load_current(
         digest = _current_artifact_digest(output, CURRENT_FEATURES)
         if str(receipt.get("ledger_rows_sha256")) != digest:
             raise FourWayDraftScoreError("current rating row values changed")
+        series_partition = _verify_current_series_partition(
+            output,
+            receipt,
+            source=source,
+        )
         metadata.update(
             {
                 "verified": True,
                 "receipt_payload_sha256": claimed,
                 "row_values_sha256": digest,
                 "fit_window_end": receipt.get("fit_window_end"),
+                "series_partition": series_partition,
             }
         )
     return output, metadata
