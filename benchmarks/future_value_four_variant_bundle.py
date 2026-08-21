@@ -792,6 +792,11 @@ def build_bundle(
             ],
             "source_receipt_sha256": source_receipt["receipt_sha256"],
             "source_receipt_file_sha256": _sha256_path(source_receipt_path),
+            "series_partition_receipt_file_sha256": (
+                str(crosswalk_receipt_file_sha256)
+                if crosswalk_path is not None
+                else None
+            ),
             "series_partition": dict(
                 model_frame.attrs.get("series_cluster_audit") or {}
             ),

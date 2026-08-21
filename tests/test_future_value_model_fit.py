@@ -1138,3 +1138,12 @@ def test_model_runtime_receipt_binds_code_source_environment_and_output(
     assert json.loads(runtime_path.read_text())["receipt_sha256"] == receipt[
         "receipt_sha256"
     ]
+    with pytest.raises(FutureValueTrainingError, match="crosswalk inputs"):
+        run_model_evaluation(
+            oe_root=oe_root,
+            freeze_path=tmp_path / "freeze.json",
+            source_receipt_path=source_path,
+            model_output_path=tmp_path / "unused-model.json",
+            runtime_receipt_path=tmp_path / "unused-runtime.json",
+            crosswalk_path=tmp_path / "crosswalk.json",
+        )

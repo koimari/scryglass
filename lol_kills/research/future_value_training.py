@@ -28,6 +28,7 @@ from lol_kills.research.future_value_rating import (
     RATING_VARIANT_ORDER,
     RatingVariant,
     bind_accepted_future_value_source,
+    bind_verified_leaguepedia_series_crosswalk,
     evaluate_future_value,
     rating_variant_config_receipt,
     validate_future_value_source_receipt_payload,
@@ -715,12 +716,28 @@ def run_model_evaluation(
     rating_variant: str | None = None,
     feature_ledger_path: Path | None = None,
     input_binding_path: Path | None = None,
+    crosswalk_path: Path | None = None,
+    crosswalk_receipt_path: Path | None = None,
+    crosswalk_receipt_file_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Run the frozen research model and emit a gate-grade runtime receipt."""
 
     freeze = _load_freeze(freeze_path)
     source_receipt = _load_json_mapping(source_receipt_path, "source receipt")
     _validate_source_receipt_mapping(source_receipt)
+    crosswalk_values = (
+        crosswalk_path,
+        crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256,
+    )
+    if any(value is not None for value in crosswalk_values) and not all(
+        value is not None for value in crosswalk_values
+    ):
+        raise FutureValueTrainingError("crosswalk inputs must be supplied together")
+    if crosswalk_receipt_file_sha256 is not None and re.fullmatch(
+        r"[0-9a-f]{64}", str(crosswalk_receipt_file_sha256), re.I
+    ) is None:
+        raise FutureValueTrainingError("crosswalk receipt file hash is invalid")
     expected_receipt_hash = str(freeze["reference_source_receipt_sha256"])
     expected_receipt_file_hash = str(freeze.get("source_receipt_file_sha256") or "")
     expected_receipt_path = str(freeze.get("source_receipt_path") or "")
@@ -766,6 +783,44 @@ def run_model_evaluation(
         frames[label] = selected.reset_index(drop=True)
     if frames["maps"]["game_uid"].nunique() != len(eligible_ids):
         raise FutureValueTrainingError("model map frame does not match the eligible census")
+    crosswalk_runtime_binding = None
+    if crosswalk_path is not None and crosswalk_receipt_path is not None:
+        if feature_ledger_path is None:
+            raise FutureValueTrainingError(
+                "verified crosswalk evaluation requires a feature ledger bundle"
+            )
+        feature_payload = _load_json_mapping(
+            feature_ledger_path, "feature ledger bundle"
+        )
+        feature_source = feature_payload.get("source")
+        if not isinstance(feature_source, Mapping) or feature_source.get(
+            "series_partition_receipt_file_sha256"
+        ) != str(crosswalk_receipt_file_sha256):
+            raise FutureValueTrainingError(
+                "crosswalk receipt hash does not match the feature bundle"
+            )
+        frames["maps"] = bind_verified_leaguepedia_series_crosswalk(
+            frames["maps"],
+            crosswalk_path=crosswalk_path,
+            receipt_path=crosswalk_receipt_path,
+            source_receipt=source_receipt,
+            expected_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+        )
+        crosswalk_runtime_binding = {
+            "artifact": {
+                "path": str(crosswalk_path),
+                "bytes": crosswalk_path.stat().st_size,
+                "sha256": _sha256(crosswalk_path),
+            },
+            "receipt": {
+                "path": str(crosswalk_receipt_path),
+                "bytes": crosswalk_receipt_path.stat().st_size,
+                "sha256": _sha256(crosswalk_receipt_path),
+            },
+            "expected_receipt_file_sha256": str(
+                crosswalk_receipt_file_sha256
+            ),
+        }
 
     repo_root = Path(__file__).resolve().parents[2]
     code_paths = [
@@ -805,6 +860,7 @@ def run_model_evaluation(
                 source_receipt_path=str(source_receipt_path),
                 source_receipt_file_sha256=receipt_file_hash,
                 runtime_receipt_path=str(runtime_receipt_path),
+                crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
             )
         else:
             variant_results: dict[str, Any] = {}
@@ -837,6 +893,7 @@ def run_model_evaluation(
                     variant=variant,
                     feature_ledger=variant_ledger,
                     inner_feature_ledger=inner_variant_ledger,
+                    crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
                 )
             result = {
                 "schema_version": "scryglass:future-value-four-variant-evaluation:v1",
@@ -880,6 +937,7 @@ def run_model_evaluation(
         "rating_variant": rating_variant or "legacy",
         "feature_ledger_path": str(feature_ledger_path) if feature_ledger_path else None,
         "input_binding": input_binding,
+        "series_partition": crosswalk_runtime_binding,
         "started_at": started_at.isoformat().replace("+00:00", "Z"),
         "completed_at": completed_at.isoformat().replace("+00:00", "Z"),
         "elapsed_seconds": float(elapsed),
@@ -988,6 +1046,9 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="frozen current-rating and atomized producer input binding",
     )
+    parser.add_argument("--crosswalk", type=Path)
+    parser.add_argument("--crosswalk-receipt", type=Path)
+    parser.add_argument("--crosswalk-receipt-file-sha256")
     args = parser.parse_args(argv)
     try:
         if args.fit_model:
@@ -1010,6 +1071,15 @@ def main(argv: list[str] | None = None) -> int:
                 rating_variant=args.rating_variant,
                 feature_ledger_path=args.feature_ledger_bundle,
                 input_binding_path=args.input_binding,
+                crosswalk_path=(
+                    None if args.crosswalk is None else args.crosswalk.resolve()
+                ),
+                crosswalk_receipt_path=(
+                    None
+                    if args.crosswalk_receipt is None
+                    else args.crosswalk_receipt.resolve()
+                ),
+                crosswalk_receipt_file_sha256=args.crosswalk_receipt_file_sha256,
                 command=[
                     sys.executable,
                     "-m",
