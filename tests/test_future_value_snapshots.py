@@ -25,7 +25,9 @@ from lol_kills.research.future_value_rating import (
 from lol_kills.research.future_value_snapshots import (
     SNAPSHOT_AUTHORITY,
     SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+    TEAM_CONTEXT_BINDING_SCHEMA_VERSION,
     FutureValueSnapshotError,
+    _validated_team_context_binding,
     _latest_player_form,
     _player_contributions,
     authorize_final_fit,
@@ -278,6 +280,89 @@ def test_team_value_requires_exact_five_players_and_preserves_champion_split() -
     assert any(row["status"] == "research_only_missing_features" for row in result.player_rows)
     assert all(row["team_context_logit"] is None for row in result.team_rows)
     assert "team_context_not_in_final_model" in result.blockers
+
+
+def test_team_context_binding_requires_source_and_parameter_proof() -> None:
+    source = _source_receipt(["g1", "g2"])
+    binding: dict[str, object] = {
+        "schema_version": TEAM_CONTEXT_BINDING_SCHEMA_VERSION,
+        "status": "available",
+        "source_receipt_sha256": source["receipt_sha256"],
+        "source_identity_sha256": source["source_identity_sha256"],
+        "fit_game_ids": ["g1", "g2"],
+        "fit_window_end": source["source_as_of"],
+        "strict_prior_timing": "fit_rows_strictly_before_cutoff",
+        "same_timestamp_policy": "batch_exclude_same_timestamp",
+        "series_safety": "whole_series_disjoint",
+        "feature_names": ["team_prior_win_diff", "roster_continuity_diff"],
+        "authority": {
+            "research_only": True,
+            "public_team_rating": False,
+        },
+    }
+    binding["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(binding)
+    ).hexdigest()
+    receipt = {
+        "fit_game_ids": ["g1", "g2"],
+        "fit_window_end": source["source_as_of"],
+        "team_context_binding": binding,
+    }
+    model = SimpleNamespace(
+        feature_names=("team_prior_win_diff", "roster_continuity_diff")
+    )
+    verified = _validated_team_context_binding(model, receipt, {
+        "source_receipt_sha256": source["receipt_sha256"],
+        "source_identity_sha256": source["source_identity_sha256"],
+    })
+    assert verified is not None
+    assert verified["feature_names"] == [
+        "team_prior_win_diff",
+        "roster_continuity_diff",
+    ]
+
+    binding["source_receipt_sha256"] = "f" * 64
+    binding["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes({key: value for key, value in binding.items() if key != "receipt_sha256"})
+    ).hexdigest()
+    with pytest.raises(FutureValueSnapshotError, match="source receipt"):
+        _validated_team_context_binding(model, receipt, {
+            "source_receipt_sha256": source["receipt_sha256"],
+            "source_identity_sha256": source["source_identity_sha256"],
+        })
+
+
+def test_team_context_receipt_clears_only_its_specific_blocker() -> None:
+    source = _source_receipt(["g1", "g2"])
+    binding: dict[str, object] = {
+        "schema_version": TEAM_CONTEXT_BINDING_SCHEMA_VERSION,
+        "status": "available",
+        "source_receipt_sha256": source["receipt_sha256"],
+        "source_identity_sha256": source["source_identity_sha256"],
+        "fit_game_ids": ["g1", "g2"],
+        "fit_window_end": source["source_as_of"],
+        "strict_prior_timing": "fit_rows_strictly_before_cutoff",
+        "same_timestamp_policy": "batch_exclude_same_timestamp",
+        "series_safety": "whole_series_disjoint",
+        "feature_names": ["team_prior_win_diff"],
+    }
+    binding["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(binding)
+    ).hexdigest()
+    receipt = {
+        "fit_game_ids": ["g1", "g2"],
+        "fit_window_end": source["source_as_of"],
+        "team_context_binding": binding,
+    }
+    model = SimpleNamespace(feature_names=("team_prior_win_diff",))
+    assert _validated_team_context_binding(
+        model,
+        receipt,
+        {
+            "source_receipt_sha256": source["receipt_sha256"],
+            "source_identity_sha256": source["source_identity_sha256"],
+        },
+    )["status"] == "available"
 
 
 def _canonical_bytes_without_hash(payload: dict[str, object]) -> bytes:

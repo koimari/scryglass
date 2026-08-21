@@ -434,6 +434,7 @@ def main() -> int:
                 "player_rows": len(result.player_rows),
                 "team_rows": len(result.team_rows),
                 "rank_coverage": result.receipt.get("rank_coverage", {}),
+                "team_context": result.receipt.get("team_context", {}),
                 "rank_diff_extremes": result.receipt.get("rank_diff_extremes", {}),
                 "manifest_sha256": manifest["manifest_sha256"],
                 "output_root": str(args.output_root.resolve()),

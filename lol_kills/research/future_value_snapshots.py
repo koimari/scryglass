@@ -73,6 +73,23 @@ PLAYER_VALUE_FEATURE_PREFIXES = (
     "rank_3_player_atom_",
     "rank_3_champion_role_atom_",
 )
+TEAM_CONTEXT_BINDING_SCHEMA_VERSION = "scryglass:future-value-team-context:v1"
+# These are the only team-context terms that this snapshot consumer can
+# interpret.  A final model receipt must list the terms that it fitted.  The
+# regional-transfer term is optional because older OE source frames do not
+# carry a verified region column.
+TEAM_CONTEXT_MODEL_FEATURES = frozenset(
+    {
+        "team_prior_win_diff",
+        "roster_continuity_diff",
+        "regional_transfer_diff",
+    }
+)
+TEAM_CONTEXT_SOURCE_FIELDS = {
+    "team_prior_win_diff": "prior_team_win",
+    "roster_continuity_diff": "roster_continuity",
+    "regional_transfer_diff": "regional_transfer",
+}
 QUALITY_FEATURES = frozenset(
     {
         "player_form_missing_rate",
@@ -88,6 +105,7 @@ IGNORED_SNAPSHOT_FEATURES = frozenset(
         *CURRENT_RATING_SIGNED_MAP_FEATURES,
         *SCALING_CURVE_SIGNED_MAP_FEATURES,
         *TEAM_CONTEXT_FEATURES,
+        *TEAM_CONTEXT_MODEL_FEATURES,
         *TEAM_FEATURES,
     }
 )
@@ -239,6 +257,119 @@ def _model_receipt_from(model: Any, model_receipt: Mapping[str, Any] | None) -> 
         return None
     value = model.receipt()
     return value if isinstance(value, Mapping) else None
+
+
+def _validated_team_context_binding(
+    model: Any,
+    model_receipt: Mapping[str, Any] | None,
+    source: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Return a final-fit team-context contract after strict validation.
+
+    Player form and exact-five aggregation can be inspected from the source
+    rows.  Team-context coefficients require a separate receipt declaration.
+    This helper accepts only a declaration that is part of the bound final
+    model receipt, uses the same source census, and names model features that
+    exist in the loaded parameter vector.  A model that merely contains a
+    similarly named feature cannot clear the team-context gate.
+    """
+
+    if not isinstance(model_receipt, Mapping):
+        return None
+    binding: Mapping[str, Any] | None = None
+    for key in ("team_context_binding", "team_context"):
+        candidate = model_receipt.get(key)
+        if isinstance(candidate, Mapping):
+            binding = candidate
+            break
+    if binding is None:
+        for parent_key in ("form_contract", "fit_contract", "model_contract"):
+            parent = model_receipt.get(parent_key)
+            if isinstance(parent, Mapping) and isinstance(
+                parent.get("team_context"), Mapping
+            ):
+                binding = parent["team_context"]
+                break
+    if binding is None:
+        return None
+
+    payload = dict(binding)
+    claimed_hash = payload.pop("receipt_sha256", None)
+    if not isinstance(claimed_hash, str) or re.fullmatch(
+        r"[0-9a-f]{64}", claimed_hash, re.I
+    ) is None:
+        raise FutureValueSnapshotError("team-context receipt hash is missing")
+    if _sha256_bytes(_canonical_json_bytes(payload)) != claimed_hash.lower():
+        raise FutureValueSnapshotError("team-context receipt hash changed")
+    if payload.get("schema_version") != TEAM_CONTEXT_BINDING_SCHEMA_VERSION:
+        raise FutureValueSnapshotError("team-context receipt schema changed")
+    if payload.get("status") != "available":
+        raise FutureValueSnapshotError("team-context receipt is not available")
+    if payload.get("source_receipt_sha256") != source["source_receipt_sha256"]:
+        raise FutureValueSnapshotError("team-context source receipt changed")
+    if payload.get("source_identity_sha256") != source["source_identity_sha256"]:
+        raise FutureValueSnapshotError("team-context source identity changed")
+    if payload.get("strict_prior_timing") != "fit_rows_strictly_before_cutoff":
+        raise FutureValueSnapshotError("team-context strict-prior timing is invalid")
+    if payload.get("same_timestamp_policy") != "batch_exclude_same_timestamp":
+        raise FutureValueSnapshotError("team-context timestamp policy is invalid")
+    if payload.get("series_safety") != "whole_series_disjoint":
+        raise FutureValueSnapshotError("team-context series safety is invalid")
+
+    model_fit_end = str(model_receipt.get("fit_window_end") or "")
+    if not model_fit_end or str(payload.get("fit_window_end") or "") != model_fit_end:
+        raise FutureValueSnapshotError("team-context fit window changed")
+    declared_fit_ids = tuple(str(value) for value in payload.get("fit_game_ids") or ())
+    model_fit_ids = tuple(str(value) for value in model_receipt.get("fit_game_ids") or ())
+    if not declared_fit_ids or tuple(sorted(set(declared_fit_ids))) != tuple(
+        sorted(set(model_fit_ids))
+    ):
+        raise FutureValueSnapshotError("team-context fit game identity changed")
+
+    feature_names_raw = payload.get("feature_names")
+    if not isinstance(feature_names_raw, (list, tuple)) or not feature_names_raw:
+        raise FutureValueSnapshotError("team-context feature names are missing")
+    feature_names = tuple(str(value) for value in feature_names_raw)
+    if len(set(feature_names)) != len(feature_names) or not set(feature_names).issubset(
+        TEAM_CONTEXT_MODEL_FEATURES
+    ):
+        raise FutureValueSnapshotError("team-context feature names are invalid")
+    model_feature_names = tuple(str(value) for value in getattr(model, "feature_names", ()))
+    if not set(feature_names).issubset(model_feature_names):
+        raise FutureValueSnapshotError(
+            "team-context features are missing from final model parameters"
+        )
+
+    authority = payload.get("authority")
+    if authority is not None:
+        if not isinstance(authority, Mapping) or authority.get("research_only") is not True:
+            raise FutureValueSnapshotError("team-context authority is invalid")
+        if authority.get("public_team_rating") is not False:
+            raise FutureValueSnapshotError("team-context public authority is invalid")
+
+    regional_source: dict[str, Any] | None = None
+    if "regional_transfer_diff" in feature_names:
+        candidate = payload.get("regional_transfer_source")
+        if not isinstance(candidate, Mapping):
+            raise FutureValueSnapshotError(
+                "team-context regional-transfer source is missing"
+            )
+        player_column = str(candidate.get("player_region_column") or "").strip()
+        if not player_column or player_column.startswith("_"):
+            raise FutureValueSnapshotError(
+                "team-context regional-transfer source column is invalid"
+            )
+        regional_source = {
+            "player_region_column": player_column,
+            "team_region_column": str(candidate.get("team_region_column") or player_column),
+        }
+
+    result = dict(payload)
+    result["receipt_sha256"] = claimed_hash.lower()
+    result["feature_names"] = list(feature_names)
+    if regional_source is not None:
+        result["regional_transfer_source"] = regional_source
+    return result
 
 
 def _validate_model_object_binding(
@@ -772,6 +903,7 @@ def _latest_player_form(
     players: pd.DataFrame,
     *,
     baseline_cache: Any | None = None,
+    context_columns: Sequence[str] = (),
 ) -> pd.DataFrame:
     """Build strict-prior form and select one unambiguous row per player."""
 
@@ -780,9 +912,27 @@ def _latest_player_form(
         players,
         baseline_cache=baseline_cache,
     )
-    identity = players[
-        ["game_id", "player_id", "team_id", "playername", "champion"]
-    ].copy()
+    identity_columns = [
+        "game_id",
+        "player_id",
+        "team_id",
+        "playername",
+        "champion",
+    ]
+    # Preserve source-bound context columns for the optional regional
+    # transfer component.  These columns remain descriptive metadata.  The
+    # strict-prior values still come only from ``strict``.
+    for column in (
+        "region",
+        "region_id",
+        "league",
+        "competition_scope",
+        "tournament",
+        *tuple(str(value) for value in context_columns),
+    ):
+        if column in players.columns and column not in identity_columns:
+            identity_columns.append(column)
+    identity = players[identity_columns].copy()
     identity["role"] = players["role"]
     identity["side"] = players["side"]
     identity["date"] = players["date"]
@@ -840,11 +990,87 @@ def _latest_team_roster(form: pd.DataFrame) -> pd.DataFrame:
             raise FutureValueSnapshotError(
                 f"team requires exactly five current-roster players: {team_id}"
             )
-        if group["role"].nunique() != 5:
+        if set(group["role"].astype(str)) != {
+            "top",
+            "jungle",
+            "mid",
+            "bot",
+            "support",
+        }:
             raise FutureValueSnapshotError(
                 f"team requires five current-roster roles: {team_id}"
             )
     return latest
+
+
+def _regional_transfer_by_team(
+    form: pd.DataFrame,
+    latest_roster: pd.DataFrame,
+    *,
+    region_column: str,
+) -> pd.DataFrame:
+    """Compute a strictly-prior regional transfer rate for each roster.
+
+    A player counts as transferred when the latest prior row with a finite
+    region belongs to a different region than the current roster row.  Rows
+    at the current timestamp are excluded.  An absent prior region remains
+    missing, so the team value can report its support accurately.
+    """
+
+    if region_column not in form.columns or region_column not in latest_roster.columns:
+        raise FutureValueSnapshotError(
+            f"regional-transfer source column is missing: {region_column}"
+        )
+    history = form[["player_id", "date", region_column]].copy()
+    history["player_id"] = history["player_id"].astype(str)
+    history["date"] = pd.to_datetime(history["date"], utc=True, errors="coerce")
+    if history["date"].isna().any():
+        raise FutureValueSnapshotError("regional-transfer history has an invalid date")
+    history["_region"] = history[region_column].astype("string").str.strip().str.casefold()
+    history.loc[history["_region"].isin({"", "<na>", "nan", "none"}), "_region"] = pd.NA
+    current = latest_roster[
+        ["team_id", "player_id", "date", region_column]
+    ].copy()
+    current["player_id"] = current["player_id"].astype(str)
+    current["date"] = pd.to_datetime(current["date"], utc=True, errors="coerce")
+    current["_current_region"] = (
+        current[region_column].astype("string").str.strip().str.casefold()
+    )
+    current.loc[
+        current["_current_region"].isin({"", "<na>", "nan", "none"}),
+        "_current_region",
+    ] = pd.NA
+    transfer = np.full(len(current), np.nan, dtype=float)
+    support = np.zeros(len(current), dtype=int)
+    for position, (_, row) in enumerate(current.iterrows()):
+        current_region = row["_current_region"]
+        if pd.isna(current_region):
+            continue
+        prior = history[
+            history["player_id"].eq(str(row["player_id"]))
+            & history["date"].lt(pd.Timestamp(row["date"]))
+            & history["_region"].notna()
+        ].sort_values(["date"], kind="stable")
+        if prior.empty:
+            continue
+        latest_date = prior["date"].max()
+        latest_prior = prior[prior["date"].eq(latest_date)]
+        prior_regions = set(latest_prior["_region"].astype(str))
+        if len(prior_regions) != 1:
+            raise FutureValueSnapshotError(
+                f"regional-transfer history is ambiguous for player {row['player_id']}"
+            )
+        transfer[position] = float(next(iter(prior_regions)) != str(current_region))
+        support[position] = int(len(prior))
+    current["regional_transfer"] = transfer
+    current["regional_transfer_support"] = support
+    grouped = current.groupby("team_id", sort=False, observed=True)
+    result = grouped["regional_transfer"].mean().to_frame()
+    result["regional_transfer_support"] = grouped["regional_transfer_support"].sum()
+    result["regional_transfer_coverage"] = grouped["regional_transfer"].count()
+    if result.index.duplicated().any():
+        raise FutureValueSnapshotError("regional-transfer team rows are ambiguous")
+    return result.reset_index()
 
 
 def _feature_column(feature: str) -> str | None:
@@ -1349,7 +1575,35 @@ def build_future_value_snapshots(
             current_rating_inputs=current_rating_inputs,
         )
 
-    form = _latest_player_form(map_frame, player_frame, baseline_cache=baseline_cache)
+    team_context_binding: dict[str, Any] | None = None
+    team_context_contract_error: str | None = None
+    try:
+        team_context_binding = _validated_team_context_binding(
+            model,
+            bound_model_receipt,
+            source,
+        )
+    except FutureValueSnapshotError as error:
+        # Player values remain usable as a research calculation.  Team
+        # context stays null and the receipt records the exact contract
+        # failure.
+        team_context_contract_error = str(error)
+
+    regional_transfer_column: str | None = None
+    if team_context_binding is not None and "regional_transfer_diff" in set(
+        team_context_binding.get("feature_names") or ()
+    ):
+        regional_source = team_context_binding.get("regional_transfer_source")
+        if isinstance(regional_source, Mapping):
+            regional_transfer_column = str(
+                regional_source.get("player_region_column") or ""
+            ).strip()
+    form = _latest_player_form(
+        map_frame,
+        player_frame,
+        baseline_cache=baseline_cache,
+        context_columns=(regional_transfer_column,) if regional_transfer_column else (),
+    )
     form = form[form["date"].le(cutoff)].copy()
     latest = _latest_rows(form, key="player_id", label="player")
     if len(latest) != form["player_id"].nunique():
@@ -1458,7 +1712,37 @@ def build_future_value_snapshots(
     if not role_counts.eq(5).all():
         raise FutureValueSnapshotError("future team value requires five unique current-roster roles")
     team_context = _team_history_features(map_frame, form)
+    team_identity = form[["game_id", "side", "team_id"]].drop_duplicates()
+    if team_identity.duplicated(["game_id", "side"]).any():
+        raise FutureValueSnapshotError("team context has ambiguous team identity")
+    team_context = team_context.merge(
+        team_identity,
+        on=["game_id", "side"],
+        how="left",
+        validate="one_to_one",
+    )
+    if team_context["team_id"].isna().any():
+        raise FutureValueSnapshotError("team context lost stable team identity")
     team_context = team_context.sort_values(["side", "game_id"], kind="stable")
+    regional_context: pd.DataFrame | None = None
+    if (
+        team_context_binding is not None
+        and "regional_transfer_diff"
+        in set(team_context_binding.get("feature_names") or ())
+    ):
+        if not regional_transfer_column:
+            team_context_contract_error = (
+                "team-context regional-transfer source column is missing"
+            )
+        else:
+            try:
+                regional_context = _regional_transfer_by_team(
+                    form,
+                    latest_roster,
+                    region_column=regional_transfer_column,
+                )
+            except FutureValueSnapshotError as error:
+                team_context_contract_error = str(error)
     # Use the latest context row by team.  The historical helper is strict
     # about roster shape and keeps the side-specific continuity state separate.
     context_rows: list[dict[str, Any]] = []
@@ -1482,12 +1766,50 @@ def build_future_value_snapshots(
                 "prior_team_win": context_match["prior_team_win"].iloc[0],
                 "prior_team_support": context_match["prior_team_support"].iloc[0],
                 "roster_continuity": context_match["roster_continuity"].iloc[0],
+                "regional_transfer": (
+                    np.nan
+                    if regional_context is None
+                    else regional_context.loc[
+                        regional_context["team_id"].astype(str).eq(str(team_id)),
+                        "regional_transfer",
+                    ].iloc[0]
+                    if len(
+                        regional_context.loc[
+                            regional_context["team_id"].astype(str).eq(str(team_id))
+                        ]
+                    )
+                    == 1
+                    else np.nan
+                ),
+                "regional_transfer_support": (
+                    0
+                    if regional_context is None
+                    else int(
+                        regional_context.loc[
+                            regional_context["team_id"].astype(str).eq(str(team_id)),
+                            "regional_transfer_support",
+                        ].iloc[0]
+                    )
+                    if len(
+                        regional_context.loc[
+                            regional_context["team_id"].astype(str).eq(str(team_id))
+                        ]
+                    )
+                    == 1
+                    else 0
+                ),
             }
         )
     context_frame = pd.DataFrame(context_rows)
     team_rows: list[dict[str, Any]] = []
-    team_feature_names = set(str(value) for value in model.feature_names) & TEAM_FEATURES
-    if not team_feature_names:
+    team_feature_names = (
+        set(str(value) for value in team_context_binding.get("feature_names") or ())
+        if team_context_binding is not None and not team_context_contract_error
+        else set()
+    )
+    if team_context_contract_error:
+        team_blocker = ("team_context_contract_invalid",)
+    elif team_context_binding is None:
         team_blocker = ("team_context_not_in_final_model",)
     else:
         team_blocker = ()
@@ -1498,29 +1820,52 @@ def build_future_value_snapshots(
         player_value = float(group["role_normalized_player_value_logit"].sum())
         champion_value = float(group["champion_role_atom_logit"].sum())
         team_context_value: float | None = None
+        context_missing = False
         if team_feature_names:
             team_context_value = 0.0
+            side_sign = 1.0 if str(group["side"].iloc[0]).casefold() == "blue" else -1.0
             for feature_index, feature in enumerate(str(value) for value in model.feature_names):
-                if feature not in TEAM_FEATURES:
+                if feature not in team_feature_names:
                     continue
-                source_name = {
-                    "team_prior_win_diff": "prior_team_win",
-                    "roster_continuity_diff": "roster_continuity",
-                }[feature]
+                source_name = TEAM_CONTEXT_SOURCE_FIELDS[feature]
                 raw_value = _finite(context[source_name].iloc[0])
-                imputation = _finite(np.asarray(model.imputation_values, dtype=float)[feature_index])
                 if raw_value is None:
-                    raw_value = imputation
+                    context_missing = True
+                    continue
                 scale = _finite(np.asarray(model.scales, dtype=float)[feature_index])
                 coefficient = _finite(np.asarray(model.coefficients, dtype=float)[feature_index])
-                if raw_value is None or imputation is None or scale is None or coefficient is None or scale == 0:
+                if scale is None or coefficient is None or scale == 0:
                     raise FutureValueSnapshotError("team context model parameter is invalid")
-                team_context_value += raw_value / scale * coefficient
-        team_has_missing = bool(group["model_feature_missing"].any())
-        team_status = "missing_features" if team_has_missing else "adequate"
+                # The fitted feature is blue-minus-red.  Store a signed
+                # per-team contribution so the two rows sum to the model
+                # component and preserve side-swap symmetry.
+                team_context_value += side_sign * raw_value / scale * coefficient
+            if context_missing:
+                team_context_value = None
+        player_missing = bool(group["model_feature_missing"].any())
+        player_sparse = bool(group["support_status"].astype(str).ne("adequate").any())
+        team_has_missing = player_missing or player_sparse or context_missing
+        team_status = (
+            "missing_features"
+            if team_has_missing
+            else "adequate"
+        )
+        team_context_status = (
+            "invalid_contract"
+            if team_context_contract_error
+            else "missing_model_feature"
+            if team_context_binding is None
+            else "missing_value"
+            if team_context_value is None
+            else "available"
+        )
         team_blockers: list[str] = []
-        if team_has_missing:
+        if player_missing or context_missing:
             team_blockers.append("missing_model_feature_value")
+        if player_sparse:
+            team_blockers.append("sparse_player_support")
+        if team_blocker:
+            team_blockers.extend(team_blocker)
         if (
             "support_uncertainty_proxy_not_calibrated" in auth.blockers
             and not support_calibration_applied
@@ -1541,9 +1886,7 @@ def build_future_value_snapshots(
                     "champion_role_atom_logit": None
                     if team_has_missing
                     else champion_value,
-                    "team_context_logit": None
-                    if team_has_missing
-                    else team_context_value,
+                    "team_context_logit": team_context_value,
                     "future_team_value_logit": None
                     if team_has_missing
                     else (
@@ -1551,12 +1894,57 @@ def build_future_value_snapshots(
                         if team_context_value is not None
                         else player_value
                     ),
-                    "team_context_status": (
-                        "available" if team_context_value is not None else "missing_model_feature"
-                    ),
+                    "team_context_status": team_context_status,
                     "prior_team_win": context["prior_team_win"].iloc[0],
                     "prior_team_support": context["prior_team_support"].iloc[0],
                     "roster_continuity": context["roster_continuity"].iloc[0],
+                    "roster_continuity_support": 5
+                    if _finite(context["roster_continuity"].iloc[0]) is not None
+                    else 0,
+                    "regional_transfer": context["regional_transfer"].iloc[0],
+                    "regional_transfer_support": int(
+                        context["regional_transfer_support"].iloc[0]
+                    ),
+                    "minimum_metric_support": float(
+                        pd.to_numeric(group["minimum_metric_support"], errors="coerce").min()
+                    ),
+                    "minimum_effective_support": float(
+                        pd.to_numeric(
+                            group["minimum_effective_support"], errors="coerce"
+                        ).min()
+                    ),
+                    "uncertainty_proxy_raw": float(
+                        pd.to_numeric(group["uncertainty_proxy_raw"], errors="coerce").mean()
+                    ),
+                    "uncertainty_proxy_calibrated": (
+                        float(
+                            pd.to_numeric(
+                                group["uncertainty_proxy_calibrated"], errors="coerce"
+                            ).mean()
+                        )
+                        if pd.to_numeric(
+                            group["uncertainty_proxy_calibrated"], errors="coerce"
+                        ).notna().all()
+                        else None
+                    ),
+                    "uncertainty_proxy": float(
+                        pd.to_numeric(group["uncertainty_proxy"], errors="coerce").mean()
+                    ),
+                    "support_uncertainty_status": (
+                        "calibrated_strict_prior"
+                        if str(group["support_uncertainty_status"].iloc[0])
+                        == "calibrated_strict_prior"
+                        and group["support_uncertainty_status"].astype(str).eq(
+                            "calibrated_strict_prior"
+                        ).all()
+                        else "not_calibrated"
+                    ),
+                    "model_feature_missing": bool(team_has_missing),
+                    "missing_feature_count": int(
+                        pd.to_numeric(
+                            group["model_feature_missing"], errors="coerce"
+                        ).sum()
+                    ),
                     "support_status": team_status,
                     "status": "research_only" if team_status == "adequate" else "research_only_missing_features",
                     "blockers": sorted(set(team_blockers)),
@@ -1627,6 +2015,11 @@ def build_future_value_snapshots(
             blocker == "support_uncertainty_proxy_not_calibrated"
             and support_calibration_applied
         )
+        and not (
+            blocker == "team_context_not_in_final_model"
+            and team_context_binding is not None
+            and team_context_contract_error is None
+        )
     )
     blockers = tuple(
         sorted(
@@ -1667,6 +2060,20 @@ def build_future_value_snapshots(
             "team": team_rank_coverage,
         },
         "rank_diff_extremes": rank_extremes,
+        "team_context": {
+            "status": (
+                "available"
+                if team_context_binding is not None and team_context_contract_error is None
+                else "invalid_contract"
+                if team_context_contract_error
+                else "missing_model_feature"
+            ),
+            "binding": dict(team_context_binding)
+            if team_context_binding is not None
+            else None,
+            "error": team_context_contract_error,
+            "feature_names": sorted(team_feature_names),
+        },
         "blockers": list(blockers),
         "tierlists": {"recalculated": False, "status": "unchanged"},
     }
@@ -1745,6 +2152,7 @@ def write_snapshot_bundle(destination: Path, result: FutureValueSnapshotResult) 
         "status": result.status,
         "authority": dict(SNAPSHOT_AUTHORITY),
         "source_receipt_sha256": result.receipt["source"]["source_receipt_sha256"],
+        "team_context": dict(result.receipt.get("team_context") or {}),
         "files": {
             key: {
                 "path": str(path),
@@ -1771,6 +2179,8 @@ __all__ = [
     "SNAPSHOT_AUTHORITY",
     "SNAPSHOT_RECEIPT_SCHEMA_VERSION",
     "SCHEMA_VERSION",
+    "TEAM_CONTEXT_BINDING_SCHEMA_VERSION",
+    "TEAM_CONTEXT_MODEL_FEATURES",
     "authorize_final_fit",
     "build_future_value_snapshots",
     "load_final_fit_model",
