@@ -1430,6 +1430,49 @@ def test_roster_continuity_unavailable_blocks_the_slice() -> None:
     assert "roster_change_field_missing" in report["blockers"]
 
 
+def test_transfer_slice_keeps_unseen_and_sparse_groups_as_diagnostics() -> None:
+    target = pd.Series([0, 1] * 15, dtype=float)
+    probability = pd.Series([0.4, 0.6] * 15, dtype=float)
+    validation_labels = pd.Series(["new"] * 25 + ["tiny"] * 5, dtype="string")
+    training_labels = pd.Series(["old"] * 40, dtype="string")
+
+    report = _group_slice_metrics(
+        target,
+        probability,
+        validation_labels,
+        training_labels,
+        slice_name="regional_transfer",
+    )
+
+    assert report["status"] == "available"
+    assert report["blockers"] == []
+    assert report["prediction_coverage"] == pytest.approx(1.0)
+    assert report["supported_group_count"] == 1
+    assert report["sparse_group_count"] == 1
+    assert report["unseen_training_group_count"] == 2
+    assert report["groups"]["new"]["transfer_status"] == "unseen_training_group"
+    assert report["groups"]["tiny"]["support_status"] == "sparse"
+    assert report["warnings"] == [
+        "regional_transfer_sparse_validation_group_present",
+        "regional_transfer_unseen_training_group_present",
+    ]
+
+
+def test_transfer_slice_fails_when_every_group_is_sparse() -> None:
+    report = _group_slice_metrics(
+        pd.Series([0.0, 1.0]),
+        pd.Series([0.4, 0.6]),
+        pd.Series(["a", "b"], dtype="string"),
+        pd.Series(["a", "b"], dtype="string"),
+        slice_name="patch_transfer",
+    )
+
+    assert report["status"] == "blocked"
+    assert report["blockers"] == [
+        "patch_transfer_supported_validation_groups_missing"
+    ]
+
+
 def test_chronological_folds_exclude_clusters_that_cross_intervals() -> None:
     rows = []
     for index in range(1, 41):

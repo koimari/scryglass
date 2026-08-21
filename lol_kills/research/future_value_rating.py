@@ -6342,7 +6342,13 @@ def _group_slice_metrics(
     slice_name: str,
     minimum_rows: int = 20,
 ) -> dict[str, Any]:
-    """Score validation groups and bind each group to its training support."""
+    """Score transfer groups and report support without hiding predictions.
+
+    An unseen validation group is the transfer case being measured. A small
+    group limits inference for that group, but it does not invalidate the
+    complete pooled slice when other groups have enough rows. Coverage loss or
+    a complete absence of supported validation groups still fails closed.
+    """
 
     if validation_labels is None:
         return {
@@ -6360,27 +6366,64 @@ def _group_slice_metrics(
     train = training_labels if training_labels is not None else pd.Series(dtype="string")
     train = train.astype("string")
     blockers: list[str] = []
+    warnings: list[str] = []
     groups: dict[str, Any] = {}
+    supported_group_count = 0
+    unseen_training_group_count = 0
+    sparse_group_count = 0
+    expected_rows = 0
+    scored_rows = 0
     for raw_group in sorted(str(value) for value in labels.dropna().unique()):
         selected = labels.astype(str).eq(raw_group)
         group_target = target.loc[selected]
         group_probability = probability.loc[selected]
         metrics = _classification_metrics(group_target, group_probability)
         train_rows = int(train.eq(raw_group).sum())
+        group_expected_rows = int(group_target.notna().sum())
+        expected_rows += group_expected_rows
+        scored_rows += int(metrics["rows"])
         if metrics["rows"] < minimum_rows:
-            blockers.append(f"{slice_name}_sparse_validation_support")
+            sparse_group_count += 1
+            warnings.append(f"{slice_name}_sparse_validation_group_present")
+        else:
+            supported_group_count += 1
         if train_rows == 0:
-            blockers.append(f"{slice_name}_unseen_training_group")
+            unseen_training_group_count += 1
+            warnings.append(f"{slice_name}_unseen_training_group_present")
+        if int(metrics["rows"]) != group_expected_rows:
+            blockers.append(f"{slice_name}_prediction_coverage_incomplete")
         groups[raw_group] = {
             "training_rows": train_rows,
             "validation_rows": int(len(group_target)),
+            "scored_rows": int(metrics["rows"]),
+            "support_status": (
+                "sparse"
+                if int(metrics["rows"]) < minimum_rows
+                else "supported"
+            ),
+            "transfer_status": (
+                "unseen_training_group" if train_rows == 0 else "seen_training_group"
+            ),
             "metrics": metrics,
         }
     if "<missing>" in groups:
         blockers.append(f"{slice_name}_labels_missing")
+    if supported_group_count == 0:
+        blockers.append(f"{slice_name}_supported_validation_groups_missing")
     return {
-        "status": "available",
+        "status": "available" if not blockers else "blocked",
         "groups": groups,
+        "pooled_metrics": _classification_metrics(target, probability),
+        "expected_rows": expected_rows,
+        "scored_rows": scored_rows,
+        "prediction_coverage": (
+            float(scored_rows / expected_rows) if expected_rows else 0.0
+        ),
+        "minimum_group_rows": int(minimum_rows),
+        "supported_group_count": supported_group_count,
+        "sparse_group_count": sparse_group_count,
+        "unseen_training_group_count": unseen_training_group_count,
+        "warnings": sorted(set(warnings)),
         "blockers": sorted(set(blockers)),
     }
 
