@@ -13,12 +13,14 @@ names, zeroes, or inferred identities.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 import hashlib
 import json
 import math
 import re
+from types import MappingProxyType
 import warnings
 
 import numpy as np
@@ -62,6 +64,17 @@ FORM_METRICS = (
 CHECKPOINTS = (10, 15, 20, 25)
 ROLES = ("top", "jungle", "mid", "bot", "support")
 SIDES = ("blue", "red")
+
+
+class RatingVariant(str, Enum):
+    """The four frozen feature contracts for future-value development."""
+
+    CURRENT_ONLY = "current_only"
+    FUTURE_PLAYER_FORM = "future_player_form"
+    SCALING_CURVE = "scaling_curve"
+    BOTH = "both"
+
+
 FORBIDDEN_PREGAME_PATTERNS = (
     re.compile(r"^(?:target|observed|current)_", re.IGNORECASE),
     re.compile(r"(?:^|_)(?:gold|xp|cs|kills|assists|deaths)at(?:10|15|20|25)$", re.IGNORECASE),
@@ -1247,6 +1260,504 @@ CENTERED_ATOM_LEVEL_FEATURES = frozenset(
     if feature.startswith("rank_3_player_atom_")
     or feature.startswith("rank_3_champion_role_atom_")
 )
+
+
+# These declarations are the only feature families accepted by the variant
+# contract.  Keep the names in source order.  The order is part of each
+# canonical receipt and therefore part of the model identity.
+RATING_VARIANT_SCHEMA_VERSION = "scryglass:future-value-rating-variants:v1"
+CURRENT_RATING_SIGNED_MAP_FEATURES = (
+    "base_team_logit",
+    "team_rating_diff_scaled",
+    "base_player_logit",
+    "player_rating_diff_scaled",
+)
+# A shorter name is useful to callers that already know the current-rating
+# namespace.  It remains an alias of the canonical tuple.
+CURRENT_RATING_FEATURES = CURRENT_RATING_SIGNED_MAP_FEATURES
+
+FUTURE_PLAYER_FORM_SIDE_FEATURES = tuple(
+    feature
+    for feature in SIDE_LEVEL_TO_MODEL_FEATURE
+    if feature not in {"team_prior_win", "roster_continuity"}
+)
+FUTURE_PLAYER_FORM_FEATURES = FUTURE_PLAYER_FORM_SIDE_FEATURES
+FUTURE_PLAYER_FORM_MODEL_FEATURES = tuple(
+    SIDE_LEVEL_TO_MODEL_FEATURE[feature] for feature in FUTURE_PLAYER_FORM_SIDE_FEATURES
+)
+FUTURE_PLAYER_FORM_SIDE_LEVEL_FEATURES = FUTURE_PLAYER_FORM_SIDE_FEATURES
+
+SCALING_CURVE_SIGNED_MAP_FEATURES = tuple(
+    f"forecast_{metric}_diff_{checkpoint}"
+    for checkpoint in CHECKPOINTS
+    for metric in ("gold", "xp")
+)
+SCALING_CURVE_FEATURES = SCALING_CURVE_SIGNED_MAP_FEATURES
+
+# These are reported diagnostics.  They are not model inputs.  The list
+# covers both the atomized forecast names and the phase-curve report names.
+SCALING_CURVE_DERIVED_FEATURES = (
+    *tuple(
+        value
+        for first, second in zip(CHECKPOINTS, CHECKPOINTS[1:])
+        for value in (
+            f"forecast_gold_slope_{first}_{second}",
+            f"forecast_xp_slope_{first}_{second}",
+        )
+    ),
+    "forecast_peak_checkpoint_signed",
+    "forecast_peak_magnitude",
+    "forecast_curve_available",
+    "forecast_curve_missing",
+    "scaling_index",
+    "snowball_index",
+    "comeback_resilience",
+)
+DERIVED_SCALING_CURVE_FEATURES = SCALING_CURVE_DERIVED_FEATURES
+
+_RATING_VARIANT_FAMILY_FEATURES = {
+    "current_rating": CURRENT_RATING_SIGNED_MAP_FEATURES,
+    "future_player_form": FUTURE_PLAYER_FORM_SIDE_FEATURES,
+    "scaling_curve": SCALING_CURVE_SIGNED_MAP_FEATURES,
+}
+_RATING_VARIANT_FEATURES = {
+    RatingVariant.CURRENT_ONLY: CURRENT_RATING_SIGNED_MAP_FEATURES,
+    # The current rating is the comparison baseline.  The named candidate
+    # families are added to it for the three other variants.
+    RatingVariant.FUTURE_PLAYER_FORM: (
+        *CURRENT_RATING_SIGNED_MAP_FEATURES,
+        *FUTURE_PLAYER_FORM_SIDE_FEATURES,
+    ),
+    RatingVariant.SCALING_CURVE: (
+        *CURRENT_RATING_SIGNED_MAP_FEATURES,
+        *SCALING_CURVE_SIGNED_MAP_FEATURES,
+    ),
+    RatingVariant.BOTH: (
+        *CURRENT_RATING_SIGNED_MAP_FEATURES,
+        *FUTURE_PLAYER_FORM_SIDE_FEATURES,
+        *SCALING_CURVE_SIGNED_MAP_FEATURES,
+    ),
+}
+_RATING_VARIANT_SIGNED_FEATURES = {
+    RatingVariant.CURRENT_ONLY: CURRENT_RATING_SIGNED_MAP_FEATURES,
+    RatingVariant.FUTURE_PLAYER_FORM: CURRENT_RATING_SIGNED_MAP_FEATURES,
+    RatingVariant.SCALING_CURVE: (
+        *CURRENT_RATING_SIGNED_MAP_FEATURES,
+        *SCALING_CURVE_SIGNED_MAP_FEATURES,
+    ),
+    RatingVariant.BOTH: (
+        *CURRENT_RATING_SIGNED_MAP_FEATURES,
+        *SCALING_CURVE_SIGNED_MAP_FEATURES,
+    ),
+}
+_RATING_VARIANT_SIDE_FEATURES = {
+    RatingVariant.CURRENT_ONLY: (),
+    RatingVariant.FUTURE_PLAYER_FORM: FUTURE_PLAYER_FORM_SIDE_FEATURES,
+    RatingVariant.SCALING_CURVE: (),
+    RatingVariant.BOTH: FUTURE_PLAYER_FORM_SIDE_FEATURES,
+}
+_RATING_MODEL_FEATURE_UNIVERSE = frozenset(
+    {
+        *CURRENT_RATING_SIGNED_MAP_FEATURES,
+        *FUTURE_PLAYER_FORM_SIDE_FEATURES,
+        *SCALING_CURVE_SIGNED_MAP_FEATURES,
+    }
+)
+TEAM_CONTEXT_FEATURES = (
+    "team_prior_win",
+    "roster_continuity",
+    "team_prior_win_diff",
+    "roster_continuity_diff",
+)
+_RATING_TEAM_CONTEXT_FEATURES = frozenset(TEAM_CONTEXT_FEATURES)
+_RATING_DERIVED_FEATURES = frozenset(
+    {
+        *SCALING_CURVE_DERIVED_FEATURES,
+    }
+)
+
+
+def _resolve_rating_variant(value: RatingVariant | str) -> RatingVariant:
+    if isinstance(value, RatingVariant):
+        return value
+    if isinstance(value, str):
+        try:
+            return RatingVariant(value.strip())
+        except ValueError as error:
+            raise FutureValueSourceError(f"unknown rating variant: {value}") from error
+    raise FutureValueSourceError(f"unknown rating variant: {value!r}")
+
+
+def _rating_feature_name_reason(name: Any) -> str | None:
+    """Return a fail-closed reason for a proposed model feature name."""
+
+    text = str(name).strip()
+    if not text:
+        return "empty feature name"
+    normalized = re.sub(r"[^a-z0-9]", "", text.casefold())
+    if any(
+        token in normalized
+        for token in (
+            "target",
+            "outcome",
+            "result",
+            "winner",
+            "observed",
+            "actual",
+            "final",
+            "censored",
+        )
+    ):
+        return "target-like or final-state feature name"
+    checkpoint = re.search(
+        r"(?:gold|xp|cs|kills|assists|deaths)(?:diff|difference)?(?:at|diff|difference)?"
+        r"(?:10|15|20|25)$",
+        normalized,
+    )
+    if checkpoint and not normalized.startswith("forecast"):
+        return "current-checkpoint feature name"
+    final_metric = {
+        "cspm",
+        "cspermin",
+        "dpm",
+        "damageshare",
+        "damagepermin",
+        "kills",
+        "deaths",
+        "assists",
+        "totalgold",
+        "earnedgold",
+        "gamelength",
+        "duration",
+    }
+    if normalized in final_metric:
+        return "final-map feature name"
+    return None
+
+
+def classify_rating_feature(name: str) -> str:
+    """Classify one canonical feature as signed-map, side-level, or derived."""
+
+    text = str(name)
+    if text in CURRENT_RATING_SIGNED_MAP_FEATURES or text in SCALING_CURVE_SIGNED_MAP_FEATURES:
+        return "signed_map"
+    if text in FUTURE_PLAYER_FORM_SIDE_FEATURES:
+        return "side_level"
+    if text in _RATING_TEAM_CONTEXT_FEATURES:
+        return "team_context"
+    if text in _RATING_DERIVED_FEATURES:
+        return "derived"
+    return "unknown"
+
+
+def rating_feature_class(name: str) -> str:
+    """Alias for :func:`classify_rating_feature`."""
+
+    return classify_rating_feature(name)
+
+
+def is_signed_map_feature(name: str) -> bool:
+    return classify_rating_feature(name) == "signed_map"
+
+
+def is_side_level_feature(name: str) -> bool:
+    return classify_rating_feature(name) == "side_level"
+
+
+def is_side_feature(name: str) -> bool:
+    """Alias for :func:`is_side_level_feature`."""
+
+    return is_side_level_feature(name)
+
+
+def is_signed_feature(name: str) -> bool:
+    """Alias for :func:`is_signed_map_feature`."""
+
+    return is_signed_map_feature(name)
+
+
+def assert_rating_feature_names(feature_names: Iterable[str]) -> tuple[str, ...]:
+    """Validate one exact model feature family list.
+
+    Feature lists are closed over the declarations above.  This helper does
+    not permit callers to add an unregistered feature, a current checkpoint,
+    or a target/final-state column.
+    """
+
+    try:
+        names = tuple(str(name) for name in feature_names)
+    except TypeError as error:
+        raise FutureValueSourceError("rating feature names must be iterable") from error
+    if len(set(names)) != len(names):
+        raise FutureValueSourceError("rating feature names contain duplicates")
+    for name in names:
+        reason = _rating_feature_name_reason(name)
+        if reason is not None:
+            raise FutureValueSourceError(f"rating feature is forbidden: {name} ({reason})")
+        classification = classify_rating_feature(name)
+        if classification == "derived":
+            raise FutureValueSourceError(
+                f"rating derived diagnostic is not a model feature: {name}"
+            )
+        if classification == "team_context":
+            raise FutureValueSourceError(
+                f"rating team context is excluded from the player-form family: {name}"
+            )
+        if name not in _RATING_MODEL_FEATURE_UNIVERSE:
+            raise FutureValueSourceError(f"rating feature is not registered: {name}")
+    return names
+
+
+@dataclass(frozen=True)
+class RatingVariantConfig:
+    """Immutable, canonical feature selection for one rating variant."""
+
+    variant: RatingVariant
+    feature_names: tuple[str, ...]
+    signed_map_features: tuple[str, ...]
+    side_level_features: tuple[str, ...]
+    excluded_features: tuple[str, ...] = SCALING_CURVE_DERIVED_FEATURES
+
+    def __post_init__(self) -> None:
+        variant = _resolve_rating_variant(self.variant)
+        object.__setattr__(self, "variant", variant)
+        names = tuple(self.feature_names)
+        signed = tuple(self.signed_map_features)
+        side = tuple(self.side_level_features)
+        excluded = tuple(self.excluded_features)
+        object.__setattr__(self, "feature_names", names)
+        object.__setattr__(self, "signed_map_features", signed)
+        object.__setattr__(self, "side_level_features", side)
+        object.__setattr__(self, "excluded_features", excluded)
+        assert_rating_feature_names(names)
+        assert_rating_feature_names(signed)
+        assert_rating_feature_names(side)
+        if set(names) != set((*signed, *side)):
+            raise FutureValueSourceError(
+                f"rating variant {variant.value} feature families do not match feature_names"
+            )
+        if names != tuple(_RATING_VARIANT_FEATURES[variant]):
+            raise FutureValueSourceError(
+                f"rating variant {variant.value} does not use its canonical feature list"
+            )
+        if signed != tuple(_RATING_VARIANT_SIGNED_FEATURES[variant]):
+            raise FutureValueSourceError(
+                f"rating variant {variant.value} signed-map family changed"
+            )
+        if side != tuple(_RATING_VARIANT_SIDE_FEATURES[variant]):
+            raise FutureValueSourceError(
+                f"rating variant {variant.value} side-level family changed"
+            )
+        if excluded != SCALING_CURVE_DERIVED_FEATURES:
+            raise FutureValueSourceError("rating variant excluded diagnostics changed")
+
+    @property
+    def features(self) -> tuple[str, ...]:
+        """Compatibility alias for the canonical model feature tuple."""
+
+        return self.feature_names
+
+    @property
+    def model_features(self) -> tuple[str, ...]:
+        return self.feature_names
+
+    @property
+    def candidate_features(self) -> tuple[str, ...]:
+        """Return features beyond the current-rating comparison baseline."""
+
+        return tuple(
+            feature
+            for feature in self.feature_names
+            if feature not in CURRENT_RATING_SIGNED_MAP_FEATURES
+        )
+
+    @property
+    def signed_features(self) -> tuple[str, ...]:
+        return self.signed_map_features
+
+    @property
+    def side_features(self) -> tuple[str, ...]:
+        return self.side_level_features
+
+    @property
+    def feature_families(self) -> Mapping[str, tuple[str, ...]]:
+        """Return the immutable family selection used by this variant."""
+
+        selected: dict[str, tuple[str, ...]] = {}
+        if self.signed_map_features:
+            selected["current_rating"] = CURRENT_RATING_SIGNED_MAP_FEATURES
+        if self.side_level_features:
+            selected["future_player_form"] = FUTURE_PLAYER_FORM_SIDE_FEATURES
+        if any(
+            feature in SCALING_CURVE_SIGNED_MAP_FEATURES
+            for feature in self.signed_map_features
+        ):
+            selected["scaling_curve"] = SCALING_CURVE_SIGNED_MAP_FEATURES
+        return MappingProxyType(selected)
+
+    @property
+    def family_registry(self) -> Mapping[str, tuple[str, ...]]:
+        """Return all immutable family declarations."""
+
+        return MappingProxyType(
+            {
+                "current_rating": CURRENT_RATING_SIGNED_MAP_FEATURES,
+                "future_player_form": FUTURE_PLAYER_FORM_SIDE_FEATURES,
+                "scaling_curve": SCALING_CURVE_SIGNED_MAP_FEATURES,
+            }
+        )
+
+    @property
+    def included_families(self) -> tuple[str, ...]:
+        return tuple(self.feature_families)
+
+    @property
+    def name(self) -> str:
+        return self.variant.value
+
+    @property
+    def config_hash(self) -> str:
+        return self.config_sha256
+
+    @property
+    def config_sha256(self) -> str:
+        return rating_variant_config_sha256(self.variant)
+
+    def receipt(self) -> dict[str, Any]:
+        return rating_variant_config_receipt(self.variant)
+
+
+def rating_variant_config(variant: RatingVariant | str) -> RatingVariantConfig:
+    """Return one immutable registered variant configuration."""
+
+    resolved = _resolve_rating_variant(variant)
+    return RATING_VARIANT_CONFIGS[resolved]
+
+
+def get_rating_variant_config(
+    variant: RatingVariant | str,
+    feature_names: Iterable[str] | None = None,
+) -> RatingVariantConfig:
+    """Return a config and reject any caller-supplied feature-list mutation."""
+
+    config = rating_variant_config(variant)
+    if feature_names is not None:
+        candidate = assert_rating_feature_names(feature_names)
+        if candidate != config.feature_names:
+            raise FutureValueSourceError(
+                f"arbitrary feature list is not allowed for rating variant {config.variant.value}"
+            )
+    return config
+
+
+def assert_rating_variant_features(
+    variant: RatingVariant | str,
+    feature_names: Iterable[str],
+) -> tuple[str, ...]:
+    """Require a feature list to equal the registered variant exactly."""
+
+    return get_rating_variant_config(variant, feature_names).feature_names
+
+
+def rating_variant_config_receipt(variant: RatingVariant | str) -> dict[str, Any]:
+    """Return a canonical receipt for one registered variant."""
+
+    config = rating_variant_config(variant)
+    payload: dict[str, Any] = {
+        "schema_version": RATING_VARIANT_SCHEMA_VERSION,
+        "variant": config.variant.value,
+        "feature_names": list(config.feature_names),
+        "signed_map_features": list(config.signed_map_features),
+        "side_level_features": list(config.side_level_features),
+        "excluded_features": list(config.excluded_features),
+    }
+    payload["config_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(payload)
+    ).hexdigest()
+    payload["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(payload)
+    ).hexdigest()
+    return payload
+
+
+def rating_variant_receipt(variant: RatingVariant | str) -> dict[str, Any]:
+    """Alias for :func:`rating_variant_config_receipt`."""
+
+    return rating_variant_config_receipt(variant)
+
+
+def rating_variant_config_sha256(variant: RatingVariant | str) -> str:
+    return str(rating_variant_config_receipt(variant)["config_sha256"])
+
+
+def rating_variant_hash(variant: RatingVariant | str) -> str:
+    """Alias for :func:`rating_variant_config_sha256`."""
+
+    return rating_variant_config_sha256(variant)
+
+
+def rating_variant_registry_receipt() -> dict[str, Any]:
+    """Return one canonical receipt binding all four variant configs."""
+
+    payload: dict[str, Any] = {
+        "schema_version": RATING_VARIANT_SCHEMA_VERSION,
+        "variants": {
+            variant.value: rating_variant_config_receipt(variant)
+            for variant in RatingVariant
+        },
+    }
+    payload["registry_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(payload)
+    ).hexdigest()
+    payload["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(payload)
+    ).hexdigest()
+    return payload
+
+
+def rating_variant_registry_sha256() -> str:
+    return str(rating_variant_registry_receipt()["registry_sha256"])
+
+
+def rating_variant_configs() -> Mapping[RatingVariant, RatingVariantConfig]:
+    """Return the immutable four-variant registry."""
+
+    return RATING_VARIANT_CONFIGS
+
+
+def variant_config(variant: RatingVariant | str) -> RatingVariantConfig:
+    """Short alias for :func:`rating_variant_config`."""
+
+    return rating_variant_config(variant)
+
+
+def variant_registry_receipt() -> dict[str, Any]:
+    """Short alias for :func:`rating_variant_registry_receipt`."""
+
+    return rating_variant_registry_receipt()
+
+
+def validate_rating_variant(variant: RatingVariant | str) -> RatingVariant:
+    """Resolve a variant name and fail closed for unknown values."""
+
+    return _resolve_rating_variant(variant)
+
+
+RATING_VARIANT_CONFIGS = MappingProxyType(
+    {
+        variant: RatingVariantConfig(
+            variant=variant,
+            feature_names=tuple(_RATING_VARIANT_FEATURES[variant]),
+            signed_map_features=tuple(_RATING_VARIANT_SIGNED_FEATURES[variant]),
+            side_level_features=tuple(_RATING_VARIANT_SIDE_FEATURES[variant]),
+        )
+        for variant in RatingVariant
+    }
+)
+RATING_VARIANT_REGISTRY = RATING_VARIANT_CONFIGS
+VARIANT_CONFIGS = RATING_VARIANT_CONFIGS
+VARIANT_REGISTRY = RATING_VARIANT_CONFIGS
+RATING_VARIANTS = tuple(RatingVariant)
 
 
 def _side_level_column(side: str, feature: str) -> str:
@@ -3862,20 +4373,59 @@ __all__ = [
     "AcceptedFutureValueSource",
     "FutureValueFoldModel",
     "FutureValueSourceError",
+    "CURRENT_RATING_FEATURES",
+    "CURRENT_RATING_SIGNED_MAP_FEATURES",
+    "DERIVED_SCALING_CURVE_FEATURES",
+    "FUTURE_PLAYER_FORM_FEATURES",
+    "FUTURE_PLAYER_FORM_MODEL_FEATURES",
+    "FUTURE_PLAYER_FORM_SIDE_FEATURES",
+    "FUTURE_PLAYER_FORM_SIDE_LEVEL_FEATURES",
     "MODEL_FEATURES",
     "MODEL_FIT_SCHEMA_VERSION",
     "Rank3AtomModel",
+    "RATING_VARIANT_CONFIGS",
+    "RATING_VARIANT_REGISTRY",
+    "RATING_VARIANT_SCHEMA_VERSION",
+    "RATING_VARIANTS",
+    "RatingVariant",
+    "RatingVariantConfig",
+    "SCALING_CURVE_DERIVED_FEATURES",
+    "SCALING_CURVE_FEATURES",
+    "SCALING_CURVE_SIGNED_MAP_FEATURES",
+    "TEAM_CONTEXT_FEATURES",
     "assert_pregame_feature_names",
+    "assert_rating_feature_names",
+    "assert_rating_variant_features",
     "bind_accepted_future_value_source",
     "build_strict_prior_player_form",
     "build_future_value_design",
     "build_time_decayed_prior_player_form",
+    "classify_rating_feature",
     "chronological_whole_series_folds",
     "evaluate_future_value",
     "fit_future_value_model",
     "fit_rank3_player_champion_role_atoms",
     "future_value_model_contract",
+    "get_rating_variant_config",
+    "is_side_level_feature",
+    "is_side_feature",
+    "is_signed_map_feature",
+    "is_signed_feature",
     "load_accepted_future_value_source",
+    "rating_feature_class",
+    "rating_variant_config",
+    "rating_variant_config_receipt",
+    "rating_variant_config_sha256",
+    "rating_variant_hash",
+    "rating_variant_receipt",
+    "rating_variant_registry_receipt",
+    "rating_variant_registry_sha256",
+    "rating_variant_configs",
     "team_value_difference",
+    "validate_rating_variant",
+    "VARIANT_CONFIGS",
+    "VARIANT_REGISTRY",
+    "variant_config",
+    "variant_registry_receipt",
     "write_source_receipt",
 ]
