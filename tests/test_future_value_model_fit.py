@@ -22,6 +22,7 @@ from lol_kills.research.future_value_rating import (
     _baseline_source_binding,
     _bind_baseline_fold_series,
     _current_rating_method_comparison,
+    _required_current_rating_comparison_blockers,
     _scope_series_cluster_audit_to_frame,
     _sequential_current_rating_baseline,
     _fold_level_imputation_values,
@@ -1105,6 +1106,25 @@ def test_current_rating_methods_keep_partial_bt_out_of_shared_cohort() -> None:
     assert "current_rating_row_id_parity_incomplete" in evidence["blockers"]
     assert "hierarchical_bt_coverage_incomplete" in evidence["blockers"]
     assert pd.isna(hierarchical.iloc[2])
+
+
+def test_partial_bt_does_not_block_complete_current_rating_controls() -> None:
+    reports = [
+        {
+            "method_specific": {
+                "sequential_player_elo": {"status": "available"},
+                "sequential_current_rating": {"status": "available"},
+                "hierarchical_bt": {"status": "partial"},
+            }
+        }
+    ]
+
+    assert _required_current_rating_comparison_blockers(reports) == []
+
+    reports[0]["method_specific"]["sequential_player_elo"]["status"] = "partial"
+    assert _required_current_rating_comparison_blockers(reports) == [
+        "current_player_rating_comparison_missing"
+    ]
 
 
 def test_series_audit_scopes_verified_model_frame_and_keeps_full_source_audit() -> None:

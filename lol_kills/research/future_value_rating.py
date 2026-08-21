@@ -7281,6 +7281,36 @@ def _current_rating_method_comparison(
     }
 
 
+def _required_current_rating_comparison_blockers(
+    current_fold_reports: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    """Return blockers for the complete player and team rating controls.
+
+    Hierarchical BT stays as an additional method-specific comparison. Its
+    deliberate unseen-team exclusions do not invalidate the complete
+    sequential player and team controls.
+    """
+
+    blockers: list[str] = []
+    if any(
+        report.get("method_specific", {})
+        .get("sequential_player_elo", {})
+        .get("status")
+        != "available"
+        for report in current_fold_reports
+    ):
+        blockers.append("current_player_rating_comparison_missing")
+    if any(
+        report.get("method_specific", {})
+        .get("sequential_current_rating", {})
+        .get("status")
+        != "available"
+        for report in current_fold_reports
+    ):
+        blockers.append("current_team_rating_comparison_missing")
+    return blockers
+
+
 def evaluate_future_value(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -7983,30 +8013,9 @@ def evaluate_future_value(
     blockers = [
         "support_uncertainty_proxy_not_calibrated",
     ]
-    if any(
-        report.get("method_specific", {})
-        .get("sequential_player_elo", {})
-        .get("status")
-        != "available"
-        for report in current_fold_reports
-    ):
-        blockers.append("current_player_rating_comparison_missing")
-    if any(
-        report.get("method_specific", {})
-        .get("sequential_current_rating", {})
-        .get("status")
-        != "available"
-        for report in current_fold_reports
-    ):
-        blockers.append("current_team_rating_comparison_missing")
-    if any(
-        report.get("method_specific", {})
-        .get("hierarchical_bt", {})
-        .get("status")
-        != "available"
-        for report in current_fold_reports
-    ):
-        blockers.append("hierarchical_bt_coverage_partial")
+    blockers.extend(
+        _required_current_rating_comparison_blockers(current_fold_reports)
+    )
     if int(n_folds) < 3 or len(fold_reports) < int(n_folds):
         blockers.append("complete_chronological_evaluation_missing")
     if int(n_folds) < 3:
