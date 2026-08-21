@@ -36,7 +36,6 @@ from lol_kills.research.future_value_rating import RatingVariant
 from lol_kills.research.future_value_rating import FUTURE_PLAYER_FORM_SIDE_FEATURES
 from lol_kills.research.future_value_draft_score import (
     CURVE_ATOM_INTERACTION_FEATURES,
-    CURRENT_RATING_SIGNED_MAP_FEATURES,
     PHASE_RAW_FEATURES,
     PHASE_SHAPE_FEATURES,
     STATIC_COMPOSITION_FEATURES,
@@ -569,7 +568,6 @@ def _collect_rows(value: Any, spec: DownstreamArtifactSpec, *, container_key: st
     if container_key is not None:
         row.setdefault("_container_key", container_key)
     rows: list[dict[str, Any]] = []
-    identity = _row_identity(row, spec)
     has_direct_value = any(field in value for field in spec.value_fields)
     if has_direct_value or spec.name == "public_manifest":
         rows.append(row)
@@ -1626,7 +1624,7 @@ def compare_downstream_variants(
                     f"{name}_forbidden_authority_{path}" for path in authority_paths
                 )
             except DownstreamDiffError:
-                pass
+                blockers.append(f"{name}_source_receipt_invalid")
         for spec in specs:
             try:
                 artifact = _load_artifact(root, spec, expected_source=expected)
@@ -1686,7 +1684,7 @@ def compare_downstream_variants(
                     if isinstance(receipt_value, Mapping) and receipt_value.get("receipt_sha256") != expected["receipt_sha256"]:
                         blockers.append(f"{name}_source_receipt_mismatch")
                 except DownstreamDiffError:
-                    pass
+                    blockers.append(f"{name}_source_receipt_invalid")
             for spec in specs:
                 candidate_artifact = loaded.get(name, {}).get(spec.name)
                 if candidate_artifact is None:

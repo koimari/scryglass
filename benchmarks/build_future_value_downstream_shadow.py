@@ -13,7 +13,6 @@ import argparse
 import hashlib
 import json
 import math
-import shutil
 from pathlib import Path
 from typing import Any, Mapping
 

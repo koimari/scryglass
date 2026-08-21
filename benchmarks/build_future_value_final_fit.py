@@ -36,7 +36,6 @@ from lol_kills.research.future_value_rating import (
     _sha256_path,
     _variant_imputation_values,
     build_future_value_design,
-    build_strict_prior_player_form,
     fit_rank3_player_champion_role_atoms,
     rating_feature_values_sha256,
     rating_variant_config,
@@ -534,7 +533,6 @@ def fit_final_v2(
     source_teams_path = source_root / "oe_team_games.parquet"
     maps = pd.read_parquet(source_maps_path)
     players = pd.read_parquet(source_players_path)
-    teams = pd.read_parquet(source_teams_path)
     model_frame = _map_model_frame(maps)
     model_frame = model_frame[model_frame["game_id"].astype(str).isin(eligible_ids)].copy()
     if tuple(sorted(model_frame["game_id"].astype(str))) != eligible_ids:

@@ -1822,10 +1822,11 @@ def _scaling_checkpoint_value(row: Mapping[str, Any], metric: str, checkpoint: i
     if raw is None:
         return None
     try:
-        if bool(pd.isna(raw)):
-            return None
+        raw_missing = bool(pd.isna(raw))
     except (TypeError, ValueError):
-        pass
+        raw_missing = False
+    if raw_missing:
+        return None
     try:
         value = float(raw)
     except (TypeError, ValueError) as exc:
@@ -1847,10 +1848,11 @@ def _scaling_stable_team(row: Mapping[str, Any]) -> str | None:
         if value is None:
             continue
         try:
-            if bool(pd.isna(value)):
-                continue
+            value_missing = bool(pd.isna(value))
         except (TypeError, ValueError):
-            pass
+            value_missing = False
+        if value_missing:
+            continue
         token = str(value).strip()
         if token.startswith("oe:team:"):
             return token
@@ -1863,10 +1865,11 @@ def _scaling_alias(value: Any) -> str | None:
     if value is None:
         return None
     try:
-        if bool(pd.isna(value)):
-            return None
+        value_missing = bool(pd.isna(value))
     except (TypeError, ValueError):
-        pass
+        value_missing = False
+    if value_missing:
+        return None
     token = str(value).strip()
     if not token or token.casefold() in {"nan", "nat", "none", "<na>"}:
         return None
@@ -2061,7 +2064,6 @@ def build_scaling_feature_ledger(
         raise AtomizedResearchError(
             "fold-local scaling ledger needs train_game_ids, validation_game_ids, and fit_window_end"
         )
-    accepted_set = set(accepted_ids)
     eligible_model_ids = (
         tuple(str(value) for value in bound_source["model_eligible_game_ids"])
         if model_eligible_only

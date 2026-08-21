@@ -31,7 +31,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.research import composition_signal
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
