@@ -1558,7 +1558,7 @@ def _trusted_producer_spec(
     return payload
 
 
-_TRUSTED_FEATURE_PRODUCER_SPECS = MappingProxyType(
+_REGISTERED_FEATURE_PRODUCER_SPECS = MappingProxyType(
     {
         "current_sequential_rating": MappingProxyType(
             _trusted_producer_spec(
@@ -1594,7 +1594,7 @@ def trusted_feature_producer_receipt(
     """
 
     key = str(name).strip()
-    spec = _TRUSTED_FEATURE_PRODUCER_SPECS.get(key)
+    spec = _REGISTERED_FEATURE_PRODUCER_SPECS.get(key)
     if spec is None:
         raise FutureValueSourceError(f"unknown rating feature producer: {name}")
     payload = dict(spec)
@@ -1634,7 +1634,7 @@ def _verified_producer_adapters(
         if not isinstance(raw, Mapping):
             raise FutureValueSourceError("rating feature producer adapter is invalid")
         name = str(raw.get("name") or "").strip()
-        expected = _TRUSTED_FEATURE_PRODUCER_SPECS.get(name)
+        expected = _REGISTERED_FEATURE_PRODUCER_SPECS.get(name)
         if expected is None:
             raise FutureValueSourceError(f"unknown rating feature producer: {name}")
         allowed = set(expected) | {"receipt_sha256", "row_values_sha256"}
@@ -2121,7 +2121,7 @@ def _producer_manifest_descriptors(
         if name in names:
             raise FutureValueSourceError("rating feature producer adapters are duplicated")
         names.add(name)
-        expected = _TRUSTED_FEATURE_PRODUCER_SPECS.get(name)
+        expected = _REGISTERED_FEATURE_PRODUCER_SPECS.get(name)
         if expected is None:
             raise FutureValueSourceError(f"unknown rating feature producer: {name}")
         artifact = _file_record(raw.get("artifact"), f"{name} artifact")
@@ -2351,7 +2351,7 @@ def write_rating_feature_producer_receipt(
     """
 
     key = str(name).strip()
-    expected = _TRUSTED_FEATURE_PRODUCER_SPECS.get(key)
+    expected = _REGISTERED_FEATURE_PRODUCER_SPECS.get(key)
     if expected is None:
         raise FutureValueSourceError(f"unknown rating feature producer: {name}")
     if evaluation_mode != "fold_local":

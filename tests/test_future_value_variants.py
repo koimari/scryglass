@@ -805,7 +805,7 @@ def test_file_backed_receipt_rejects_resealed_source_and_fold_mutations(tmp_path
 
 def test_signed_map_side_swap_negates_every_variant_feature() -> None:
     design = _variant_design()
-    for variant in RatingVariant:
+    for variant in RATING_VARIANT_CONFIGS:
         config = get_rating_variant_config(variant)
         original = build_rating_variant_matrix(design, variant)
         swapped = design.copy()

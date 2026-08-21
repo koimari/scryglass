@@ -152,17 +152,12 @@ def _source_envelope(source: Mapping[str, Any], rows: list[dict[str, Any]]) -> d
 
 def _validate_source(source: Mapping[str, Any], receipt_path: Path) -> dict[str, Any]:
     try:
-        validated = validate_future_value_source_receipt_payload(
-            dict(source), receipt_path=receipt_path
-        )
-    except TypeError:
-        # Older local versions expose the path-free validator.
-        validated = validate_future_value_source_receipt_payload(dict(source))
+        validate_future_value_source_receipt_payload(dict(source))
     except Exception as error:
         raise ShadowBuildError(f"source receipt failed validation: {error}") from error
-    if not isinstance(validated, Mapping):
-        validated = source
-    result = dict(validated)
+    if not receipt_path.is_file() or receipt_path.is_symlink():
+        raise ShadowBuildError("source receipt path is not a regular file")
+    result = dict(source)
     if result.get("status") != "accepted_source_bound_development_only":
         raise ShadowBuildError("source receipt is not development-only")
     if result.get("authority", {}).get("research_only") is not True:
