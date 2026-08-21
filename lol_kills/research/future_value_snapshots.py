@@ -113,6 +113,10 @@ PROMOTION_ONLY_BLOCKERS = frozenset(
 RESEARCH_FIT_STATUSES = frozenset(
     {"research_only", "research_only_blocked", "research_only_partial"}
 )
+RANK_UNIVERSE = "common_verified_finite_ids"
+RANK_ELIGIBILITY_FILTER = "verified_nonempty_id_and_finite_value"
+RANK_DIRECTION = "descending_value_rank_1_highest"
+FULL_SNAPSHOT_RANK_STATUS = "incomparable"
 
 
 class FutureValueSnapshotError(FutureValueSourceError):
@@ -982,24 +986,30 @@ def _rank_diffs(
     futures = pd.DataFrame(list(future_rows))
     total_future = int(len(futures))
     assignments: dict[str, dict[str, Any]] = {}
-    if not futures.empty and identity in futures.columns and future_value in futures.columns:
-        futures[identity] = futures[identity].astype("string")
-        futures[future_value] = pd.to_numeric(futures[future_value], errors="coerce")
-        finite = (
-            futures[future_value].notna()
-            & futures[identity].notna()
-            & futures[identity].str.strip().ne("")
+
+    def _identity_digest(values: Iterable[Any]) -> str:
+        ids = sorted({str(value) for value in values if str(value).strip()})
+        return _sha256_bytes(
+            _canonical_json_bytes({"identity": identity, "ids": ids})
         )
-        if bool(finite.any()) and not futures.loc[finite, identity].duplicated().any():
-            futures.loc[finite, "__future_rank"] = futures.loc[finite, future_value].rank(
-                method="min", ascending=False
-            )
-            for row in futures.loc[finite].to_dict("records"):
-                assignments[str(row[identity])] = {
-                    "future_rank": int(row["__future_rank"]),
-                    "current_rank": None,
-                    "rank_delta": None,
-                }
+
+    def _full_rank_contract(
+        *,
+        current_size: int,
+        future_size: int,
+        current_field: str | None,
+        future_field: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "status": FULL_SNAPSHOT_RANK_STATUS,
+            "reason": "full snapshot ranks use separate universes",
+            "current_universe_size": int(current_size),
+            "future_universe_size": int(future_size),
+            "current_value_field": current_field,
+            "future_value_field": future_field,
+            "rank_direction": RANK_DIRECTION,
+        }
+
     coverage: dict[str, Any] = {
         "future_rows": total_future,
         "current_rows": 0,
@@ -1007,72 +1017,173 @@ def _rank_diffs(
         "unmatched_rows": total_future,
         "join_rate": 0.0 if total_future else None,
         "status": "unavailable",
+        "rank_universe": RANK_UNIVERSE,
+        "eligibility_filter": RANK_ELIGIBILITY_FILTER,
+        "common_universe_size": 0,
+        "common_identity_sha256": _identity_digest(()),
+        "identity_sha256": _identity_digest(()),
+        "current_value_field": None,
+        "future_value_field": future_value,
+        "rank_direction": RANK_DIRECTION,
+        "paired_row_digest_sha256": _sha256_bytes(_canonical_json_bytes([])),
+        "paired_row_digest": _sha256_bytes(_canonical_json_bytes([])),
+        "finite_current_rows": 0,
+        "finite_future_rows": 0,
+        "full_snapshot_ranks": _full_rank_contract(
+            current_size=0,
+            future_size=0,
+            current_field=None,
+            future_field=future_value,
+        ),
     }
+
+    if futures.empty or identity not in futures.columns or future_value not in futures.columns:
+        return [], [f"future_{identity}_snapshot_missing"], coverage, assignments
+
+    futures[identity] = futures[identity].astype("string")
+    futures[future_value] = pd.to_numeric(futures[future_value], errors="coerce")
+    future_with_identity = futures[
+        futures[identity].notna() & futures[identity].str.strip().ne("")
+    ].copy()
+    if future_with_identity[identity].duplicated().any():
+        return [], [f"future_{identity}_snapshot_identity_or_value_ambiguous"], coverage, assignments
+    future_finite = future_with_identity[
+        future_with_identity[future_value].map(lambda value: _finite(value) is not None)
+    ].copy()
+    coverage["finite_future_rows"] = int(len(future_finite))
+
     if current is None:
+        coverage["full_snapshot_ranks"] = _full_rank_contract(
+            current_size=0,
+            future_size=len(future_finite),
+            current_field=None,
+            future_field=future_value,
+        )
         return [], [f"current_{identity}_rating_snapshot_missing"], coverage, assignments
     if identity not in current.columns:
+        coverage["full_snapshot_ranks"] = _full_rank_contract(
+            current_size=0,
+            future_size=len(future_finite),
+            current_field=None,
+            future_field=future_value,
+        )
         return [], [f"current_{identity}_rating_identity_missing"], coverage, assignments
     value_column = next((name for name in current_value_candidates if name in current.columns), None)
     if value_column is None:
+        coverage["full_snapshot_ranks"] = _full_rank_contract(
+            current_size=0,
+            future_size=len(future_finite),
+            current_field=None,
+            future_field=future_value,
+        )
         return [], [f"current_{identity}_rating_value_missing"], coverage, assignments
+
     frame = current[[identity, value_column]].copy()
     frame[identity] = frame[identity].astype("string")
     frame[value_column] = pd.to_numeric(frame[value_column], errors="coerce")
-    frame = frame[
-        frame[identity].notna()
-        & frame[identity].str.strip().ne("")
-        & frame[value_column].notna()
+    current_with_identity = frame[
+        frame[identity].notna() & frame[identity].str.strip().ne("")
     ].copy()
-    if frame[identity].duplicated().any():
+    if current_with_identity[identity].duplicated().any():
         return [], [f"current_{identity}_rating_identity_or_value_ambiguous"], coverage, assignments
-    if futures.empty or identity not in futures.columns or future_value not in futures.columns:
-        return [], [f"future_{identity}_snapshot_missing"], coverage, assignments
-    futures = futures[
-        futures[identity].notna() & futures[identity].str.strip().ne("")
+    frame = current_with_identity[
+        current_with_identity[value_column].map(lambda value: _finite(value) is not None)
     ].copy()
-    if futures[identity].duplicated().any():
-        return [], [f"future_{identity}_snapshot_identity_or_value_ambiguous"], coverage, assignments
-    finite_future = futures[future_value].notna()
-    futures = futures[finite_future].copy()
-    if futures.empty:
+    coverage["current_rows"] = int(len(frame))
+    coverage["finite_current_rows"] = int(len(frame))
+    coverage["current_value_field"] = value_column
+    coverage["full_snapshot_ranks"] = _full_rank_contract(
+        current_size=len(frame),
+        future_size=len(future_finite),
+        current_field=value_column,
+        future_field=future_value,
+    )
+    if future_finite.empty:
         coverage["status"] = "no_finite_future_values"
         return [], [], coverage, assignments
-    frame["__rank"] = pd.to_numeric(frame[value_column], errors="coerce").rank(
+
+    current_ids = set(frame[identity].astype(str))
+    future_ids = set(future_finite[identity].astype(str))
+    common_ids = tuple(sorted(current_ids & future_ids))
+    common_id_set = set(common_ids)
+    coverage["common_universe_size"] = len(common_ids)
+    coverage["common_identity_sha256"] = _identity_digest(common_ids)
+    coverage["identity_sha256"] = coverage["common_identity_sha256"]
+    if not common_ids:
+        coverage["status"] = "partial"
+        coverage["unmatched_rows"] = total_future
+        coverage["join_rate"] = 0.0 if total_future else None
+        return [], [], coverage, assignments
+
+    common_current = frame[frame[identity].astype(str).isin(common_id_set)].copy()
+    common_future = future_finite[future_finite[identity].astype(str).isin(common_id_set)].copy()
+    common_current["__rank"] = common_current[value_column].rank(
         method="min", ascending=False
     )
-    current_rank = dict(zip(frame[identity].astype(str), frame["__rank"]))
-    futures["__rank"] = futures[future_value].rank(method="min", ascending=False)
+    common_future["__rank"] = common_future[future_value].rank(
+        method="min", ascending=False
+    )
+    current_rank = dict(zip(common_current[identity].astype(str), common_current["__rank"]))
+    current_value = dict(zip(common_current[identity].astype(str), common_current[value_column]))
+    future_rank = dict(zip(common_future[identity].astype(str), common_future["__rank"]))
+    future_value_by_id = dict(zip(common_future[identity].astype(str), common_future[future_value]))
+
+    paired_rows: list[dict[str, Any]] = []
+    for key in common_ids:
+        current_rank_value = int(current_rank[key])
+        future_rank_value = int(future_rank[key])
+        rank_delta = int(current_rank_value - future_rank_value)
+        paired_rows.append(
+            {
+                identity: key,
+                "current_rank": current_rank_value,
+                "future_rank": future_rank_value,
+                "rank_delta": rank_delta,
+                "current_value": float(current_value[key]),
+                "future_value": float(future_value_by_id[key]),
+            }
+        )
+    paired_digest = _sha256_bytes(_canonical_json_bytes(paired_rows))
+    coverage["paired_row_digest_sha256"] = paired_digest
+    coverage["paired_row_digest"] = paired_digest
+
     output: list[dict[str, Any]] = []
-    for row in futures.to_dict("records"):
+    for row in common_future.to_dict("records"):
         key = str(row[identity])
-        if key not in current_rank:
-            continue
-        assignments[key] = {
-            "future_rank": int(row["__rank"]),
-            "current_rank": int(current_rank[key]),
-            "rank_delta": int(current_rank[key] - row["__rank"]),
+        current_rank_value = int(current_rank[key])
+        future_rank_value = int(future_rank[key])
+        rank_delta = int(current_rank_value - future_rank_value)
+        assignment = {
+            "future_rank": future_rank_value,
+            "current_rank": current_rank_value,
+            "rank_delta": rank_delta,
+            "rank_universe": RANK_UNIVERSE,
+            "rank_comparability": "comparable",
+            "full_snapshot_rank_status": FULL_SNAPSHOT_RANK_STATUS,
         }
+        assignments[key] = assignment
         output.append(
             {
                 identity: key,
-                "current_rank": int(current_rank[key]),
-                "future_rank": int(row["__rank"]),
-                "rank_delta": int(current_rank[key] - row["__rank"]),
-                "current_value": float(
-                    frame.loc[frame[identity].eq(key), value_column].iloc[0]
-                ),
-                "future_value": float(row[future_value]),
+                "current_rank": current_rank_value,
+                "future_rank": future_rank_value,
+                "rank_delta": rank_delta,
+                "current_value": float(current_value[key]),
+                "future_value": float(future_value_by_id[key]),
+                "rank_universe": RANK_UNIVERSE,
+                "rank_comparability": "comparable",
+                "full_snapshot_rank_status": FULL_SNAPSHOT_RANK_STATUS,
             }
         )
     matched = len(output)
-    coverage = {
-        "future_rows": total_future,
-        "current_rows": int(len(frame)),
-        "matched_rows": matched,
-        "unmatched_rows": max(0, total_future - matched),
-        "join_rate": float(matched / total_future) if total_future else None,
-        "status": "complete" if matched == total_future else "partial",
-    }
+    coverage.update(
+        {
+            "matched_rows": matched,
+            "unmatched_rows": max(0, total_future - matched),
+            "join_rate": float(matched / total_future) if total_future else None,
+            "status": "complete" if matched == total_future else "partial",
+        }
+    )
     return output, blockers, coverage, assignments
 
 
@@ -1385,7 +1496,13 @@ def build_future_value_snapshots(
                 else "current_rating_unmatched"
             )
         else:
-            row["rank_join_status"] = "current_rating_unavailable"
+            row["rank_join_status"] = (
+                "future_value_unavailable"
+                if _finite(row.get("future_player_value_logit")) is None
+                else "current_rating_unavailable"
+                if player_rank_coverage["status"] == "unavailable"
+                else "current_rating_unmatched"
+            )
     for row in team_rows:
         assignment = team_rank_assignments.get(str(row["team_id"]))
         if assignment is not None:
@@ -1398,7 +1515,13 @@ def build_future_value_snapshots(
                 else "current_rating_unmatched"
             )
         else:
-            row["rank_join_status"] = "current_rating_unavailable"
+            row["rank_join_status"] = (
+                "future_value_unavailable"
+                if _finite(row.get("future_team_value_logit")) is None
+                else "current_rating_unavailable"
+                if team_rank_coverage["status"] == "unavailable"
+                else "current_rating_unmatched"
+            )
     blockers = tuple(
         sorted(
             set(
@@ -1482,6 +1605,11 @@ def write_snapshot_bundle(destination: Path, result: FutureValueSnapshotResult) 
                 "rows": rows[key],
                 "blockers": list(result.blockers),
             }
+            if key in {"player_rank_diffs", "team_rank_diffs"}:
+                scope = "player" if key.startswith("player") else "team"
+                payload["rank_coverage"] = dict(
+                    result.receipt.get("rank_coverage", {}).get(scope, {})
+                )
         else:
             payload = dict(result.receipt)
         path.write_text(
