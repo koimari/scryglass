@@ -1007,6 +1007,11 @@ def build_source_trust(
         "unfiltered_source_game_ids": list(raw_ids),
         "accepted_census": {
             **accepted,
+            # The training verifier uses the explicit source_* names.  Keep
+            # the standard census fields above for consumers that expect the
+            # compact accepted-census schema.
+            "source_game_count": len(accepted_ids),
+            "source_identity_sha256": identity_sha256(accepted_ids),
             "excluded_game_ids": list(excluded),
         },
         "model_eligible_census": {
@@ -1017,10 +1022,12 @@ def build_source_trust(
         "normalized_source_files": {
             label: source_files[label] for label in ("maps", "players", "teams")
         },
+        "source_file_records": dict(source_files),
         "oe_annual_sources": [
             {
                 "name": record["name"],
                 "year": record["year"],
+                "path": record["path"],
                 "bytes": record["bytes"],
                 "raw_sha256": record["sha256"],
                 "game_count": record.get("game_count"),
@@ -1030,6 +1037,7 @@ def build_source_trust(
         "oe_bridge_sources": [
             {
                 "name": record["name"],
+                "path": record["path"],
                 "bytes": record["bytes"],
                 "raw_sha256": record["sha256"],
             }
@@ -1040,6 +1048,7 @@ def build_source_trust(
         "reference_source_receipt_sha256": source.receipt["receipt_sha256"],
         "accepted_census_path": str(census_path),
         "accepted_census_file_sha256": census_record["sha256"],
+        "accepted_census_file": census_record,
         "stable_team_key_rows_sha256": stable_team_key_digest,
         "duplicate_resolution_required_bridge_game_ids": list(sorted(set(excluded) & set(KNOWN_DUPLICATE_BRIDGE_GAME_IDS))),
         "authority": dict(AUTHORITY),

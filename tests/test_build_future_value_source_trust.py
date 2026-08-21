@@ -17,6 +17,8 @@ from benchmarks.build_future_value_source_trust import (
     build_source_trust,
 )
 from lol_kills.research.future_value_rating import validate_future_value_source_receipt_payload
+from lol_kills.research.future_value_training import _load_freeze
+from lol_kills.research.future_value_training import verify_research_source
 
 
 def _write_json(path: Path, value: object) -> tuple[int, str]:
@@ -193,6 +195,40 @@ def test_build_source_trust_binds_all_identities_and_map_projection(tmp_path: Pa
     receipt = json.loads((output / SOURCE_RECEIPT_FILE).read_text())
     validate_future_value_source_receipt_payload(receipt)
     assert receipt["source_game_count"] == 2
+
+
+def test_source_trust_freeze_is_accepted_by_training_validator(tmp_path: Path) -> None:
+    root, values, _ = _make_fixture(tmp_path)
+    output = tmp_path / "out"
+    build_source_trust(
+        source_root=root,
+        output_root=output,
+        resolution_spec=values["spec"],
+        expected_unfiltered_count=3,
+        expected_accepted_count=2,
+    )
+    freeze = _load_freeze(output / FREEZE_FILE)
+    assert freeze["accepted_census"]["source_game_count"] == 2
+    assert freeze["accepted_census"]["source_identity_sha256"]
+
+
+def test_source_trust_round_trips_through_research_verifier(tmp_path: Path) -> None:
+    root, values, _ = _make_fixture(tmp_path)
+    output = tmp_path / "out"
+    run = build_source_trust(
+        source_root=root,
+        output_root=output,
+        resolution_spec=values["spec"],
+        expected_unfiltered_count=3,
+        expected_accepted_count=2,
+    )
+    verified = verify_research_source(
+        annual_root=root / "raw",
+        oe_root=root,
+        freeze_path=output / FREEZE_FILE,
+        output_root=tmp_path / "verified",
+    )
+    assert verified["source_receipt_sha256"] == run["source_receipt_sha256"]
 
 
 def test_source_trust_rejects_changed_audit_receipt(tmp_path: Path) -> None:

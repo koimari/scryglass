@@ -955,6 +955,43 @@ def _source_file_records(
     return records
 
 
+def _verified_v2_source_file_records(freeze: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Read the absolute source-file bindings carried by a v2 freeze."""
+
+    raw_records = freeze.get("source_file_records")
+    if not isinstance(raw_records, Mapping):
+        raise FutureValueTrainingError("v2 source freeze file records are missing")
+    required = {"maps", "players", "teams", "accepted_census"}
+    if not required.issubset(raw_records):
+        raise FutureValueTrainingError("v2 source freeze file records are incomplete")
+    records: dict[str, dict[str, Any]] = {}
+    for label, record in raw_records.items():
+        if not isinstance(label, str) or not label.strip():
+            raise FutureValueTrainingError("v2 source freeze file label is invalid")
+        if not isinstance(record, Mapping) or not isinstance(record.get("path"), str):
+            raise FutureValueTrainingError(f"v2 source freeze file path is invalid: {label}")
+        _path, _raw, normalized = _duplicate_file_record(
+            record,
+            label=f"v2 source file {label}",
+        )
+        if "year" in record:
+            normalized["year"] = record["year"]
+        records[label] = normalized
+    accepted_record = freeze.get("accepted_census_file")
+    if not isinstance(accepted_record, Mapping):
+        raise FutureValueTrainingError("v2 accepted census file binding is missing")
+    accepted_path, _raw, accepted_normalized = _duplicate_file_record(
+        accepted_record,
+        label="v2 accepted census file",
+    )
+    declared = records.get("accepted_census")
+    if declared is None or declared != accepted_normalized:
+        raise FutureValueTrainingError("v2 accepted census file binding changed")
+    if not accepted_path.is_file():
+        raise FutureValueTrainingError("v2 accepted census file is missing")
+    return records
+
+
 def _write_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -979,8 +1016,16 @@ def verify_research_source(
         "players": oe_root / "oe_player_games.parquet",
         "teams": oe_root / "oe_team_games.parquet",
     }
-    bridge_records = verify_bridge_sources(oe_root.parent, freeze)
-    source_files = _source_file_records(oe_root, annual_records, bridge_records)
+    bridge_root = oe_root / "bridge"
+    if not bridge_root.is_dir():
+        bridge_root = oe_root.parent
+    bridge_records = verify_bridge_sources(bridge_root, freeze)
+    if freeze.get("schema_version") == FREEZE_SCHEMA_V2_VERSION and freeze.get(
+        "source_file_records"
+    ) is not None:
+        source_files = _verified_v2_source_file_records(freeze)
+    else:
+        source_files = _source_file_records(oe_root, annual_records, bridge_records)
     maps = pd.read_parquet(paths["maps"])
     census = frozen_census(maps, freeze)
     try:
