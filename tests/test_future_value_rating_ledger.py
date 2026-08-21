@@ -324,11 +324,13 @@ def test_stable_player_id_preserves_state_across_display_rename() -> None:
     )
 
 
-def test_display_alias_collision_fails_closed() -> None:
+def test_display_name_reuse_across_stable_player_ids_does_not_merge_state() -> None:
     maps, players, teams, receipt = _source()
     broken = players.copy()
     broken.loc[broken["game_uid"].eq("g3") & broken["position"].eq("top"), "playername"] = (
         players.loc[players["game_uid"].eq("g1") & players["position"].eq("top"), "playername"].iloc[0]
     )
-    with pytest.raises(CurrentRatingLedgerError, match="alias collision"):
-        _build(maps, broken, teams, receipt)
+    ledger, artifact = _build(maps, broken, teams, receipt)
+    assert len(ledger) == len(GAME_IDS)
+    assert artifact["state_key_policy"]["player"] == "stable_oe_player_id"
+    assert artifact["state_key_policy"]["display_alias_reuse"] == "allowed_with_stable_keys"

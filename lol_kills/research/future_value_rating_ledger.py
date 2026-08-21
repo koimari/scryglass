@@ -115,7 +115,7 @@ _RECEIPT_STATE_KEY_POLICY = {
     "team": "stable_oe_team_id",
     "player": "stable_oe_player_id",
     "display_names": "metadata_only",
-    "alias_collision": "fail_closed",
+    "display_alias_reuse": "allowed_with_stable_keys",
 }
 
 
@@ -267,61 +267,6 @@ def _identity_text(value: Any) -> str:
     return str(value).strip()
 
 
-def _validate_display_identity_mappings(
-    players: pd.DataFrame,
-    teams: pd.DataFrame,
-    maps: pd.DataFrame | None = None,
-) -> None:
-    """Reject one display alias that names more than one stable entity.
-
-    A stable ID may receive a new display name over time.  A display name may
-    not resolve to two stable IDs in one replay.  State keys therefore remain
-    stable when an OE display name changes, while ambiguous aliases fail closed.
-    """
-
-    player_aliases: dict[str, set[str]] = defaultdict(set)
-    team_aliases: dict[str, set[str]] = defaultdict(set)
-    for frame, id_column, name_column, aliases, prefix, label in (
-        (players, "playerid", "playername", player_aliases, "oe:player:", "player"),
-        (players, "teamid", "teamname", team_aliases, "oe:team:", "team"),
-        (teams, "teamid", "teamname", team_aliases, "oe:team:", "team"),
-    ):
-        if id_column not in frame.columns or name_column not in frame.columns:
-            continue
-        for identity, display in zip(frame[id_column], frame[name_column]):
-            stable = _identity_text(identity)
-            alias = _identity_text(display)
-            if not stable.startswith(prefix) or not alias:
-                continue
-            if label == "team":
-                alias = normalize_team(alias).casefold()
-            else:
-                alias = alias.casefold()
-            if alias and alias not in {"nan", "none", "<na>"}:
-                aliases[alias].add(stable)
-    if maps is not None:
-        team_ids_by_game_side = _stable_team_ids_by_game_side(players)
-        map_ids = _game_ids(maps, "maps").astype(str)
-        blue_column = "blue_team" if "blue_team" in maps.columns else "blue_teamname"
-        red_column = "red_team" if "red_team" in maps.columns else "red_teamname"
-        for gid, row in zip(map_ids, maps.to_dict(orient="records")):
-            for side, column in (("Blue", blue_column), ("Red", red_column)):
-                stable = team_ids_by_game_side.get((str(gid), side), "")
-                alias = _identity_text(row.get(column))
-                if stable and alias:
-                    team_aliases[normalize_team(alias).casefold()].add(stable)
-    collisions = [
-        (alias, sorted(ids))
-        for alias, ids in (*player_aliases.items(), *team_aliases.items())
-        if len(ids) > 1
-    ]
-    if collisions:
-        alias, identities = sorted(collisions, key=lambda item: item[0])[0]
-        raise CurrentRatingLedgerError(
-            f"stable identity alias collision: {alias}: {', '.join(identities)}"
-        )
-
-
 def _stable_team_ids_by_game_side(players: pd.DataFrame) -> dict[tuple[str, str], str]:
     """Map each map-side to its stable OE team ID."""
 
@@ -445,7 +390,6 @@ def _validate_source_frames(
     map_work = map_work.loc[map_work["__game_id"].isin(requested)].copy()
     player_work = player_work.loc[player_work["__game_id"].isin(requested)].copy()
     team_work = team_work.loc[team_work["__game_id"].isin(requested)].copy()
-    _validate_display_identity_mappings(player_work, team_work, map_work)
     if not player_work.groupby("__game_id", sort=False).size().reindex(sorted(requested), fill_value=0).eq(10).all():
         raise CurrentRatingLedgerError("players do not contain exactly ten rows per eligible map")
     if not team_work.groupby("__game_id", sort=False).size().reindex(sorted(requested), fill_value=0).eq(2).all():
@@ -457,7 +401,7 @@ def _validate_source_frames(
         names = group["playername"].astype("string").str.strip()
         ids = group["playerid"].astype("string").str.strip()
         tids = group["teamid"].astype("string").str.strip()
-        if names.isna().any() or names.eq("").any() or names.str.casefold().isin({"nan", "none", "<na>"}).any() or names.nunique() != 10:
+        if names.isna().any() or names.eq("").any() or names.str.casefold().isin({"nan", "none", "<na>"}).any():
             raise CurrentRatingLedgerError(f"player names are incomplete for {gid}")
         if (
             ids.isna().any()
@@ -668,33 +612,41 @@ def _player_replay(
     )
     stable_lineups = _stable_player_lineups(source_players)
     team_ids = _stable_team_ids_by_game_side(source_players)
-    attribution_by_name, _ = player_attribution_multipliers(
-        attribution_metrics, cfg, baseline_cache=None
-    )
-    name_to_player_id: dict[tuple[str, str, str], str] = {}
+    stable_by_slot: dict[tuple[str, str, str], str] = {}
     player_gids = _game_ids(source_players, "players").astype(str)
     player_work = source_players.copy()
     player_work["__gid"] = player_gids.to_numpy()
     player_work["__side"] = player_work["side"].astype("string").str.strip().str.title()
-    player_work["__name"] = player_work["playername"].map(_identity_text)
     player_work["__player_id"] = player_work["playerid"].map(_identity_text)
-    for row in player_work[["__gid", "__side", "__name", "__player_id"]].itertuples(
+    player_work["__role"] = player_work["position"].map(_norm_role)
+    for row in player_work[["__gid", "__side", "__role", "__player_id"]].itertuples(
         index=False, name=None
     ):
-        gid, side, name, player_id = (str(value) for value in row)
-        key = (gid, side, name)
-        if not name or not player_id or (key in name_to_player_id and name_to_player_id[key] != player_id):
+        gid, side, role, player_id = (str(value) for value in row)
+        key = (gid, side, role)
+        if not role or not player_id or (key in stable_by_slot and stable_by_slot[key] != player_id):
             raise CurrentRatingLedgerError(
-                f"player display identity is unstable for {gid} {side} {name}"
+                f"stable player identity is unstable for {gid} {side} {role}"
             )
-        name_to_player_id[key] = player_id
-    attribution: dict[tuple[str, str, str], float] = {}
-    for (gid, side, name), multiplier in attribution_by_name.items():
-        player_id = name_to_player_id.get((str(gid), str(side), str(name)))
+        stable_by_slot[key] = player_id
+    attribution_metrics = attribution_metrics.copy()
+    stable_metric_ids: list[str] = []
+    for row in attribution_metrics[["_gid", "side", "_role"]].itertuples(
+        index=False, name=None
+    ):
+        gid, side, role = (str(value) for value in row)
+        player_id = stable_by_slot.get((gid, side, role))
         if not player_id:
             raise CurrentRatingLedgerError(
-                f"player attribution identity is unresolved for {gid} {side} {name}"
+                f"player attribution identity is unresolved for {gid} {side} {role}"
             )
+        stable_metric_ids.append(player_id)
+    attribution_metrics["_name"] = stable_metric_ids
+    attribution_by_id, _ = player_attribution_multipliers(
+        attribution_metrics, cfg, baseline_cache=None
+    )
+    attribution: dict[tuple[str, str, str], float] = {}
+    for (gid, side, player_id), multiplier in attribution_by_id.items():
         attribution[(str(gid), str(side), player_id)] = float(multiplier)
     states: dict[str, PlayerState] = {}
     rows: list[dict[str, Any]] = []
