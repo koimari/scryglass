@@ -11,6 +11,7 @@ from benchmarks.future_value_four_variant_bundle import (
     FourVariantBundleError,
     _derive_inner_fold_spec,
     _prepare_inner_output_root,
+    build_bundle,
 )
 
 
@@ -59,3 +60,17 @@ def test_nested_output_root_fails_closed_when_reused(tmp_path: Path) -> None:
     with pytest.raises(FourVariantBundleError, match="must be empty"):
         _prepare_inner_output_root(root)
 
+
+def test_bundle_requires_complete_crosswalk_binding(tmp_path: Path) -> None:
+    source_receipt = tmp_path / "source-receipt.json"
+    source_receipt.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(
+        FourVariantBundleError, match="crosswalk inputs must be supplied together"
+    ):
+        build_bundle(
+            source_root=tmp_path,
+            source_receipt_path=source_receipt,
+            folds_root=tmp_path,
+            crosswalk_path=tmp_path / "crosswalk.json",
+        )

@@ -22,6 +22,7 @@ from lol_kills.research.future_value_rating import (
     RATING_VARIANT_ORDER,
     SCALING_CURVE_SIGNED_MAP_FEATURES,
     _map_model_frame,
+    bind_verified_leaguepedia_series_crosswalk,
     bind_rating_feature_ledger,
     build_rating_feature_producer_manifest,
     chronological_whole_series_folds,
@@ -460,13 +461,42 @@ def build_bundle(
     source_receipt_path: Path,
     folds_root: Path,
     inner_output_root: Path | None = None,
+    crosswalk_path: Path | None = None,
+    crosswalk_receipt_path: Path | None = None,
+    crosswalk_receipt_file_sha256: str | None = None,
 ) -> dict[str, Any]:
+    crosswalk_values = (
+        crosswalk_path,
+        crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256,
+    )
+    if any(value is not None for value in crosswalk_values) and not all(
+        value is not None for value in crosswalk_values
+    ):
+        raise FourVariantBundleError("crosswalk inputs must be supplied together")
     source_receipt = _load_json(source_receipt_path, "source receipt")
     validate_future_value_source_receipt_payload(source_receipt)
     maps = pd.read_parquet(source_root / "maps.parquet")
     players = pd.read_parquet(source_root / "oe_player_games.parquet")
     teams = pd.read_parquet(source_root / "oe_team_games.parquet")
-    model_frame = _map_model_frame(maps)
+    if crosswalk_path is not None and crosswalk_receipt_path is not None:
+        maps = bind_verified_leaguepedia_series_crosswalk(
+            maps,
+            crosswalk_path=crosswalk_path,
+            receipt_path=crosswalk_receipt_path,
+            source_receipt=source_receipt,
+            expected_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+        )
+        model_frame = _map_model_frame(
+            maps,
+            verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+            verified_source_receipt=source_receipt,
+            verified_crosswalk_receipt_file_sha256=str(
+                crosswalk_receipt_file_sha256
+            ),
+        )
+    else:
+        model_frame = _map_model_frame(maps)
     eligible_ids = tuple(sorted(str(value) for value in source_receipt["model_eligible_game_ids"]))
     model_frame = model_frame[model_frame["game_id"].astype(str).isin(eligible_ids)].copy()
     if tuple(sorted(model_frame["game_id"].astype(str))) != eligible_ids:
@@ -644,6 +674,9 @@ def build_bundle(
             ],
             "source_receipt_sha256": source_receipt["receipt_sha256"],
             "source_receipt_file_sha256": _sha256_path(source_receipt_path),
+            "series_partition": dict(
+                model_frame.attrs.get("series_cluster_audit") or {}
+            ),
         },
         "fold_receipts": fold_receipts,
         "nested_inner": {
@@ -680,6 +713,9 @@ def main() -> int:
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--source-receipt", required=True, type=Path)
     parser.add_argument("--folds-root", required=True, type=Path)
+    parser.add_argument("--crosswalk", type=Path, default=None)
+    parser.add_argument("--crosswalk-receipt", type=Path, default=None)
+    parser.add_argument("--crosswalk-receipt-file-sha256", default=None)
     parser.add_argument(
         "--inner-output-root",
         type=Path,
@@ -700,6 +736,13 @@ def main() -> int:
         inner_output_root=(
             None if args.inner_output_root is None else args.inner_output_root.resolve()
         ),
+        crosswalk_path=(None if args.crosswalk is None else args.crosswalk.resolve()),
+        crosswalk_receipt_path=(
+            None
+            if args.crosswalk_receipt is None
+            else args.crosswalk_receipt.resolve()
+        ),
+        crosswalk_receipt_file_sha256=args.crosswalk_receipt_file_sha256,
     )
     output.write_bytes(_canonical_bytes(payload))
     print(
