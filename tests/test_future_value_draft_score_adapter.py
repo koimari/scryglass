@@ -3,30 +3,30 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import shutil
 
+import pandas as pd
 import pytest
 
-from lol_kills.research.future_value_draft_score import (
-    DraftScoreProducerBinding,
-    FutureValueDraftScoreError,
-    validate_producer_binding,
-)
 from lol_kills.research.future_value_draft_score_adapter import (
+    DEFAULT_TRUST_ROOT_FILE_SHA256,
     DraftScoreAdapterError,
     adapt_public_crossfit_draft_rows,
-    adapt_public_descriptive_draft_records,
     adapt_verified_public_descriptive_draft_records,
+    load_default_public_draft_trust_root,
     load_source_bound_atom_ledger,
     verify_public_descriptive_authority,
     write_source_bound_atom_ledger,
 )
-from lol_kills.v2.tierlists.accepted_census import identity_sha256
+
+
+RELEASE_ID = "v2026.08.20.210112"
+FREEZE = Path("/private/tmp/scryglass-four-variant-freeze-20260820T145129")
 
 
 def _sha(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(value, allow_nan=False, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    raw = json.dumps(value, allow_nan=False, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _write_json(path: Path, value: object) -> bytes:
@@ -36,745 +36,243 @@ def _write_json(path: Path, value: object) -> bytes:
     return raw
 
 
-def _manifest_kwargs(manifest_path: Path) -> dict[str, object]:
-    receipt_path = manifest_path.parent / "freeze-manifest.json"
-    return {
-        "manifest_receipt_path": receipt_path,
-        "expected_manifest_receipt_sha256": hashlib.sha256(
-            receipt_path.read_bytes()
-        ).hexdigest(),
-    }
+def _repository_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
 
-def _reseal_manifest_receipt(manifest_path: Path, draft_path: Path) -> None:
-    receipt_path = manifest_path.parent / "freeze-manifest.json"
-    receipt = json.loads(receipt_path.read_text())
-    for record in receipt["files"]:
-        candidate = receipt_path.parent / record["path"]
-        if candidate.resolve() in {manifest_path.resolve(), draft_path.resolve()}:
-            record["bytes"] = candidate.stat().st_size
-            record["sha256"] = hashlib.sha256(candidate.read_bytes()).hexdigest()
-    receipt.pop("freeze_sha256", None)
-    receipt["freeze_sha256"] = _sha(receipt)
-    _write_json(receipt_path, receipt)
-
-
-def _authority_kwargs(
-    authority_path: Path,
-    *,
-    repository_root: Path,
-    output_dir: Path,
-) -> dict[str, object]:
-    authority = json.loads(authority_path.read_text())
-    paths = {
-        "model": repository_root / authority["artifact_path"],
-        "recipe": repository_root / authority["recipe_path"],
-        "scorer": repository_root / authority["scorer_code_path"],
-    }
-    receipt = {
-        "schema_version": "scryglass:draft-authority-receipt:v1",
-        "authority_locator": str(authority_path.resolve()),
-        "authority_bytes": authority_path.stat().st_size,
-        "authority_sha256": hashlib.sha256(authority_path.read_bytes()).hexdigest(),
-        "authority_id": authority["authority_id"],
-        "model_version": authority["model_version"],
-        "model_locator": str(paths["model"].resolve()),
-        "model_bytes": paths["model"].stat().st_size,
-        "model_sha256": hashlib.sha256(paths["model"].read_bytes()).hexdigest(),
-        "recipe_locator": str(paths["recipe"].resolve()),
-        "recipe_bytes": paths["recipe"].stat().st_size,
-        "recipe_sha256": hashlib.sha256(paths["recipe"].read_bytes()).hexdigest(),
-        "scorer_locator": str(paths["scorer"].resolve()),
-        "scorer_bytes": paths["scorer"].stat().st_size,
-        "scorer_sha256": hashlib.sha256(paths["scorer"].read_bytes()).hexdigest(),
-        "authority": {
-            "research_only": True,
-            "public_probability": False,
-            "deployment": False,
-        },
-    }
-    receipt["receipt_sha256"] = _sha(receipt)
-    receipt_path = output_dir / "authority-receipt.json"
-    _write_json(receipt_path, receipt)
-    return {
-        "authority_receipt_path": receipt_path,
-        "expected_authority_file_sha256": hashlib.sha256(
-            authority_path.read_bytes()
-        ).hexdigest(),
-    }
-
-
-def _public_files(
-    tmp_path: Path,
-    *,
-    fit_through: str = "2026-02-03T00:00:00Z",
-    ids: list[str] | None = None,
-    draft_ids: list[str] | None = None,
-) -> tuple[Path, Path, Path]:
-    ids = ids or ["game-1", "game-2"]
-    draft_ids = draft_ids or ids
-    source_file = tmp_path / "accepted-census.csv"
-    source_raw = b"game-1\ngame-2\n"
-    source_file.write_bytes(source_raw)
-    source = {
-        "schema_version": "scryglass:future-value-rating-source:v1",
-        "status": "verified_public_pack_source",
-        "source_as_of": "2026-02-03T00:00:00Z",
-        "source_game_count": len(ids),
-        "source_identity_sha256": identity_sha256(ids),
-        "accepted_game_ids": ids,
-        "source_files": {
-            "accepted_census": {
-                "locator": source_file.name,
-                "bytes": len(source_raw),
-                "sha256": hashlib.sha256(source_raw).hexdigest(),
-            }
-        },
-        "authority": {"research_only": True},
-    }
-    source["receipt_sha256"] = _sha(source)
-    source_path = _write_json(tmp_path / "source-receipt.json", source)
-    source_receipt_path = tmp_path / "source-receipt.json"
-    assert source_path
-
-    games = {
-        game_id: {
-            "date": "2026-02-02T00:00:00Z",
-            "edge_components": {
-                "base": 1.0 if game_id == "game-1" else 2.0,
-                "ally_synergy": 2.0,
-                "enemy_counter": 3.0,
-                "same_role": 4.0,
-                "archetype_interactions": 5.0,
-                "total": 15.0 if game_id == "game-1" else 16.0,
-            },
-        }
-        for game_id in draft_ids
-    }
-    draft = {
-        "schema_version": "scryglass:draft-records:v1",
-        "authority": "descriptive",
-        "estimand": "composition_only",
-        "model_version": "draft-recommendation-static-v2",
-        "fit_through": fit_through,
-        "source_identity_sha256": source["source_identity_sha256"],
-        "release_id": "v2026.02.03.000001",
-        "games": games,
-    }
-    draft_path = tmp_path / "features" / "draft_records.json"
-    draft_raw = _write_json(draft_path, draft)
-    manifest = {
-        "pack_id": "v2026.02.03.000001",
-        "source_identity_sha256": source["source_identity_sha256"],
-        "files": [
-            {
-                "path": "features/draft_records.json",
-                "bytes": len(draft_raw),
-                "sha256": hashlib.sha256(draft_raw).hexdigest(),
-            }
-        ],
-    }
-    manifest_path = tmp_path / "manifest.json"
-    _write_json(manifest_path, manifest)
-    freeze = {
-        "schema_version": "scryglass:future-value-four-variant-freeze:v1",
-        "status": "frozen_research_inputs",
-        "variant": "fixture",
-        "release_id": manifest["pack_id"],
-        "source_as_of": source["source_as_of"],
-        "source_game_count": source["source_game_count"],
-        "source_identity_sha256": source["source_identity_sha256"],
-        "source_receipt_sha256": source["receipt_sha256"],
-        "accepted_game_ids_sha256": identity_sha256(ids),
-        "authority": {
-            "research_only": True,
-            "public": False,
-            "probability": False,
-            "deployment": False,
-        },
-        "files": [
-            {
-                "path": manifest_path.name,
-                "bytes": manifest_path.stat().st_size,
-                "sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-            },
-            {
-                "path": draft_path.relative_to(tmp_path).as_posix(),
-                "bytes": len(draft_raw),
-                "sha256": hashlib.sha256(draft_raw).hexdigest(),
-            },
-        ],
-    }
-    freeze["freeze_sha256"] = _sha(freeze)
-    _write_json(tmp_path / "freeze-manifest.json", freeze)
-    return draft_path, manifest_path, source_receipt_path
-
-
-def test_public_descriptive_adapter_converts_real_five_component_edges(tmp_path: Path) -> None:
-    draft_path, manifest_path, source_path = _public_files(tmp_path)
-    result = adapt_public_descriptive_draft_records(
-        draft_path,
-        manifest_path,
-        source_path,
-        **_manifest_kwargs(manifest_path),
-        output_dir=tmp_path / "adapter",
+@pytest.fixture(scope="module")
+def real_result(tmp_path_factory: pytest.TempPathFactory):
+    required = (
+        FREEZE / "freeze-manifest.json",
+        FREEZE / "future-value-source-receipt.json",
+        FREEZE / "baseline/public-pack/manifest.json",
+        FREEZE / "baseline/public-pack/features/draft_records.json",
+        FREEZE / "source/maps.parquet",
     )
-    assert list(result.frame["game_id"]) == ["game-1", "game-2"]
-    assert [column for column in result.frame if column.startswith("composition_")] == [
-        "composition_base_logit",
-        "composition_ally_synergy_logit",
-        "composition_enemy_counter_logit",
-        "composition_same_role_logit",
-        "composition_archetype_interactions_logit",
-    ]
-    assert result.frame.loc[0, "composition_enemy_counter_logit"] == 3.0
-    assert result.chronological_evaluation_suitable is False
-    assert result.static_atom_receipt_path.is_file()
-    assert result.static_atom_receipt["source_receipt_sha256"] == json.loads(source_path.read_text())["receipt_sha256"]
-
-
-def test_public_descriptive_adapter_rejects_manifest_hash_mutation(tmp_path: Path) -> None:
-    draft_path, manifest_path, source_path = _public_files(tmp_path)
-    draft_path.write_text(draft_path.read_text() + "\n", encoding="utf-8")
-    with pytest.raises(DraftScoreAdapterError, match="bytes or SHA-256"):
-        adapt_public_descriptive_draft_records(
-            draft_path,
-            manifest_path,
-            source_path,
-            **_manifest_kwargs(manifest_path),
-        )
-
-
-def test_public_descriptive_adapter_rejects_self_sealed_source_fields(tmp_path: Path) -> None:
-    draft_path, manifest_path, source_path = _public_files(tmp_path)
-    source = json.loads(source_path.read_text())
-    source["forged_by"] = "attacker"
-    source["receipt_sha256"] = _sha({key: value for key, value in source.items() if key != "receipt_sha256"})
-    _write_json(source_path, source)
-    with pytest.raises(DraftScoreAdapterError, match="unknown fields"):
-        adapt_public_descriptive_draft_records(
-            draft_path,
-            manifest_path,
-            source_path,
-            **_manifest_kwargs(manifest_path),
-        )
-
-    source.pop("forged_by")
-    source.pop("authority")
-    source["receipt_sha256"] = _sha({key: value for key, value in source.items() if key != "receipt_sha256"})
-    _write_json(source_path, source)
-    with pytest.raises(DraftScoreAdapterError, match="incomplete"):
-        adapt_public_descriptive_draft_records(
-            draft_path,
-            manifest_path,
-            source_path,
-            **_manifest_kwargs(manifest_path),
-        )
-
-
-def test_public_descriptive_adapter_rejects_symlinked_source_artifact(tmp_path: Path) -> None:
-    draft_path, manifest_path, source_path = _public_files(tmp_path)
-    target = tmp_path / "real-census.csv"
-    target.write_bytes(b"game-1\ngame-2\n")
-    link = tmp_path / "linked-census.csv"
-    link.symlink_to(target)
-    source = json.loads(source_path.read_text())
-    source["source_files"]["accepted_census"]["locator"] = link.name
-    source["source_files"]["accepted_census"]["sha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
-    source["receipt_sha256"] = _sha({key: value for key, value in source.items() if key != "receipt_sha256"})
-    _write_json(source_path, source)
-    with pytest.raises(DraftScoreAdapterError, match="unsafe|symlink"):
-        adapt_public_descriptive_draft_records(
-            draft_path,
-            manifest_path,
-            source_path,
-            **_manifest_kwargs(manifest_path),
-        )
-
-
-def test_frozen_public_pack_adapts_as_coverage_scoped_evidence(tmp_path: Path) -> None:
-    freeze = Path("/private/tmp/scryglass-four-variant-freeze-20260820T145129")
-    draft_path = freeze / "baseline/public-pack/features/draft_records.json"
-    manifest_path = freeze / "baseline/public-pack/manifest.json"
-    source_path = freeze / "future-value-source-receipt.json"
-    if not all(path.is_file() for path in (draft_path, manifest_path, source_path)):
-        pytest.skip("frozen public pack is unavailable")
-    repository_root = Path(__file__).resolve().parents[1]
-    authority_path = repository_root / "data/lol/v2/evaluation/composition-descriptive-authority.json"
-    authority_kwargs = _authority_kwargs(
-        authority_path,
-        repository_root=repository_root,
-        output_dir=tmp_path,
+    if not all(path.is_file() for path in required):
+        pytest.skip("frozen four-variant pack is unavailable")
+    return adapt_verified_public_descriptive_draft_records(
+        required[3], required[2], required[1],
+        manifest_receipt_path=required[0], release_id=RELEASE_ID,
+        repository_root=_repository_root(), source_root=FREEZE,
+        output_dir=tmp_path_factory.mktemp("draft-adapter"),
     )
-    freeze_receipt_path = freeze / "freeze-manifest.json"
-    result = adapt_verified_public_descriptive_draft_records(
-        draft_path,
-        manifest_path,
-        source_path,
-        authority_path=authority_path,
-        **authority_kwargs,
-        manifest_receipt_path=freeze_receipt_path,
-        expected_manifest_receipt_sha256=hashlib.sha256(
-            freeze_receipt_path.read_bytes()
-        ).hexdigest(),
-        repository_root=repository_root,
-        output_dir=tmp_path / "adapter",
-        source_root=freeze,
-    )
-    assert 0 < len(result.frame) < result.source_receipt["source_game_count"]
-    assert result.static_atom_receipt["coverage_game_count"] == len(result.frame)
-    assert result.static_atom_receipt["coverage_game_ids"] == list(result.frame["game_id"])
-    assert result.chronological_evaluation_suitable is False
-    authority = verify_public_descriptive_authority(
-        authority_path,
-        **authority_kwargs,
-        repository_root=repository_root,
-    )
+
+
+def _authority():
+    return verify_public_descriptive_authority(repository_root=_repository_root())
+
+
+def _fit_evidence(result) -> tuple[str, str, str]:
+    scored = set(result.frame["game_id"].astype(str))
+    maps = pd.read_parquet(FREEZE / "source/maps.parquet", columns=["game_uid", "date"])
+    row = maps.loc[~maps["game_uid"].astype(str).isin(scored)].iloc[0]
+    game_id = str(row["game_uid"])
+    date = pd.Timestamp(row["date"]).isoformat().replace("+00:00", "Z")
+    cutoff = (pd.Timestamp(row["date"]) + pd.Timedelta(days=1)).isoformat().replace("+00:00", "Z")
+    return game_id, date, cutoff
+
+
+def _write_fit_ledger(result, tmp_path: Path):
+    game_id, date, cutoff = _fit_evidence(result)
     ledger = write_source_bound_atom_ledger(
-        result,
-        tmp_path / "real-pack-atoms.json",
-        authority=authority,
-        fold_id="descriptive-public-pack",
-        fit_game_ids=[],
-        fit_window_end="2026-07-18T16:33:48Z",
+        result, tmp_path / "atoms.json", authority=_authority(),
+        fold_id="descriptive-public-pack", fit_game_ids=[game_id],
+        fit_window_end=cutoff, fit_game_dates={game_id: date},
     )
-    assert ledger.row_count == len(result.frame)
-    assert ledger.receipt["evidence_mode"] == "descriptive_only"
-    loaded = load_source_bound_atom_ledger(
-        ledger.ledger_path,
-        ledger.receipt_path,
+    return ledger, game_id, date, cutoff
+
+
+def _load(ledger, result):
+    return load_source_bound_atom_ledger(
+        ledger.ledger_path, ledger.receipt_path,
         source_receipt=result.source_receipt,
-        authority=authority,
+        source_receipt_path=result.source_receipt_path,
+        source_root=result.source_root, authority=_authority(),
         expected_fold_id="descriptive-public-pack",
     )
-    assert len(loaded) == 2051
-    with pytest.raises(DraftScoreAdapterError, match="fit and scored"):
-        write_source_bound_atom_ledger(
-            result,
-            tmp_path / "invalid-overlap-atoms.json",
-            authority=authority,
-            fold_id="invalid-overlap",
-            fit_game_ids=[str(result.frame.iloc[0]["game_id"])],
-            fit_window_end="2026-07-18T16:33:48Z",
-            fit_game_dates={
-                str(result.frame.iloc[0]["game_id"]): "2026-01-01T00:00:00Z"
-            },
-        )
 
 
-def test_independent_descriptive_authority_binds_model_recipe_and_scorer(tmp_path: Path) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    authority_path = repository_root / "data/lol/v2/evaluation/composition-descriptive-authority.json"
-    result = verify_public_descriptive_authority(
-        authority_path,
-        **_authority_kwargs(
-            authority_path,
-            repository_root=repository_root,
-            output_dir=tmp_path,
-        ),
-        repository_root=repository_root,
-    )
-    assert result.model_sha256 == "3a42542710e8a61f11f740ff85965d7f4541724575c3dc7fd063872b7a0c71fe"
-    assert result.recipe_sha256
-    assert result.scorer_sha256
-    assert result.authority_receipt_sha256
-
-
-def test_authority_receipt_rejects_resealed_fields_and_unpinned_file(
-    tmp_path: Path,
-) -> None:
-    repository_root = Path(__file__).resolve().parents[1]
-    authority_path = (
-        repository_root / "data/lol/v2/evaluation/composition-descriptive-authority.json"
-    )
-    authority_kwargs = _authority_kwargs(
-        authority_path,
-        repository_root=repository_root,
-        output_dir=tmp_path,
-    )
-    receipt_path = Path(authority_kwargs["authority_receipt_path"])
-    receipt = json.loads(receipt_path.read_text())
-    receipt["forged_by"] = "attacker"
-    receipt.pop("receipt_sha256")
+def _reseal_ledger(ledger, *, producer_mutation=None, ledger_mutation=None, receipt_mutation=None):
+    producer = json.loads(ledger.producer_receipt_path.read_text())
+    artifact = json.loads(ledger.ledger_path.read_text())
+    receipt = json.loads(ledger.receipt_path.read_text())
+    if producer_mutation:
+        producer_mutation(producer)
+    producer.pop("receipt_sha256", None)
+    producer["receipt_sha256"] = _sha(producer)
+    producer_raw = _write_json(ledger.producer_receipt_path, producer)
+    for payload in (artifact, receipt):
+        payload["producer_receipt_sha256"] = producer["receipt_sha256"]
+        payload["producer_receipt_bytes"] = len(producer_raw)
+        payload["producer_receipt_file_sha256"] = hashlib.sha256(producer_raw).hexdigest()
+    if ledger_mutation:
+        ledger_mutation(artifact)
+    artifact_raw = _write_json(ledger.ledger_path, artifact)
+    if receipt_mutation:
+        receipt_mutation(receipt)
+    receipt["artifact_bytes"] = len(artifact_raw)
+    receipt["artifact_sha256"] = hashlib.sha256(artifact_raw).hexdigest()
+    receipt.pop("receipt_sha256", None)
     receipt["receipt_sha256"] = _sha(receipt)
-    _write_json(receipt_path, receipt)
-    with pytest.raises(DraftScoreAdapterError, match="receipt schema"):
-        verify_public_descriptive_authority(
-            authority_path,
-            **authority_kwargs,
-            repository_root=repository_root,
-        )
-    restored = _authority_kwargs(
-        authority_path,
-        repository_root=repository_root,
-        output_dir=tmp_path,
-    )
-    with pytest.raises(DraftScoreAdapterError, match="authority file changed"):
-        verify_public_descriptive_authority(
-            authority_path,
-            authority_receipt_path=restored["authority_receipt_path"],
-            expected_authority_file_sha256="f" * 64,
-            repository_root=repository_root,
-        )
+    _write_json(ledger.receipt_path, receipt)
 
 
-def test_manifest_and_asset_cannot_be_resealed_together(tmp_path: Path) -> None:
-    draft_path, manifest_path, source_path = _public_files(tmp_path)
-    immutable_manifest_receipt = _manifest_kwargs(manifest_path)
-    draft = json.loads(draft_path.read_text())
-    draft["games"]["game-1"]["edge_components"]["base"] += 0.5
-    draft["games"]["game-1"]["edge_components"]["total"] += 0.5
-    draft_raw = _write_json(draft_path, draft)
-    manifest = json.loads(manifest_path.read_text())
-    manifest["files"][0]["bytes"] = len(draft_raw)
-    manifest["files"][0]["sha256"] = hashlib.sha256(draft_raw).hexdigest()
-    _write_json(manifest_path, manifest)
-    _reseal_manifest_receipt(manifest_path, draft_path)
-    with pytest.raises(DraftScoreAdapterError, match="manifest receipt file changed"):
-        adapt_public_descriptive_draft_records(
-            draft_path,
-            manifest_path,
-            source_path,
-            **immutable_manifest_receipt,
-        )
+def test_checked_in_trust_root_and_authority_are_byte_pinned() -> None:
+    root = load_default_public_draft_trust_root(_repository_root())
+    assert root.trust_root_file_sha256 == DEFAULT_TRUST_ROOT_FILE_SHA256
+    assert hashlib.sha256(root.trust_root_path.read_bytes()).hexdigest() == DEFAULT_TRUST_ROOT_FILE_SHA256
+    authority = _authority()
+    assert authority.model_version == "draft-recommendation-static-v2"
+    assert authority.model_sha256 == "3a42542710e8a61f11f740ff85965d7f4541724575c3dc7fd063872b7a0c71fe"
+    assert authority.authority_receipt_sha256 == "7f6e1a538912b15a021fe90425c5efa4fb91dd88b5be1de0bbb12b1230da0ebd"
 
 
-def test_verified_adapter_writes_source_bound_atom_ledger(tmp_path: Path) -> None:
-    draft_path, manifest_path, source_path = _public_files(
-        tmp_path,
-        fit_through="2026-02-01T00:00:00Z",
-        ids=["fit-0", "game-1", "game-2"],
-        draft_ids=["game-1", "game-2"],
-    )
-    model_path = tmp_path / "model.json"
-    recipe_path = tmp_path / "recipe.json"
-    scorer_path = tmp_path / "scorer.py"
-    model_raw = b"{\"model\":\"fixture\"}\n"
-    recipe_raw = b"{\"recipe\":\"fixture\"}\n"
-    scorer_raw = b"# fixture scorer\n"
-    model_path.write_bytes(model_raw)
-    recipe_path.write_bytes(recipe_raw)
-    scorer_path.write_bytes(scorer_raw)
-    draft = json.loads(draft_path.read_text())
-    draft["artifact_sha256"] = hashlib.sha256(model_raw).hexdigest()
-    draft_path.write_bytes(_write_json(draft_path, draft))
-    manifest = json.loads(manifest_path.read_text())
-    manifest["files"][0]["bytes"] = draft_path.stat().st_size
-    manifest["files"][0]["sha256"] = hashlib.sha256(draft_path.read_bytes()).hexdigest()
-    _write_json(manifest_path, manifest)
-    _reseal_manifest_receipt(manifest_path, draft_path)
-    authority = {
-        "schema_version": "scryglass:draft-authority:v1",
-        "authority_id": "fixture-descriptive-authority",
-        "status": "descriptive",
-        "estimand": "composition_only",
-        "model_version": "draft-recommendation-static-v2",
-        "artifact_path": model_path.name,
-        "artifact_sha256": hashlib.sha256(model_raw).hexdigest(),
-        "recipe_path": recipe_path.name,
-        "recipe_sha256": hashlib.sha256(recipe_raw).hexdigest(),
-        "scorer_code_path": scorer_path.name,
-        "scorer_code_sha256": hashlib.sha256(scorer_raw).hexdigest(),
-        "probability_authority": False,
-        "recommendation_authority": False,
-        "betting_authority": False,
-    }
-    authority_path = tmp_path / "authority.json"
-    _write_json(authority_path, authority)
-    authority_kwargs = _authority_kwargs(
-        authority_path,
-        repository_root=tmp_path,
-        output_dir=tmp_path,
-    )
-    result = adapt_verified_public_descriptive_draft_records(
-        draft_path,
-        manifest_path,
-        source_path,
-        authority_path=authority_path,
-        **authority_kwargs,
-        **_manifest_kwargs(manifest_path),
-        repository_root=tmp_path,
-        output_dir=tmp_path / "adapter",
-    )
-    ledger = write_source_bound_atom_ledger(
-        result,
-        tmp_path / "ledger" / "atoms.json",
-        authority=verify_public_descriptive_authority(
-            authority_path,
-            **authority_kwargs,
-            repository_root=tmp_path,
-        ),
-        fold_id="fold-1",
-        fit_game_ids=["fit-0"],
-        fit_window_start="2026-01-30T00:00:00Z",
-        fit_window_end="2026-02-01T00:00:00Z",
-        fit_game_dates={"fit-0": "2026-01-31T00:00:00Z"},
-    )
-    assert ledger.row_count == 2
-    assert ledger.ledger_path.is_file()
-    assert ledger.receipt_path.is_file()
-    assert ledger.producer_receipt_path.is_file()
-    assert ledger.receipt["source_identity_sha256"] == result.source_receipt["source_identity_sha256"]
-    loaded = load_source_bound_atom_ledger(
-        ledger.ledger_path,
-        ledger.receipt_path,
-        source_receipt=result.source_receipt,
-        authority=verify_public_descriptive_authority(
-            authority_path,
-            **authority_kwargs,
-            repository_root=tmp_path,
-        ),
-        expected_fold_id="fold-1",
-    )
-    assert list(loaded["game_id"]) == ["game-1", "game-2"]
-    ledger_payload = json.loads(ledger.ledger_path.read_text())
-    ledger_payload["rows"][0]["date"] = "2026-01-31T00:00:00Z"
-    ledger_payload["scored_game_dates"]["game-1"] = "2026-01-31T00:00:00Z"
-    ledger_payload["row_digest_sha256"] = _sha(ledger_payload["rows"])
-    ledger_payload["scored_dates_sha256"] = _sha(
-        ledger_payload["scored_game_dates"]
-    )
-    ledger_raw = _write_json(ledger.ledger_path, ledger_payload)
-    ledger_receipt = json.loads(ledger.receipt_path.read_text())
-    ledger_receipt["scored_game_dates"] = ledger_payload["scored_game_dates"]
-    ledger_receipt["scored_dates_sha256"] = ledger_payload["scored_dates_sha256"]
-    ledger_receipt["row_digest_sha256"] = ledger_payload["row_digest_sha256"]
-    ledger_receipt["artifact_bytes"] = len(ledger_raw)
-    ledger_receipt["artifact_sha256"] = hashlib.sha256(ledger_raw).hexdigest()
-    ledger_receipt.pop("receipt_sha256")
-    ledger_receipt["receipt_sha256"] = _sha(ledger_receipt)
-    _write_json(ledger.receipt_path, ledger_receipt)
-    with pytest.raises(DraftScoreAdapterError, match="fold-ready dates"):
-        load_source_bound_atom_ledger(
-            ledger.ledger_path,
-            ledger.receipt_path,
-            source_receipt=result.source_receipt,
-            authority=verify_public_descriptive_authority(
-                authority_path,
-                **authority_kwargs,
-                repository_root=tmp_path,
-            ),
-        )
-
-
-def test_verified_adapter_keeps_overlapping_static_fit_blocked(tmp_path: Path) -> None:
-    draft_path, manifest_path, source_path = _public_files(
-        tmp_path,
-        fit_through="2026-02-03T00:00:00Z",
-        ids=["fit-0", "game-1", "game-2"],
-        draft_ids=["game-1", "game-2"],
-    )
-    repository_root = Path(__file__).resolve().parents[1]
-    authority_path = (
-        repository_root / "data/lol/v2/evaluation/composition-descriptive-authority.json"
-    )
-    authority_kwargs = _authority_kwargs(
-        authority_path,
-        repository_root=repository_root,
-        output_dir=tmp_path,
-    )
-    authority = verify_public_descriptive_authority(
-        authority_path,
-        **authority_kwargs,
-        repository_root=repository_root,
-    )
-    draft = json.loads(draft_path.read_text())
-    draft["artifact_sha256"] = authority.model_sha256
-    draft_raw = _write_json(draft_path, draft)
-    manifest = json.loads(manifest_path.read_text())
-    manifest["files"][0]["bytes"] = len(draft_raw)
-    manifest["files"][0]["sha256"] = hashlib.sha256(draft_raw).hexdigest()
-    _write_json(manifest_path, manifest)
-    _reseal_manifest_receipt(manifest_path, draft_path)
-    result = adapt_verified_public_descriptive_draft_records(
-        draft_path,
-        manifest_path,
-        source_path,
-        authority_path=authority_path,
-        **authority_kwargs,
-        **_manifest_kwargs(manifest_path),
-        repository_root=repository_root,
-        output_dir=tmp_path / "adapter",
-    )
+def test_real_public_pack_adapts_as_descriptive_only_evidence(real_result, tmp_path: Path) -> None:
+    result = real_result
+    assert len(result.frame) == 2051
     assert result.chronological_evaluation_suitable is False
     ledger = write_source_bound_atom_ledger(
-        result,
-        tmp_path / "blocked-atoms.json",
-        authority=authority,
-        fold_id="fold-blocked",
-        fit_game_ids=["fit-0"],
-        fit_window_end="2026-02-03T00:00:00Z",
-        fit_game_dates={"fit-0": "2026-01-31T00:00:00Z"},
+        result, tmp_path / "real-pack-atoms.json", authority=_authority(),
+        fold_id="descriptive-public-pack", fit_game_ids=[],
+        fit_window_end="2026-07-18T16:33:48Z",
     )
-    binding = DraftScoreProducerBinding.create(
-        source_receipt=result.source_receipt,
-        accepted_game_ids=result.source_receipt["accepted_game_ids"],
-        fit_game_ids=["fit-0"],
-        fit_window_end="2026-02-03T00:00:00Z",
-        fit_game_dates={"fit-0": "2026-01-31T00:00:00Z"},
-        fold_id="fold-blocked",
-        producer="public_descriptive_draft_records",
-        producer_family="static_composition",
-        series_safe_evidence={
-            "series_safe": True,
-            "fit_validation_disjoint": True,
-            "source_type": "public_pack",
-            "series_column": "game_id",
-            "cluster_identity_sha256": result.source_receipt["source_identity_sha256"],
-        },
-        source_receipt_path=result.source_receipt_path,
-        source_root=tmp_path,
-        producer_receipt_path=ledger.producer_receipt_path,
-    )
-    with pytest.raises(FutureValueDraftScoreError, match="strictly prior"):
-        validate_producer_binding(result.frame, binding)
+    assert ledger.receipt["evidence_mode"] == "descriptive_only"
+    assert len(_load(ledger, result)) == 2051
 
 
-def test_crossfit_adapter_maps_public_component_rows(tmp_path: Path) -> None:
-    _draft_path, _manifest_path, source_path = _public_files(
-        tmp_path,
-        fit_through="2026-01-01T00:00:00Z",
-        ids=["fit-0", "game-1", "game-2"],
+def test_forged_authority_chain_cannot_replace_code_pinned_trust_root(tmp_path: Path) -> None:
+    repository = _repository_root()
+    paths = (
+        "data/lol/v2/evaluation/composition-descriptive-authority.json",
+        "data/lol/v2/evaluation/composition-descriptive-authority-receipt.json",
+        "data/lol/v2/evaluation/future-value-draft-score-trust-root.json",
+        "data/lol/v2/evaluation/composition-descriptive-recipe.json",
+        "data/lol/models/draft_recommendation.json",
+        "lol_kills/research/descriptive_draft_score.py",
     )
-    rows_path = tmp_path / "crossfit-rows.json"
-    rows = {
-        "rows": [
-            {
-                "game_uid": "game-1",
-                "date": "2026-02-02T00:00:00Z",
-                "crossfit_champion_main": 0.1,
-                "crossfit_role_champion": 0.2,
-                "crossfit_ally_synergy": 0.3,
-                "crossfit_archetype_synergy": 0.4,
-                "crossfit_enemy_counter": 0.5,
-                "crossfit_archetype_counter": 0.6,
-                "crossfit_same_role": 0.7,
-            },
-            {
-                "game_uid": "game-2",
-                "date": "2026-02-02T00:00:00Z",
-                "crossfit_champion_main": 0.1,
-                "crossfit_role_champion": 0.2,
-                "crossfit_ally_synergy": 0.3,
-                "crossfit_archetype_synergy": 0.4,
-                "crossfit_enemy_counter": 0.5,
-                "crossfit_archetype_counter": 0.6,
-                "crossfit_same_role": 0.7,
-            },
-        ]
-    }
-    rows_raw = _write_json(rows_path, rows)
-    source = json.loads(source_path.read_text())
-    receipt = {
-        "schema_version": "scryglass:public-crossfit-draft-receipt:v1",
-        "source_receipt_sha256": source["receipt_sha256"],
-        "source_identity_sha256": source["source_identity_sha256"],
-        "accepted_game_ids": ["fit-0", "game-1", "game-2"],
-        "fold_id": "fold-1",
-        "model_id": "crossfit-v1",
-        "fit_game_ids": ["fit-0"],
-        "fit_game_identity_sha256": identity_sha256(["fit-0"]),
-        "producer_timing": "cross_fitted_pregame",
-        "artifact_locator": str(rows_path),
-        "artifact_bytes": len(rows_raw),
-        "artifact_sha256": hashlib.sha256(rows_raw).hexdigest(),
-        "fit_window_end": "2026-01-01T00:00:00Z",
-        "fit_game_dates": {"fit-0": "2025-12-31T00:00:00Z"},
-        "chronological_evaluation_suitable": True,
-        "chronological_evaluation_reason": None,
-    }
-    receipt["receipt_sha256"] = _sha(receipt)
-    receipt_path = tmp_path / "crossfit-receipt.json"
-    _write_json(receipt_path, receipt)
-    result = adapt_public_crossfit_draft_rows(rows_path, receipt_path, source_path)
-    assert result.frame.loc[0, "composition_base_logit"] == pytest.approx(0.3)
-    assert result.frame.loc[0, "composition_archetype_interactions_logit"] == pytest.approx(1.0)
-    assert result.frame.loc[0, "producer_timing"] == "cross_fitted_pregame"
-    assert result.chronological_evaluation_suitable is True
-    receipt["fit_window_end"] = None
-    receipt["fit_game_dates"] = {}
-    receipt["chronological_evaluation_suitable"] = False
-    receipt["chronological_evaluation_reason"] = "fit dates unavailable"
+    for relative in paths:
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repository / relative, target)
+    authority_path = tmp_path / paths[0]
+    authority = json.loads(authority_path.read_text())
+    authority["model_version"] = "attacker-model"
+    authority_raw = _write_json(authority_path, authority)
+    receipt_path = tmp_path / paths[1]
+    receipt = json.loads(receipt_path.read_text())
+    receipt["model_version"] = "attacker-model"
+    receipt["authority_bytes"] = len(authority_raw)
+    receipt["authority_sha256"] = hashlib.sha256(authority_raw).hexdigest()
     receipt.pop("receipt_sha256")
     receipt["receipt_sha256"] = _sha(receipt)
-    _write_json(receipt_path, receipt)
-    unavailable = adapt_public_crossfit_draft_rows(rows_path, receipt_path, source_path)
-    assert unavailable.chronological_evaluation_suitable is False
-    assert unavailable.frame["producer_timing"].eq("chronology_unavailable").all()
-    receipt["chronological_evaluation_suitable"] = True
-    receipt["chronological_evaluation_reason"] = None
-    receipt.pop("receipt_sha256")
-    receipt["receipt_sha256"] = _sha(receipt)
-    _write_json(receipt_path, receipt)
-    with pytest.raises(DraftScoreAdapterError, match="chronology evidence"):
-        adapt_public_crossfit_draft_rows(rows_path, receipt_path, source_path)
+    receipt_raw = _write_json(receipt_path, receipt)
+    trust_path = tmp_path / paths[2]
+    trust = json.loads(trust_path.read_text())
+    trust["descriptive_authority"]["authority_bytes"] = len(authority_raw)
+    trust["descriptive_authority"]["authority_sha256"] = hashlib.sha256(authority_raw).hexdigest()
+    trust["descriptive_authority"]["authority_receipt_bytes"] = len(receipt_raw)
+    trust["descriptive_authority"]["authority_receipt_sha256"] = hashlib.sha256(receipt_raw).hexdigest()
+    trust.pop("trust_root_sha256")
+    trust["trust_root_sha256"] = _sha(trust)
+    _write_json(trust_path, trust)
+    with pytest.raises(DraftScoreAdapterError, match="trust root file changed"):
+        verify_public_descriptive_authority(repository_root=tmp_path)
 
 
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    (
-        ("missing_component", "components are incomplete"),
-        ("null_artifact_sha", "artifact_sha256"),
-        ("null_artifact_bytes", "byte count"),
-        ("fit_overlap", "fit and scored"),
-        ("fit_outside", "outside the model fold census"),
-        ("bad_fit_date", "fit date is not strictly prior"),
-    ),
-)
-def test_crossfit_adapter_rejects_incomplete_or_leaking_evidence(
-    tmp_path: Path,
-    mutation: str,
-    message: str,
-) -> None:
-    _draft_path, _manifest_path, source_path = _public_files(
-        tmp_path,
-        ids=["fit-0", "game-1"],
+def test_resealed_draft_manifest_and_freeze_cannot_replace_release_pin(tmp_path: Path) -> None:
+    draft_path = tmp_path / "features/draft_records.json"
+    manifest_path = tmp_path / "manifest.json"
+    freeze_path = tmp_path / "freeze-manifest.json"
+    draft_path.parent.mkdir(parents=True)
+    shutil.copy2(FREEZE / "baseline/public-pack/features/draft_records.json", draft_path)
+    shutil.copy2(FREEZE / "baseline/public-pack/manifest.json", manifest_path)
+    shutil.copy2(FREEZE / "freeze-manifest.json", freeze_path)
+    for path in (draft_path, manifest_path, freeze_path):
+        path.chmod(0o600)
+    draft = json.loads(draft_path.read_text())
+    first = next(iter(draft["games"].values()))
+    first["edge_components"]["base"] += 0.5
+    first["edge_components"]["total"] += 0.5
+    draft_raw = _write_json(draft_path, draft)
+    manifest = json.loads(manifest_path.read_text())
+    for record in manifest["files"]:
+        if str(record.get("path", "")).endswith("draft_records.json"):
+            record["bytes"] = len(draft_raw)
+            record["sha256"] = hashlib.sha256(draft_raw).hexdigest()
+    manifest_raw = _write_json(manifest_path, manifest)
+    freeze = json.loads(freeze_path.read_text())
+    for record in freeze["files"]:
+        if str(record["path"]).endswith("manifest.json"):
+            record["bytes"] = len(manifest_raw)
+            record["sha256"] = hashlib.sha256(manifest_raw).hexdigest()
+        if str(record["path"]).endswith("draft_records.json"):
+            record["bytes"] = len(draft_raw)
+            record["sha256"] = hashlib.sha256(draft_raw).hexdigest()
+    freeze.pop("freeze_sha256")
+    freeze["freeze_sha256"] = _sha(freeze)
+    _write_json(freeze_path, freeze)
+    with pytest.raises(DraftScoreAdapterError, match="pinned public (manifest|draft records)"):
+        adapt_verified_public_descriptive_draft_records(
+            draft_path, manifest_path, FREEZE / "future-value-source-receipt.json",
+            manifest_receipt_path=freeze_path, release_id=RELEASE_ID,
+            repository_root=_repository_root(), source_root=FREEZE,
+        )
+
+
+def test_loader_rejects_producer_ledger_fit_date_disagreement(real_result, tmp_path: Path) -> None:
+    ledger, _game_id, _date, cutoff = _write_fit_ledger(real_result, tmp_path)
+    forged = (pd.Timestamp(cutoff) - pd.Timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    _reseal_ledger(ledger, producer_mutation=lambda payload: payload["fit_game_dates"].update({next(iter(payload["fit_game_dates"])): forged}))
+    with pytest.raises(DraftScoreAdapterError, match="fit_game_dates binding changed"):
+        _load(ledger, real_result)
+
+
+def test_loader_rejects_self_claimed_fit_date_against_frozen_source(real_result, tmp_path: Path) -> None:
+    ledger, game_id, date, _cutoff = _write_fit_ledger(real_result, tmp_path)
+    forged = (pd.Timestamp(date) + pd.Timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    mutate = lambda payload: payload["fit_game_dates"].update({game_id: forged})
+    _reseal_ledger(ledger, producer_mutation=mutate, ledger_mutation=mutate, receipt_mutation=mutate)
+    with pytest.raises(DraftScoreAdapterError, match="fit date changed from frozen source"):
+        _load(ledger, real_result)
+
+
+def test_loader_rejects_self_claimed_scored_date_against_frozen_source(real_result, tmp_path: Path) -> None:
+    ledger = write_source_bound_atom_ledger(
+        real_result, tmp_path / "atoms.json", authority=_authority(),
+        fold_id="descriptive-public-pack", fit_game_ids=[],
+        fit_window_end="2026-07-18T16:33:48Z",
     )
-    row = {
-        "game_uid": "game-1",
-        "date": "2026-02-02T00:00:00Z",
-        "crossfit_champion_main": 0.1,
-        "crossfit_role_champion": 0.2,
-        "crossfit_ally_synergy": 0.3,
-        "crossfit_archetype_synergy": 0.4,
-        "crossfit_enemy_counter": 0.5,
-        "crossfit_archetype_counter": 0.6,
-        "crossfit_same_role": 0.7,
-    }
-    if mutation == "missing_component":
-        row.pop("crossfit_enemy_counter")
-    rows_path = tmp_path / "crossfit-rows.json"
-    rows_raw = _write_json(rows_path, {"rows": [row]})
-    source = json.loads(source_path.read_text())
-    fit_ids = ["fit-0"]
-    if mutation == "fit_overlap":
-        fit_ids = ["game-1"]
-    elif mutation == "fit_outside":
-        fit_ids = ["outside"]
-    receipt = {
-        "schema_version": "scryglass:public-crossfit-draft-receipt:v1",
-        "source_receipt_sha256": source["receipt_sha256"],
-        "source_identity_sha256": source["source_identity_sha256"],
-        "accepted_game_ids": source["accepted_game_ids"],
-        "fold_id": "fold-1",
-        "model_id": "crossfit-v1",
-        "fit_game_ids": fit_ids,
-        "fit_game_identity_sha256": identity_sha256(fit_ids),
-        "producer_timing": "cross_fitted_pregame",
-        "artifact_locator": str(rows_path),
-        "artifact_bytes": None if mutation == "null_artifact_bytes" else len(rows_raw),
-        "artifact_sha256": None
-        if mutation == "null_artifact_sha"
-        else hashlib.sha256(rows_raw).hexdigest(),
-        "fit_window_end": "2026-01-01T00:00:00Z",
-        "fit_game_dates": {fit_ids[0]: "2025-12-31T00:00:00Z"},
-        "chronological_evaluation_suitable": True,
-        "chronological_evaluation_reason": None,
-    }
-    if mutation == "bad_fit_date":
-        receipt["fit_game_dates"] = {fit_ids[0]: "2026-01-01T00:00:00Z"}
-    receipt["receipt_sha256"] = _sha(receipt)
-    receipt_path = tmp_path / "crossfit-receipt.json"
-    _write_json(receipt_path, receipt)
-    with pytest.raises(DraftScoreAdapterError, match=message):
-        adapt_public_crossfit_draft_rows(rows_path, receipt_path, source_path)
+    game_id = ledger.receipt["game_ids"][0]
+    forged = "2026-01-01T00:00:00Z"
+
+    def mutate_artifact(payload):
+        payload["scored_game_dates"][game_id] = forged
+        payload["scored_dates_sha256"] = _sha(payload["scored_game_dates"])
+        payload["rows"][0]["date"] = forged
+        payload["row_digest_sha256"] = _sha(payload["rows"])
+
+    def mutate_receipt(payload):
+        payload["scored_game_dates"][game_id] = forged
+        payload["scored_dates_sha256"] = _sha(payload["scored_game_dates"])
+        artifact = json.loads(ledger.ledger_path.read_text())
+        payload["row_digest_sha256"] = artifact["row_digest_sha256"]
+
+    _reseal_ledger(ledger, ledger_mutation=mutate_artifact, receipt_mutation=mutate_receipt)
+    with pytest.raises(DraftScoreAdapterError, match="scored date changed from frozen source"):
+        _load(ledger, real_result)
+
+
+def test_crossfit_receipt_requires_a_pin_from_the_checked_in_root(tmp_path: Path) -> None:
+    rows_path = tmp_path / "rows.json"
+    receipt_path = tmp_path / "receipt.json"
+    source_path = tmp_path / "source.json"
+    _write_json(rows_path, {"rows": []})
+    _write_json(receipt_path, {"receipt_sha256": "a" * 64})
+    _write_json(source_path, {})
+    with pytest.raises(DraftScoreAdapterError, match="receipt is not pinned"):
+        adapt_public_crossfit_draft_rows(
+            rows_path, receipt_path, source_path,
+            repository_root=_repository_root(),
+            receipt_pin_id="attacker-self-sealed", source_root=tmp_path,
+        )
