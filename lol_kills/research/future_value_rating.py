@@ -19,10 +19,12 @@ import hashlib
 import json
 import math
 import re
+import warnings
 
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 from lol_kills.etl.source_keys import canonical_source_game_key
@@ -220,7 +222,9 @@ def _side(value: Any) -> str | None:
 
 
 def _role(value: Any) -> str | None:
-    text = str(value or "").strip().casefold()
+    if value is None or bool(pd.isna(value)):
+        return None
+    text = str(value).strip().casefold()
     return {
         "top": "top",
         "jng": "jungle",
@@ -692,18 +696,21 @@ def build_time_decayed_prior_player_form(
     player_ids = players.loc[metrics.index, "playerid"].astype("string")
     team_ids = players.loc[metrics.index, "teamid"].astype("string")
     champions = players.loc[metrics.index, "champion"].astype("string").str.strip()
+    roles = metrics["_role"].map(_role)
     stable_player = player_ids.map(lambda value: _stable_identity(value, "oe:player:"))
     stable_team = team_ids.map(lambda value: _stable_identity(value, "oe:team:"))
     if not bool(stable_player.all()) or not bool(stable_team.all()):
         raise FutureValueSourceError("player form contains unstable player or team identity")
     if champions.isna().any() or champions.eq("").any():
         raise FutureValueSourceError("player form contains missing champion identity")
+    if roles.isna().any():
+        raise FutureValueSourceError("player form contains an unknown role")
     base = pd.DataFrame(
         {
             "game_id": metrics["_game_id"].astype(str).to_numpy(),
             "date": pd.to_datetime(metrics["_date"], utc=True).to_numpy(),
             "side": metrics["_side"].astype(str).to_numpy(),
-            "role": metrics["_role"].astype(str).to_numpy(),
+            "role": roles.astype(str).to_numpy(),
             "player_id": player_ids.astype(str).to_numpy(),
             "team_id": team_ids.astype(str).to_numpy(),
             "champion": champions.astype(str).to_numpy(),
@@ -836,8 +843,8 @@ class Rank3AtomModel:
 
 def _champion_role_key(champion: Any, role: Any) -> str:
     champion_text = str(champion).strip().casefold()
-    role_text = str(role).strip().casefold()
-    if not champion_text or champion_text == "nan" or not role_text or role_text == "nan":
+    role_text = _role(role)
+    if not champion_text or champion_text == "nan" or role_text is None:
         raise FutureValueSourceError("rank-3 atom has missing champion or role")
     return f"{champion_text}|{role_text}"
 
@@ -934,6 +941,91 @@ def fit_rank3_player_champion_role_atoms(
     )
 
 
+def _verified_authoritative_series_column(
+    maps: pd.DataFrame,
+    frame: pd.DataFrame,
+) -> str | None:
+    receipt = maps.attrs.get("verified_series_receipt")
+    if not isinstance(receipt, Mapping):
+        return None
+    payload = dict(receipt)
+    claimed_hash = payload.pop("receipt_sha256", None)
+    if not isinstance(claimed_hash, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", claimed_hash
+    ):
+        raise FutureValueSourceError("authoritative series receipt hash is invalid")
+    if hashlib.sha256(_canonical_json_bytes(payload)).hexdigest() != claimed_hash:
+        raise FutureValueSourceError("authoritative series receipt changed")
+    column = payload.get("series_column")
+    source_receipt_sha256 = maps.attrs.get("verified_source_receipt_sha256")
+    game_count = payload.get("game_count")
+    if (
+        payload.get("source_type") != "verified_grid_series"
+        or column != "grid_series_id"
+        or not isinstance(game_count, int)
+        or isinstance(game_count, bool)
+        or game_count != len(frame)
+        or payload.get("game_identity_sha256")
+        != identity_sha256(frame["game_id"].astype(str))
+        or not isinstance(source_receipt_sha256, str)
+        or payload.get("source_receipt_sha256") != source_receipt_sha256
+        or column not in frame.columns
+    ):
+        raise FutureValueSourceError("authoritative series receipt does not bind maps")
+    series = frame[column].astype("string").str.strip()
+    if series.isna().any() or series.eq("").any():
+        raise FutureValueSourceError("authoritative series identity is incomplete")
+    assignment_rows = sorted(
+        (
+            {"game_id": str(game_id), "series_id": str(series_id)}
+            for game_id, series_id in zip(frame["game_id"], series)
+        ),
+        key=lambda row: row["game_id"],
+    )
+    if payload.get("series_assignment_sha256") != hashlib.sha256(
+        _canonical_json_bytes(assignment_rows)
+    ).hexdigest():
+        raise FutureValueSourceError("authoritative series assignments changed")
+    team_columns = next(
+        (
+            (blue_name, red_name)
+            for blue_name, red_name in (
+                ("blue_teamid", "red_teamid"),
+                ("blue_team_key", "red_team_key"),
+                ("blue_team", "red_team"),
+            )
+            if blue_name in frame.columns and red_name in frame.columns
+        ),
+        None,
+    )
+    if team_columns is None:
+        raise FutureValueSourceError("authoritative series team identity is missing")
+    blue_column, red_column = team_columns
+    pair_rows = []
+    series_pairs: dict[str, set[str]] = {}
+    for game_id, series_id, blue_team, red_team in zip(
+        frame["game_id"], series, frame[blue_column], frame[red_column]
+    ):
+        teams = sorted(
+            (str(blue_team).strip().casefold(), str(red_team).strip().casefold())
+        )
+        if not all(teams):
+            raise FutureValueSourceError("authoritative series team identity is empty")
+        pair = "|".join(teams)
+        series_pairs.setdefault(str(series_id), set()).add(pair)
+        pair_rows.append(
+            {"game_id": str(game_id), "series_id": str(series_id), "team_pair": pair}
+        )
+    if any(len(pairs) != 1 for pairs in series_pairs.values()):
+        raise FutureValueSourceError("authoritative series spans multiple team pairs")
+    pair_rows.sort(key=lambda row: row["game_id"])
+    if payload.get("series_pair_assignment_sha256") != hashlib.sha256(
+        _canonical_json_bytes(pair_rows)
+    ).hexdigest():
+        raise FutureValueSourceError("authoritative series team assignments changed")
+    return str(column)
+
+
 def _map_model_frame(maps: pd.DataFrame) -> pd.DataFrame:
     required = {"date", "y_blue_win"}
     missing = sorted(required - set(maps.columns))
@@ -947,22 +1039,29 @@ def _map_model_frame(maps: pd.DataFrame) -> pd.DataFrame:
         raise FutureValueSourceError("model maps do not have one dated row per game")
     if not frame["target"].isin({0, 1}).all():
         raise FutureValueSourceError("model maps contain an invalid result target")
-    series_column = "grid_series_id" if "grid_series_id" in frame.columns else None
+    series_column = _verified_authoritative_series_column(maps, frame)
     valid_authoritative_series = False
     if series_column is not None:
         series = frame[series_column].astype("string").str.strip()
         valid_authoritative_series = bool(series.notna().all() and series.ne("").all())
         if valid_authoritative_series:
             frame["series_id"] = series
+            cluster_sizes = series.value_counts(sort=False)
+            colliding = cluster_sizes.gt(1)
             frame.attrs["series_cluster_source"] = f"authoritative:{series_column}"
             frame.attrs["series_cluster_audit"] = {
                 "source": f"authoritative:{series_column}",
                 "authoritative": True,
-                "cluster_count": int(series.nunique()),
+                "cluster_count": int(len(cluster_sizes)),
                 "map_count": int(len(frame)),
-                "colliding_cluster_count": 0,
-                "collision_extra_map_count": 0,
-                "max_cluster_size": 1,
+                "colliding_cluster_count": int(colliding.sum()),
+                "collision_extra_map_count": int(
+                    cluster_sizes.loc[colliding].sub(1).sum()
+                ),
+                "max_cluster_size": int(cluster_sizes.max()),
+                "receipt_sha256": maps.attrs["verified_series_receipt"][
+                    "receipt_sha256"
+                ],
             }
     if not valid_authoritative_series:
         team_columns = next(
@@ -1124,14 +1223,14 @@ SIDE_LEVEL_TO_MODEL_FEATURE = {
     ),
     "player_form_support_mean": "player_form_support_mean_diff",
     "player_form_effective_support_mean": "player_form_effective_support_mean_diff",
-    "player_form_support_uncertainty_proxy": (
-        "player_form_support_uncertainty_proxy_diff"
-    ),
-    "rank_3_atom_support_uncertainty_proxy": (
-        "rank_3_atom_support_uncertainty_proxy_diff"
-    ),
 }
 MODEL_FEATURES = tuple(SIDE_LEVEL_TO_MODEL_FEATURE.values())
+CENTERED_ATOM_LEVEL_FEATURES = frozenset(
+    feature
+    for feature in SIDE_LEVEL_TO_MODEL_FEATURE
+    if feature.startswith("rank_3_player_atom_")
+    or feature.startswith("rank_3_champion_role_atom_")
+)
 
 
 def _side_level_column(side: str, feature: str) -> str:
@@ -1287,14 +1386,6 @@ def build_future_value_design(
     )
     put_side_levels("player_form_support_mean", support_mean)
     put_side_levels("player_form_effective_support_mean", effective_support_mean)
-    put_side_levels(
-        "player_form_support_uncertainty_proxy",
-        1.0 / np.sqrt(1.0 + effective_support_mean),
-    )
-    put_side_levels(
-        "rank_3_atom_support_uncertainty_proxy",
-        1.0 / np.sqrt(1.0 + rank_support),
-    )
     design["player_form_support_mean"] = support_mean.mean(axis=1).reindex(
         design.index
     )
@@ -1307,11 +1398,41 @@ def build_future_value_design(
     design["rank_3_atom_support_uncertainty_proxy"] = (
         1.0 / np.sqrt(1.0 + rank_support.mean(axis=1).reindex(design.index))
     )
+    minimum_metric_support = support_values.groupby(
+        "game_id", sort=False, observed=True
+    )[support_columns].min().min(axis=1)
+    minimum_effective_support = support_values.groupby(
+        "game_id", sort=False, observed=True
+    )[effective_support_columns].min().min(axis=1)
+    minimum_atom_support = rank_support.min(axis=1)
+    design["player_form_minimum_metric_support"] = minimum_metric_support.reindex(
+        design.index
+    )
+    design["player_form_minimum_effective_support"] = (
+        minimum_effective_support.reindex(design.index)
+    )
+    design["rank_3_champion_role_minimum_support"] = minimum_atom_support.reindex(
+        design.index
+    )
     raw_side_columns = [
         _side_level_column(side, source_name)
         for source_name in SIDE_LEVEL_TO_MODEL_FEATURE
         for side in SIDES
     ]
+    design["model_missing_feature_names"] = [
+        sorted(
+            source_name
+            for source_name in SIDE_LEVEL_TO_MODEL_FEATURE
+            if not (
+                np.isfinite(row[_side_level_column("blue", source_name)])
+                and np.isfinite(row[_side_level_column("red", source_name)])
+            )
+        )
+        for _, row in design.iterrows()
+    ]
+    design["model_missing_feature_count"] = design[
+        "model_missing_feature_names"
+    ].map(len)
     design["model_features_complete"] = np.isfinite(
         design[raw_side_columns].to_numpy(dtype=float)
     ).all(axis=1)
@@ -1361,7 +1482,14 @@ def _fold_level_imputation_values(train: pd.DataFrame) -> np.ndarray:
             dtype=float
         )
         finite = pooled[np.isfinite(pooled)]
-        values.append(float(np.median(finite)) if finite.size else 0.0)
+        if finite.size:
+            values.append(float(np.median(finite)))
+        elif source_name in CENTERED_ATOM_LEVEL_FEATURES:
+            values.append(0.0)
+        else:
+            raise FutureValueSourceError(
+                f"non-centered imputation feature is all missing: {source_name}"
+            )
     return np.asarray(values, dtype=float)
 
 
@@ -1394,6 +1522,55 @@ def _antisymmetric_design_matrix(
     if not np.isfinite(matrix).all():
         raise FutureValueSourceError("antisymmetric design matrix is non-finite")
     return matrix
+
+
+def _fit_zero_intercept_logistic(
+    matrix: np.ndarray,
+    target: np.ndarray,
+    *,
+    regularization_c: float,
+) -> tuple[LogisticRegression, dict[str, Any]]:
+    max_iterations = 1000
+    classifier = LogisticRegression(
+        C=float(regularization_c),
+        penalty="l2",
+        solver="lbfgs",
+        fit_intercept=False,
+        max_iter=max_iterations,
+        random_state=0,
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ConvergenceWarning)
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            classifier.fit(matrix, target)
+    convergence_messages = [
+        str(item.message)
+        for item in caught
+        if issubclass(item.category, ConvergenceWarning)
+    ]
+    iterations = [int(value) for value in np.asarray(classifier.n_iter_).ravel()]
+    finite = bool(np.isfinite(classifier.coef_).all())
+    converged = bool(
+        finite
+        and not convergence_messages
+        and iterations
+        and max(iterations) < max_iterations
+    )
+    evidence = {
+        "solver": "lbfgs",
+        "success": converged,
+        "finite_coefficients": finite,
+        "iterations": iterations,
+        "max_iterations": max_iterations,
+        "convergence_warnings": convergence_messages,
+        "regularization_c": float(regularization_c),
+        "coefficient_sha256": hashlib.sha256(
+            _canonical_json_bytes(classifier.coef_.astype(float).tolist())
+        ).hexdigest(),
+    }
+    if not converged:
+        raise FutureValueSourceError("future-value classifier did not converge")
+    return classifier, evidence
 
 
 def _select_fold_regularization(
@@ -1440,32 +1617,49 @@ def _select_fold_regularization(
     validation_matrix = _antisymmetric_design_matrix(inner_validation, imputation)
     scales = matrix.std(axis=0, ddof=0)
     scales = np.where(np.isfinite(scales) & (scales > 1e-12), scales, 1.0)
-    candidate_scores: list[dict[str, float]] = []
+    candidate_scores: list[dict[str, Any]] = []
+    inner_atom_receipt = atom_model.parameter_receipt()
+    transform_payload = {
+        "atom_parameter_sha256": inner_atom_receipt["parameter_sha256"],
+        "imputation_values": [float(value) for value in imputation],
+        "scales": [float(value) for value in scales],
+        "feature_names": list(MODEL_FEATURES),
+    }
+    transform_sha256 = hashlib.sha256(
+        _canonical_json_bytes(transform_payload)
+    ).hexdigest()
     for regularization_c in REGULARIZATION_GRID:
-        classifier = LogisticRegression(
-            C=float(regularization_c),
-            penalty="l2",
-            solver="lbfgs",
-            fit_intercept=False,
-            max_iter=1000,
-            random_state=0,
+        classifier, optimizer = _fit_zero_intercept_logistic(
+            matrix / scales,
+            train_target.to_numpy(dtype=int),
+            regularization_c=float(regularization_c),
         )
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-            classifier.fit(
-                matrix / scales,
-                train_target.to_numpy(dtype=int),
-            )
             probability = classifier.predict_proba(validation_matrix / scales)[:, 1]
         if not np.isfinite(probability).all():
             raise FutureValueSourceError(
                 "nested regularization prediction is non-finite"
             )
+        prediction_rows = [
+            {
+                "game_id": str(game_id),
+                "target": int(target_value),
+                "probability": float(probability_value),
+            }
+            for game_id, target_value, probability_value in zip(
+                inner_validation["game_id"], validation_target, probability
+            )
+        ]
         candidate_scores.append(
             {
                 "c": float(regularization_c),
                 "log_loss": float(
                     log_loss(validation_target.to_numpy(dtype=int), probability)
                 ),
+                "optimizer": optimizer,
+                "prediction_sha256": hashlib.sha256(
+                    _canonical_json_bytes(prediction_rows)
+                ).hexdigest(),
             }
         )
     selected = min(candidate_scores, key=lambda row: (row["log_loss"], row["c"]))
@@ -1474,11 +1668,15 @@ def _select_fold_regularization(
         "candidate_grid": [float(value) for value in REGULARIZATION_GRID],
         "candidate_scores": candidate_scores,
         "selected_c": float(selected["c"]),
+        "inner_atom_parameter_sha256": inner_atom_receipt["parameter_sha256"],
+        "inner_transform_sha256": transform_sha256,
         "inner_train_game_count": len(inner_train_ids),
         "inner_train_identity_sha256": identity_sha256(inner_train_ids),
         "inner_validation_game_count": len(inner_validation_ids),
         "inner_validation_identity_sha256": identity_sha256(inner_validation_ids),
         "inner_validation_start": str(inner_fold["validation_start"]),
+        "inner_validation_end": str(inner_fold["validation_end"]),
+        "inner_overlap_audit": dict(inner_fold["overlap_audit"]),
     }
 
 
@@ -1493,6 +1691,7 @@ class FutureValueFoldModel:
     coefficients: np.ndarray
     intercept: float
     regularization_selection: Mapping[str, Any]
+    optimizer_evidence: Mapping[str, Any]
     atom_model: Rank3AtomModel
     fit_game_ids: tuple[str, ...]
     fit_window_end: str
@@ -1535,6 +1734,12 @@ class FutureValueFoldModel:
                     SIDE_LEVEL_TO_MODEL_FEATURE, self.imputation_values
                 )
             },
+            "imputation_policy": {
+                "finite_features": "fold_local_pooled_side_median",
+                "all_missing_centered_atom_coordinates": "neutral_zero",
+                "all_missing_non_centered_features": "fail_closed",
+                "centered_atom_features": sorted(CENTERED_ATOM_LEVEL_FEATURES),
+            },
             "coefficients": self.coefficient_map,
             "intercept": float(self.intercept),
             "antisymmetric_fit": {
@@ -1543,6 +1748,7 @@ class FutureValueFoldModel:
                 "fit_intercept": False,
             },
             "regularization_selection": dict(self.regularization_selection),
+            "optimizer_evidence": dict(self.optimizer_evidence),
             "rank_3": self.atom_model.parameter_receipt(),
         }
         parameters["parameter_sha256"] = hashlib.sha256(
@@ -1565,46 +1771,154 @@ class FutureValueFoldModel:
         values[finite] = 1.0 / (1.0 + np.exp(-np.clip(values[finite], -40.0, 40.0)))
         return pd.Series(values, index=design.index, name="future_value_probability")
 
-    def player_value_logit(self, form: pd.DataFrame) -> pd.DataFrame:
-        """Return per-player logit contributions with support and uncertainty."""
+    def player_value_logit(
+        self,
+        form: pd.DataFrame,
+        design: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """Return exact map-logit components and explicit player support records."""
 
+        required = {"game_id", "player_id", "side", "role", "champion"}
+        missing = sorted(required - set(form.columns))
+        if missing:
+            raise FutureValueSourceError(
+                "player value form is missing: " + ", ".join(missing)
+            )
         atoms = self.atom_model.transform(form)
-        combined = pd.concat([form.reset_index(drop=True), atoms.reset_index(drop=True)], axis=1)
-        output = pd.DataFrame(index=combined.index)
-        values = np.zeros(len(combined), dtype=float)
-        available = np.ones(len(combined), dtype=bool)
-        metric_features = {f"player_form_{metric}" for metric in FORM_METRICS}
-        player_features = {
-            feature_index: feature
-            for feature_index, feature in enumerate(self.feature_names)
-            if feature in metric_features or feature.startswith("rank_3_")
+        combined = pd.concat(
+            [form.reset_index(drop=True), atoms.reset_index(drop=True)], axis=1
+        )
+        design_ids = set(design["game_id"].astype(str))
+        selected = combined[combined["game_id"].astype(str).isin(design_ids)].copy()
+        counts = selected.groupby("game_id", sort=False, observed=True).size()
+        if set(counts.index.astype(str)) != design_ids or not counts.eq(10).all():
+            raise FutureValueSourceError(
+                "player value components require ten player rows per design game"
+            )
+
+        matrix = _antisymmetric_design_matrix(design, self.imputation_values)
+        contributions = (matrix / self.scales) * self.coefficients
+        player_sources = {
+            *[f"player_form_{metric}" for metric in FORM_METRICS],
+            *[
+                f"rank_3_player_atom_{index}"
+                for index in range(1, RANK_3 + 1)
+            ],
+            *[
+                f"rank_3_champion_role_atom_{index}"
+                for index in range(1, RANK_3 + 1)
+            ],
         }
-        for feature_index, feature in player_features.items():
-            source = (
-                feature.replace("player_form_", "prior_form_")
-                if feature.startswith("player_form_")
-                else feature
+        team_sources = {"team_prior_win", "roster_continuity"}
+        player_indexes = [
+            index
+            for index, source_name in enumerate(SIDE_LEVEL_TO_MODEL_FEATURE)
+            if source_name in player_sources
+        ]
+        team_indexes = [
+            index
+            for index, source_name in enumerate(SIDE_LEVEL_TO_MODEL_FEATURE)
+            if source_name in team_sources
+        ]
+        quality_indexes = [
+            index
+            for index in range(len(SIDE_LEVEL_TO_MODEL_FEATURE))
+            if index not in {*player_indexes, *team_indexes}
+        ]
+        output = design[["game_id"]].copy().reset_index(drop=True)
+        output["player_value_logit"] = contributions[:, player_indexes].sum(axis=1)
+        output["team_context_logit"] = contributions[:, team_indexes].sum(axis=1)
+        output["data_quality_logit"] = contributions[:, quality_indexes].sum(axis=1)
+        output["full_model_logit"] = self.predict_logit(design).to_numpy(dtype=float)
+        output["component_reconstruction_error"] = output["full_model_logit"] - (
+            output["player_value_logit"]
+            + output["team_context_logit"]
+            + output["data_quality_logit"]
+        )
+        if output["component_reconstruction_error"].abs().max() > 1e-12:
+            raise FutureValueSourceError("player value components do not reconstruct logit")
+
+        metric_support_columns = [
+            f"prior_form_{metric}_support" for metric in FORM_METRICS
+        ]
+        effective_support_columns = [
+            f"prior_form_{metric}_effective_support" for metric in FORM_METRICS
+        ]
+        explicit_value_columns = [
+            *[f"prior_form_{metric}" for metric in FORM_METRICS],
+            *[
+                f"rank_3_player_atom_{index}"
+                for index in range(1, RANK_3 + 1)
+            ],
+            *[
+                f"rank_3_champion_role_atom_{index}"
+                for index in range(1, RANK_3 + 1)
+            ],
+        ]
+        records_by_game: dict[str, list[dict[str, Any]]] = {}
+        for game_id, group in selected.groupby("game_id", sort=False, observed=True):
+            records: list[dict[str, Any]] = []
+            for row in group.to_dict(orient="records"):
+                support = {
+                    metric: _ledger_value(row.get(f"prior_form_{metric}_support"))
+                    for metric in FORM_METRICS
+                }
+                effective_support = {
+                    metric: _ledger_value(
+                        row.get(f"prior_form_{metric}_effective_support")
+                    )
+                    for metric in FORM_METRICS
+                }
+                finite_support = [
+                    float(value) for value in support.values() if value is not None
+                ]
+                finite_effective = [
+                    float(value)
+                    for value in effective_support.values()
+                    if value is not None
+                ]
+                missing_names = sorted(
+                    name
+                    for name in explicit_value_columns
+                    if _ledger_value(row.get(name)) is None
+                )
+                atom_support = int(row.get("rank_3_champion_role_support") or 0)
+                minimum_support = min(finite_support) if finite_support else 0.0
+                minimum_effective = min(finite_effective) if finite_effective else 0.0
+                status = (
+                    "missing"
+                    if missing_names
+                    else "sparse"
+                    if minimum_effective < 5.0 or atom_support < 1
+                    else "adequate"
+                )
+                records.append(
+                    {
+                        "player_id": str(row["player_id"]),
+                        "side": str(row["side"]),
+                        "role": str(row["role"]),
+                        "metric_support": support,
+                        "metric_effective_support": effective_support,
+                        "minimum_metric_support": minimum_support,
+                        "minimum_effective_support": minimum_effective,
+                        "champion_role_atom_support": atom_support,
+                        "missing_feature_names": missing_names,
+                        "support_status": status,
+                    }
+                )
+            records_by_game[str(game_id)] = records
+        output["player_support_records"] = output["game_id"].astype(str).map(
+            records_by_game
+        )
+        output["support_status"] = output["player_support_records"].map(
+            lambda records: (
+                "missing"
+                if any(row["support_status"] == "missing" for row in records)
+                else "sparse"
+                if any(row["support_status"] == "sparse" for row in records)
+                else "adequate"
             )
-            if source not in combined.columns:
-                available[:] = False
-                continue
-            numeric = pd.to_numeric(combined[source], errors="coerce").to_numpy(dtype=float)
-            available &= np.isfinite(numeric)
-            values += np.where(
-                np.isfinite(numeric),
-                ((numeric - self.means[feature_index]) / self.scales[feature_index])
-                * self.coefficients[feature_index]
-                / 5.0,
-                0.0,
-            )
-        output["player_value_logit"] = np.where(available, values, np.nan)
-        support = combined[
-            [f"prior_form_{metric}_effective_support" for metric in FORM_METRICS]
-        ].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-        output["support"] = support
-        output["support_uncertainty_proxy"] = 1.0 / np.sqrt(1.0 + support)
-        output["available"] = available
-        output.index = form.index
+        )
         return output
 
     def receipt(self) -> dict[str, Any]:
@@ -1623,8 +1937,10 @@ class FutureValueFoldModel:
             "fold_local_side_imputation": parameters[
                 "fold_local_side_imputation"
             ],
+            "imputation_policy": parameters["imputation_policy"],
             "antisymmetric_fit": parameters["antisymmetric_fit"],
             "regularization_selection": parameters["regularization_selection"],
+            "optimizer_evidence": parameters["optimizer_evidence"],
             "parameter_sha256": parameters["parameter_sha256"],
             "rank_3": parameters["rank_3"],
             "train_rows": int(self.train_rows),
@@ -1712,21 +2028,11 @@ def fit_future_value_model(
     means = np.zeros(matrix.shape[1], dtype=float)
     scales = matrix.std(axis=0, ddof=0)
     scales = np.where(np.isfinite(scales) & (scales > 1e-12), scales, 1.0)
-    classifier = LogisticRegression(
-        C=float(regularization_selection["selected_c"]),
-        penalty="l2",
-        solver="lbfgs",
-        fit_intercept=False,
-        max_iter=1000,
-        random_state=0,
+    classifier, optimizer_evidence = _fit_zero_intercept_logistic(
+        matrix / scales,
+        usable_train["target"].to_numpy(dtype=int),
+        regularization_c=float(regularization_selection["selected_c"]),
     )
-    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-        classifier.fit(
-            matrix / scales,
-            usable_train["target"].to_numpy(dtype=int),
-        )
-    if not np.isfinite(classifier.coef_).all():
-        raise FutureValueSourceError("future-value classifier fit is non-finite")
     model = FutureValueFoldModel(
         feature_names=feature_names,
         means=means,
@@ -1735,6 +2041,7 @@ def fit_future_value_model(
         coefficients=classifier.coef_[0].astype(float),
         intercept=0.0,
         regularization_selection=regularization_selection,
+        optimizer_evidence=optimizer_evidence,
         atom_model=atom_model,
         fit_game_ids=train_ids,
         fit_window_end=_utc_text(boundary),
@@ -1760,21 +2067,33 @@ def chronological_whole_series_folds(
         .agg(first_date=("date", "min"), last_date=("date", "max"))
         .sort_values(["first_date", "series_id"], kind="stable")
     )
-    date_blocks = list(series_summary.groupby("first_date", sort=True, observed=True))
+    date_blocks = [
+        pd.Timestamp(value) for value in sorted(frame["date"].drop_duplicates())
+    ]
     if len(date_blocks) < int(n_folds) + 1:
         raise FutureValueSourceError("chronological folds need more timestamp blocks")
-    chunks = np.array_split(np.arange(len(date_blocks)), int(n_folds) + 1)
+    chunks = np.array_split(np.asarray(date_blocks, dtype=object), int(n_folds) + 1)
     folds: list[dict[str, Any]] = []
     for fold_index in range(1, len(chunks)):
-        validation_blocks = [date_blocks[int(index)] for index in chunks[fold_index]]
-        if not validation_blocks:
+        validation_dates = chunks[fold_index]
+        if not len(validation_dates):
             continue
-        validation_series = {str(series_id) for _date, block in validation_blocks for series_id in block.index}
-        validation_min = min(block["first_date"].min() for _date, block in validation_blocks)
+        validation_min = pd.Timestamp(validation_dates[0])
+        validation_max = pd.Timestamp(validation_dates[-1])
+        contained = series_summary["first_date"].ge(validation_min) & series_summary[
+            "last_date"
+        ].le(validation_max)
+        intersects = series_summary["last_date"].ge(validation_min) & series_summary[
+            "first_date"
+        ].le(validation_max)
+        validation_series = set(series_summary.index[contained].astype(str))
+        excluded_boundary_series = set(
+            series_summary.index[intersects & ~contained].astype(str)
+        )
         train_series = {
             str(series_id)
             for series_id, row in series_summary.iterrows()
-            if str(series_id) not in validation_series and row["last_date"] < validation_min
+            if row["last_date"] < validation_min
         }
         train_ids = tuple(sorted(frame.loc[frame["series_id"].astype(str).isin(train_series), "game_id"]))
         validation_ids = tuple(sorted(frame.loc[frame["series_id"].astype(str).isin(validation_series), "game_id"]))
@@ -1782,8 +2101,14 @@ def chronological_whole_series_folds(
             continue
         train_max = frame.loc[frame["game_id"].isin(train_ids), "date"].max()
         valid_min = frame.loc[frame["game_id"].isin(validation_ids), "date"].min()
+        valid_max = frame.loc[frame["game_id"].isin(validation_ids), "date"].max()
         if not pd.Timestamp(train_max) < pd.Timestamp(valid_min):
             raise FutureValueSourceError("chronological fold has a non-strict date boundary")
+        if pd.Timestamp(valid_min) < validation_min or pd.Timestamp(valid_max) > validation_max:
+            raise FutureValueSourceError("validation cluster crosses its chronological interval")
+        excluded_boundary_map_count = int(
+            frame["series_id"].astype(str).isin(excluded_boundary_series).sum()
+        )
         folds.append(
             {
                 "fold": int(fold_index),
@@ -1793,10 +2118,36 @@ def chronological_whole_series_folds(
                 "validation_series_ids": tuple(sorted(validation_series)),
                 "train_end": _utc_text(train_max),
                 "validation_start": _utc_text(valid_min),
+                "validation_end": _utc_text(valid_max),
+                "validation_interval_start": _utc_text(validation_min),
+                "validation_interval_end": _utc_text(validation_max),
+                "overlap_audit": {
+                    "boundary_cluster_policy": "exclude_cluster_from_validation_interval",
+                    "excluded_boundary_cluster_count": len(excluded_boundary_series),
+                    "excluded_boundary_map_count": excluded_boundary_map_count,
+                    "validation_game_identity_sha256": identity_sha256(validation_ids),
+                },
             }
         )
-    if not folds:
-        raise FutureValueSourceError("chronological fold construction produced no usable folds")
+    if len(folds) != int(n_folds):
+        raise FutureValueSourceError(
+            "chronological fold construction did not produce every requested fold"
+        )
+    seen_validation_ids: set[str] = set()
+    previous_end: pd.Timestamp | None = None
+    for fold in folds:
+        current_ids = set(map(str, fold["validation_game_ids"]))
+        overlap = seen_validation_ids & current_ids
+        if overlap:
+            raise FutureValueSourceError("chronological validation folds overlap by game ID")
+        current_start = _utc_timestamp(fold["validation_start"], "validation_start")
+        current_end = _utc_timestamp(fold["validation_end"], "validation_end")
+        if previous_end is not None and not previous_end < current_start:
+            raise FutureValueSourceError("chronological validation intervals overlap")
+        fold["overlap_audit"]["prior_validation_game_overlap_count"] = 0
+        fold["overlap_audit"]["prior_validation_interval_overlap"] = False
+        seen_validation_ids.update(current_ids)
+        previous_end = current_end
     return folds
 
 
@@ -1937,8 +2288,18 @@ def _missingness_metrics(
         blockers.append("incomplete_feature_prediction_missing")
     if not bool((paired & complete).any()):
         blockers.append("complete_case_validation_rows_missing")
+    status = "blocked" if "incomplete_feature_prediction_missing" in blockers else (
+        "imputed_only" if not bool((paired & complete).any()) else "available"
+    )
+    missing_feature_counts: dict[str, int] = {}
+    if "model_missing_feature_names" in validation.columns:
+        for names in validation["model_missing_feature_names"]:
+            for name in names:
+                missing_feature_counts[str(name)] = (
+                    missing_feature_counts.get(str(name), 0) + 1
+                )
     return {
-        "status": "available",
+        "status": status,
         "total_rows": int(len(validation)),
         "complete_case_rows": int(complete.sum()),
         "incomplete_case_rows": int((~complete).sum()),
@@ -1957,6 +2318,7 @@ def _missingness_metrics(
             else 1.0
         ),
         "imputation_contract": "fold_local_equal_side_median",
+        "missing_feature_counts": dict(sorted(missing_feature_counts.items())),
         "blockers": blockers,
     }
 
@@ -2017,7 +2379,7 @@ def _roster_change_labels(frame: pd.DataFrame) -> pd.Series | None:
         return None
     blue = pd.to_numeric(frame["blue_roster_continuity"], errors="coerce")
     red = pd.to_numeric(frame["red_roster_continuity"], errors="coerce")
-    labels = pd.Series("continuity_unavailable", index=frame.index, dtype="string")
+    labels = pd.Series("<missing>", index=frame.index, dtype="string")
     stable = blue.ge(1.0) & red.ge(1.0)
     changed = blue.lt(1.0) | red.lt(1.0)
     labels.loc[stable] = "stable_roster"
@@ -2026,7 +2388,7 @@ def _roster_change_labels(frame: pd.DataFrame) -> pd.Series | None:
 
 
 def _support_labels(frame: pd.DataFrame, threshold: float = 5.0) -> pd.Series | None:
-    field = "player_form_effective_support_mean"
+    field = "player_form_minimum_effective_support"
     if field not in frame.columns:
         return None
     support = pd.to_numeric(frame[field], errors="coerce")
@@ -2696,6 +3058,27 @@ def evaluate_future_value(
                     "hierarchical_bt": _ledger_value(
                         hierarchical_probability.loc[row_index]
                     ),
+                    "minimum_metric_support": _ledger_value(
+                        validation.loc[
+                            row_index, "player_form_minimum_metric_support"
+                        ]
+                    ),
+                    "minimum_effective_support": _ledger_value(
+                        validation.loc[
+                            row_index, "player_form_minimum_effective_support"
+                        ]
+                    ),
+                    "minimum_atom_support": _ledger_value(
+                        validation.loc[
+                            row_index, "rank_3_champion_role_minimum_support"
+                        ]
+                    ),
+                    "missing_feature_names": list(
+                        validation.loc[row_index, "model_missing_feature_names"]
+                    ),
+                    "support_status": str(
+                        _support_labels(validation.loc[[row_index]]).iloc[0]
+                    ),
                 }
             )
         current_fold_reports.append(current_comparison)
@@ -2771,6 +3154,10 @@ def evaluate_future_value(
                 "fold": fold["fold"],
                 "train_end": fold["train_end"],
                 "validation_start": fold["validation_start"],
+                "validation_end": fold["validation_end"],
+                "validation_interval_start": fold["validation_interval_start"],
+                "validation_interval_end": fold["validation_interval_end"],
+                "validation_overlap_audit": fold["overlap_audit"],
                 "train_series_count": len(fold["train_series_ids"]),
                 "validation_series_count": len(fold["validation_series_ids"]),
                 "candidate": _classification_metrics(paired_target, paired_prediction),
@@ -2794,6 +3181,7 @@ def evaluate_future_value(
                 "regularization_selection": model_parameters[
                     "regularization_selection"
                 ],
+                "optimizer_evidence": model_parameters["optimizer_evidence"],
                 "coefficients": model_parameters["coefficients"],
                 "model_parameter_sha256": model_parameters["parameter_sha256"],
                 "rank_3": model_parameters["rank_3"],
@@ -2924,6 +3312,11 @@ def evaluate_future_value(
             "intercept",
             "sequential_player_elo",
             "hierarchical_bt",
+            "minimum_metric_support",
+            "minimum_effective_support",
+            "minimum_atom_support",
+            "missing_feature_names",
+            "support_status",
         ],
         "row_count": len(prediction_ledger_rows),
         "game_identity_sha256": identity_sha256(
@@ -2970,6 +3363,32 @@ def evaluate_future_value(
             "pooled_calibration": pooled_calibration_report,
             "pooled_baseline_calibration": pooled_baseline_calibration_report,
             "pooled_current_rating_comparison": pooled_current_comparison,
+            "validation_overlap_audit": {
+                "status": "passed",
+                "validation_game_count": len(
+                    {
+                        game_id
+                        for report in fold_reports
+                        for game_id in report["paired_game_ids"]
+                    }
+                ),
+                "fold_validation_game_count_sum": sum(
+                    report["validation_game_id_count"] for report in fold_reports
+                ),
+                "game_id_overlap_count": 0,
+                "interval_overlap_count": 0,
+                "fold_windows": [
+                    {
+                        "fold": report["fold"],
+                        "validation_start": report["validation_start"],
+                        "validation_end": report["validation_end"],
+                        "validation_game_identity_sha256": report[
+                            "validation_game_identity_sha256"
+                        ],
+                    }
+                    for report in fold_reports
+                ],
+            },
         },
         "folds": fold_reports,
         "prediction_ledger": prediction_ledger,
@@ -3042,19 +3461,21 @@ def future_value_model_contract() -> dict[str, Any]:
             "team_state": "exact-five roster aggregation plus strictly prior team win state and roster continuity",
             "metric_weights": "fit inside development folds; no hand-assigned performance weights",
             "side_symmetry": "zero-intercept linear logit over blue-minus-red features after equal fold-local side imputation",
-            "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red before subtraction",
+            "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red; allow neutral zero only for all-missing centered atom coordinates and fail closed otherwise",
             "regularization": "select L2 strength inside each outer training fold with a nested chronological whole-series log-loss comparison",
+            "role_identity": "normalize top, jungle, mid, bot, and support aliases before every atom fit and transform lookup",
+            "optimizer": "require finite converged zero-intercept L-BFGS evidence for every nested candidate and final fold fit",
         },
         "evaluation": [
-            "chronological whole-series folds",
+            "non-overlapping chronological intervals with whole clusters and boundary-cluster exclusion",
             "intercept baseline and proper scores",
             "conservative series-superset clusters with collision audit",
             "validation calibration bins and pooled proper scores",
             "regional and patch transfer slices with training-support checks",
             "roster-change and tournament-boundary slices",
-            "complete-case and withheld-row missingness counts",
+            "separate complete and imputed-row proper scores with imputed-only blockers",
             "fold-local equal-side imputation with signed missingness and support indicators",
-            "sparse-support slice and support-uncertainty diagnostics",
+            "minimum and per-metric support diagnostics with named missing features",
             "structural side-swap probability-complement identity",
         ],
         "future_scope_blockers": [

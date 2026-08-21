@@ -11,9 +11,13 @@ from lol_kills.research.future_value_rating import (
     SIDE_LEVEL_TO_MODEL_FEATURE,
     _side_level_column,
     _map_model_frame,
+    _missingness_metrics,
+    _group_slice_metrics,
+    _roster_change_labels,
     _frame_game_ids,
     _baseline_output_alignment,
     _baseline_source_binding,
+    _fold_level_imputation_values,
     build_future_value_design,
     build_time_decayed_prior_player_form,
     chronological_whole_series_folds,
@@ -191,6 +195,70 @@ def test_rank3_fit_and_design_use_exact_five_rosters() -> None:
         build_future_value_design(maps, broken_role, atom)
 
 
+def test_rank3_fit_normalizes_frozen_jng_and_sup_roles() -> None:
+    maps, form = _manual_form(24)
+    form.loc[form["role"].eq("jungle"), "role"] = "jng"
+    form.loc[form["role"].eq("support"), "role"] = "sup"
+    for index, row in form.iterrows():
+        blue_win = (int(row["game_id"]) - 1) % 2 == 1
+        favorable = blue_win if row["side"] == "blue" else not blue_win
+        form.loc[index, "champion"] = (
+            f"Signal-{'favorable' if favorable else 'unfavorable'}-{row['role']}"
+        )
+    train_ids = [str(index) for index in range(1, 22)]
+    atom = fit_rank3_player_champion_role_atoms(form, train_game_ids=train_ids)
+    assert any(key.endswith("|jungle") for key in atom.champion_role_coordinates)
+    assert any(key.endswith("|support") for key in atom.champion_role_coordinates)
+    assert not any(key.endswith("|jng") for key in atom.champion_role_coordinates)
+    assert not any(key.endswith("|sup") for key in atom.champion_role_coordinates)
+    model, design = fit_future_value_model(
+        maps,
+        form,
+        train_game_ids=train_ids,
+        fit_window_end="2026-01-22T00:00:00Z",
+        source_receipt=_source_receipt([str(index) for index in range(1, 25)]),
+    )
+    champion_columns = [
+        _side_level_column(side, f"rank_3_champion_role_atom_{index}")
+        for side in ("blue", "red")
+        for index in range(1, 4)
+    ]
+    assert np.isfinite(design[champion_columns].to_numpy(dtype=float)).any()
+    champion_coefficients = [
+        model.coefficient_map[f"rank_3_champion_role_atom_{index}"]
+        for index in range(1, 4)
+    ]
+    assert any(abs(value) > 1e-12 for value in champion_coefficients)
+    broken = form.copy()
+    broken.loc[broken.index[0], "role"] = pd.NA
+    with pytest.raises(FutureValueSourceError, match="missing champion or role"):
+        fit_rank3_player_champion_role_atoms(broken, train_game_ids=train_ids)
+
+
+def test_imputation_fails_closed_for_all_missing_non_centered_features() -> None:
+    maps, form = _manual_form(24)
+    atom = fit_rank3_player_champion_role_atoms(
+        form, train_game_ids=[str(index) for index in range(1, 22)]
+    )
+    design = build_future_value_design(maps, form, atom)
+    broken = design.copy()
+    for side in ("blue", "red"):
+        broken[_side_level_column(side, "team_prior_win")] = np.nan
+    with pytest.raises(FutureValueSourceError, match="non-centered.*all missing"):
+        _fold_level_imputation_values(broken)
+    centered = design.copy()
+    atom_sources = [
+        f"rank_3_champion_role_atom_{index}" for index in range(1, 4)
+    ]
+    for source_name in atom_sources:
+        for side in ("blue", "red"):
+            centered[_side_level_column(side, source_name)] = np.nan
+    imputation = _fold_level_imputation_values(centered)
+    for source_name in atom_sources:
+        position = list(SIDE_LEVEL_TO_MODEL_FEATURE).index(source_name)
+        assert imputation[position] == 0.0
+
+
 def test_future_value_fit_returns_fitted_metric_weights_and_prediction() -> None:
     maps, form = _manual_form(24)
     model, design = fit_future_value_model(
@@ -244,6 +312,15 @@ def test_fold_local_imputation_predicts_incomplete_rows_and_preserves_side_swap(
     assert incomplete["model_features_complete"].eq(False).all()
     probability = model.predict_probability(incomplete)
     assert probability.notna().all()
+    missingness = _missingness_metrics(
+        incomplete,
+        incomplete["target"].astype(float),
+        probability,
+    )
+    assert missingness["status"] == "imputed_only"
+    assert missingness["complete_case_metrics"]["rows"] == 0
+    assert missingness["incomplete_case_metrics"]["rows"] == 1
+    assert "complete_case_validation_rows_missing" in missingness["blockers"]
 
     swapped = incomplete.copy()
     for source_name in SIDE_LEVEL_TO_MODEL_FEATURE:
@@ -276,6 +353,47 @@ def test_fold_local_imputation_predicts_incomplete_rows_and_preserves_side_swap(
     assert model.regularization_selection["selected_c"] in model.regularization_selection[
         "candidate_grid"
     ]
+
+
+def test_player_value_components_reconstruct_full_logit_with_support_records() -> None:
+    maps, form = _manual_form(24)
+    model, design = fit_future_value_model(
+        maps,
+        form,
+        train_game_ids=[str(index) for index in range(1, 22)],
+        fit_window_end="2026-01-22T00:00:00Z",
+        source_receipt=_source_receipt([str(index) for index in range(1, 25)]),
+    )
+    selected_design = design.loc[design["game_id"].isin(["22", "23", "24"])].copy()
+    components = model.player_value_logit(form, selected_design)
+    reconstructed = (
+        components["player_value_logit"]
+        + components["team_context_logit"]
+        + components["data_quality_logit"]
+    )
+    np.testing.assert_allclose(
+        reconstructed,
+        components["full_model_logit"],
+        rtol=0.0,
+        atol=1e-12,
+    )
+    assert components["component_reconstruction_error"].abs().max() <= 1e-12
+    assert components["player_support_records"].map(len).eq(10).all()
+    first_record = components.iloc[0]["player_support_records"][0]
+    assert set(first_record["metric_support"]) == set(METRICS)
+    assert set(first_record["metric_effective_support"]) == set(METRICS)
+    assert "minimum_effective_support" in first_record
+    assert "champion_role_atom_support" in first_record
+    assert "missing_feature_names" in first_record
+    assert first_record["support_status"] in {"adequate", "sparse", "missing"}
+    assert model.optimizer_evidence["success"] is True
+    assert model.optimizer_evidence["finite_coefficients"] is True
+    assert model.regularization_selection["inner_atom_parameter_sha256"]
+    assert model.regularization_selection["inner_transform_sha256"]
+    assert all(
+        row["optimizer"]["success"] and len(row["prediction_sha256"]) == 64
+        for row in model.regularization_selection["candidate_scores"]
+    )
 
 
 def test_fit_requires_a_verified_source_receipt() -> None:
@@ -359,6 +477,72 @@ def test_bare_source_neutral_series_id_does_not_claim_authority() -> None:
     assert frame["series_id"].str.startswith("proxy:").all()
 
 
+def test_authoritative_series_requires_source_bound_assignment_receipt() -> None:
+    maps = pd.DataFrame(
+        [
+            {
+                "game_uid": f"g{index}",
+                "date": f"2026-01-0{index}T00:00:00Z",
+                "y_blue_win": index % 2,
+                "grid_series_id": "series-a" if index < 3 else "series-b",
+                "blue_teamid": "oe:team:a",
+                "red_teamid": "oe:team:b",
+            }
+            for index in range(1, 4)
+        ]
+    )
+    game_ids = list(maps["game_uid"])
+    source_receipt_sha256 = "a" * 64
+    assignment_rows = [
+        {"game_id": row.game_uid, "series_id": row.grid_series_id}
+        for row in maps.sort_values("game_uid").itertuples(index=False)
+    ]
+    pair_rows = [
+        {
+            "game_id": row.game_uid,
+            "series_id": row.grid_series_id,
+            "team_pair": "oe:team:a|oe:team:b",
+        }
+        for row in maps.sort_values("game_uid").itertuples(index=False)
+    ]
+    payload = {
+        "source_type": "verified_grid_series",
+        "series_column": "grid_series_id",
+        "game_count": len(maps),
+        "game_identity_sha256": identity_sha256(game_ids),
+        "series_assignment_sha256": hashlib.sha256(
+            json.dumps(assignment_rows, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest(),
+        "series_pair_assignment_sha256": hashlib.sha256(
+            json.dumps(pair_rows, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest(),
+        "source_receipt_sha256": source_receipt_sha256,
+    }
+    payload["receipt_sha256"] = hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    maps.attrs["verified_source_receipt_sha256"] = source_receipt_sha256
+    maps.attrs["verified_series_receipt"] = payload
+    frame = _map_model_frame(maps)
+    audit = frame.attrs["series_cluster_audit"]
+    assert audit["authoritative"] is True
+    assert audit["cluster_count"] == 2
+    assert audit["colliding_cluster_count"] == 1
+    assert audit["collision_extra_map_count"] == 1
+    assert audit["max_cluster_size"] == 2
+
+    mutated = maps.copy()
+    mutated.attrs = dict(maps.attrs)
+    mutated.loc[0, "grid_series_id"] = "forged"
+    with pytest.raises(FutureValueSourceError, match="assignments changed"):
+        _map_model_frame(mutated)
+
+    unbound = maps.copy()
+    unbound.attrs = {"verified_series_receipt": payload}
+    with pytest.raises(FutureValueSourceError, match="does not bind"):
+        _map_model_frame(unbound)
+
+
 def test_proxy_series_prefers_stable_team_ids_over_alias_keys() -> None:
     maps = pd.DataFrame(
         [
@@ -429,6 +613,11 @@ def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None
         "intercept",
         "sequential_player_elo",
         "hierarchical_bt",
+        "minimum_metric_support",
+        "minimum_effective_support",
+        "minimum_atom_support",
+        "missing_feature_names",
+        "support_status",
     ]
     assert ledger["sha256"] == hashlib.sha256(
         json.dumps(
@@ -613,13 +802,70 @@ def test_sequential_binding_rejects_forged_implementation_and_config_hashes() ->
 
 def test_chronological_folds_keep_series_whole_and_dates_strict() -> None:
     maps, _form = _manual_form(24)
-    maps["series_id"] = [f"series-{index // 2}" for index in range(len(maps))]
+    maps["blue_teamid"] = [f"oe:team:a-{index // 2}" for index in range(len(maps))]
+    maps["red_teamid"] = [f"oe:team:b-{index // 2}" for index in range(len(maps))]
     folds = chronological_whole_series_folds(maps, n_folds=2)
-    assert folds
+    assert len(folds) == 2
+    prior_validation_ids: set[str] = set()
+    previous_end = None
     for fold in folds:
         assert set(fold["train_series_ids"]).isdisjoint(fold["validation_series_ids"])
         assert fold["train_end"] < fold["validation_start"]
+        assert fold["validation_start"] <= fold["validation_end"]
         assert set(fold["train_game_ids"]).isdisjoint(fold["validation_game_ids"])
+        assert prior_validation_ids.isdisjoint(fold["validation_game_ids"])
+        assert fold["overlap_audit"]["prior_validation_game_overlap_count"] == 0
+        if previous_end is not None:
+            assert previous_end < fold["validation_start"]
+        previous_end = fold["validation_end"]
+        prior_validation_ids.update(fold["validation_game_ids"])
+
+
+def test_roster_continuity_unavailable_blocks_the_slice() -> None:
+    frame = pd.DataFrame(
+        {
+            "blue_roster_continuity": [np.nan] * 20,
+            "red_roster_continuity": [np.nan] * 20,
+        }
+    )
+    labels = _roster_change_labels(frame)
+    assert labels is not None and labels.eq("<missing>").all()
+    report = _group_slice_metrics(
+        pd.Series([0, 1] * 10, dtype=float),
+        pd.Series([0.4, 0.6] * 10, dtype=float),
+        labels,
+        labels,
+        slice_name="roster_change",
+    )
+    assert "roster_change_labels_missing" in report["blockers"]
+
+
+def test_chronological_folds_exclude_clusters_that_cross_intervals() -> None:
+    rows = []
+    for index in range(1, 41):
+        bridge = index in {12, 29}
+        rows.append(
+            {
+                "game_uid": f"g{index:02d}",
+                "date": pd.Timestamp("2026-01-01T00:00:00Z")
+                + pd.Timedelta(days=index - 1),
+                "y_blue_win": index % 2,
+                "league": "LEC",
+                "blue_teamid": "oe:team:bridge-a" if bridge else f"oe:team:a-{index}",
+                "red_teamid": "oe:team:bridge-b" if bridge else f"oe:team:b-{index}",
+            }
+        )
+    folds = chronological_whole_series_folds(pd.DataFrame(rows), n_folds=3)
+    assert len(folds) == 3
+    validation_ids = {
+        game_id for fold in folds for game_id in fold["validation_game_ids"]
+    }
+    assert {"g12", "g29"}.isdisjoint(validation_ids)
+    assert {"g12", "g29"}.issubset(set(folds[2]["train_game_ids"]))
+    assert any(
+        fold["overlap_audit"]["excluded_boundary_cluster_count"] > 0
+        for fold in folds[:2]
+    )
 
 
 def test_bridge_receipt_binds_bytes_and_rejects_mutation(tmp_path) -> None:

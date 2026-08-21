@@ -12,15 +12,15 @@
     "recommendation": false
   },
   "evaluation": [
-    "chronological whole-series folds",
+    "non-overlapping chronological intervals with whole clusters and boundary-cluster exclusion",
     "intercept baseline and proper scores",
     "conservative series-superset clusters with collision audit",
     "validation calibration bins and pooled proper scores",
     "regional and patch transfer slices with training-support checks",
     "roster-change and tournament-boundary slices",
-    "complete-case and withheld-row missingness counts",
+    "separate complete and imputed-row proper scores with imputed-only blockers",
     "fold-local equal-side imputation with signed missingness and support indicators",
-    "sparse-support slice and support-uncertainty diagnostics",
+    "minimum and per-metric support diagnostics with named missing features",
     "structural side-swap probability-complement identity"
   ],
   "estimands": {
@@ -29,10 +29,12 @@
   },
   "fit_contract": {
     "metric_weights": "fit inside development folds; no hand-assigned performance weights",
-    "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red before subtraction",
+    "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red; allow neutral zero only for all-missing centered atom coordinates and fail closed otherwise",
+    "optimizer": "require finite converged zero-intercept L-BFGS evidence for every nested candidate and final fold fit",
     "player_state": "strictly prior time-decayed form with fold-local rank-3 atoms and support diagnostics",
     "regularization": "select L2 strength inside each outer training fold with a nested chronological whole-series log-loss comparison",
     "representation": "atom-derived rank-3 champion embedding refit inside each chronological fold",
+    "role_identity": "normalize top, jungle, mid, bot, and support aliases before every atom fit and transform lookup",
     "side_symmetry": "zero-intercept linear logit over blue-minus-red features after equal fold-local side imputation",
     "team_state": "exact-five roster aggregation plus strictly prior team win state and roster continuity"
   },
@@ -62,7 +64,7 @@
     },
     "future_value_model_builder": {
       "locator": "lol_kills/research/future_value_rating.py",
-      "raw_sha256": "2670cf73d03eb17d0c04e85a33c06b4f3e6a618faebb3188fd9cc454fbc6d253"
+      "raw_sha256": "d3264f66e8c73d574660079fc6d47e631254542d12ed8139a0a3edbeb25ced49"
     },
     "phase_curve_builder": {
       "locator": "lol_kills/research/future_phase_curve.py",
