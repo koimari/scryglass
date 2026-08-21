@@ -248,8 +248,16 @@ def _validate_verified_source_receipt(
 
 def validate_future_value_source_receipt_payload(
     receipt: Mapping[str, Any] | None,
+    *,
+    expected_receipt_sha256: str | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Validate the complete canonical research source receipt."""
+    """Validate the complete canonical research source receipt.
+
+    A receipt hash can be supplied by a frozen manifest.  Source records that
+    contain durable paths are checked against the bytes at those paths.  A
+    locator-only record remains a provenance claim until its source root is
+    available to the caller.
+    """
 
     if not isinstance(receipt, Mapping):
         raise FutureValueSourceError("verified source receipt is required")
@@ -270,6 +278,12 @@ def validate_future_value_source_receipt_payload(
     payload.pop("receipt_sha256", None)
     if hashlib.sha256(_canonical_json_bytes(payload)).hexdigest() != receipt_hash:
         raise FutureValueSourceError("verified source receipt hash does not match payload")
+    if expected_receipt_sha256 is not None:
+        expected_hash = str(expected_receipt_sha256).lower()
+        if re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None:
+            raise FutureValueSourceError("expected verified source receipt hash is invalid")
+        if receipt_hash.lower() != expected_hash:
+            raise FutureValueSourceError("verified source receipt hash differs from expected")
     accepted_ids = tuple(str(value) for value in receipt["accepted_game_ids"])
     eligible_ids = tuple(str(value) for value in receipt["model_eligible_game_ids"])
     if (
@@ -303,8 +317,16 @@ def validate_future_value_source_receipt_payload(
         locators = (record.get("path"), record.get("locator"))
         if sum(isinstance(value, str) and bool(value.strip()) for value in locators) != 1:
             raise FutureValueSourceError(f"verified source file locator is invalid: {label}")
-        if re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256") or ""), re.I) is None:
+        expected_file_hash = str(record.get("sha256") or "").lower()
+        if re.fullmatch(r"[0-9a-f]{64}", expected_file_hash, re.I) is None:
             raise FutureValueSourceError(f"verified source file hash is invalid: {label}")
+        if isinstance(record.get("path"), str) and record["path"].strip():
+            path = _safe_file_path(record["path"], f"verified source file {label}")
+            actual_bytes = path.stat().st_size
+            if int(record["bytes"]) != actual_bytes:
+                raise FutureValueSourceError(f"verified source file bytes changed: {label}")
+            if _sha256_path(path) != expected_file_hash:
+                raise FutureValueSourceError(f"verified source file hash changed: {label}")
         if "year" in record and (
             isinstance(record["year"], bool) or not isinstance(record["year"], int)
         ):
@@ -1368,10 +1390,10 @@ RATING_FEATURE_PRODUCER_SCHEMA_VERSION = (
     "scryglass:future-value-rating-feature-producer:v1"
 )
 RATING_FEATURE_PRODUCER_RECEIPT_SCHEMA_VERSION = (
-    "scryglass:future-value-rating-feature-producer-receipt:v1"
+    "scryglass:future-value-rating-feature-producer-receipt:v2"
 )
 RATING_FEATURE_PRODUCER_MANIFEST_SCHEMA_VERSION = (
-    "scryglass:future-value-rating-feature-producer-manifest:v1"
+    "scryglass:future-value-rating-feature-producer-manifest:v2"
 )
 RATING_FEATURE_PRODUCER_AUTHORITY = MappingProxyType(
     {
@@ -1786,6 +1808,271 @@ def _compare_artifact_values(
             )
 
 
+def _load_native_producer_artifact(path: Path, name: str) -> pd.DataFrame:
+    """Load the producer-owned ledger used by a native receipt.
+
+    Native receipts describe parquet ledgers emitted by the registered
+    producers.  A narrow adapter artifact may contain only selected columns,
+    while native validation needs the date and series columns as well.
+    """
+
+    if path.suffix.casefold() not in {".parquet", ".pq"}:
+        raise FutureValueSourceError(f"{name} native artifact must be parquet")
+    try:
+        native = pd.read_parquet(path)
+    except Exception as error:
+        raise FutureValueSourceError(f"{name} native artifact cannot be loaded") from error
+    if not isinstance(native, pd.DataFrame) or native.empty:
+        raise FutureValueSourceError(f"{name} native artifact is empty")
+    required = {"game_id", "date"}
+    if name == "current_sequential_rating":
+        required.add("series_id")
+    missing = sorted(required - set(native.columns))
+    if missing:
+        raise FutureValueSourceError(
+            f"{name} native artifact is missing: " + ", ".join(missing)
+        )
+    native = native.copy()
+    native["game_id"] = native["game_id"].astype(str)
+    native["date"] = pd.to_datetime(native["date"], utc=True, errors="coerce")
+    if "series_id" in native.columns:
+        native["series_id"] = native["series_id"].astype(str).str.strip()
+    if (
+        native["game_id"].eq("").any()
+        or native["game_id"].duplicated().any()
+        or native["date"].isna().any()
+        or (
+            "series_id" in native.columns
+            and (
+                native["series_id"].eq("").any()
+                or native["series_id"].eq("nan").any()
+            )
+        )
+    ):
+        raise FutureValueSourceError(f"{name} native artifact identity is invalid")
+    return native
+
+
+def _scaling_native_rows_sha256(frame: pd.DataFrame) -> str:
+    """Recompute the atomized scaling producer's full-row digest."""
+
+    try:
+        from lol_kills.research.atomized_rf_composite import (
+            _scaling_json_value,
+            _strict_canonical_sha256,
+        )
+    except Exception as error:  # pragma: no cover - import failure is an environment error
+        raise FutureValueSourceError("scaling producer implementation is unavailable") from error
+    ordered = frame.sort_values(["date", "game_id"], kind="stable")
+    rows = [
+        {
+            str(column): _scaling_json_value(value)
+            for column, value in row.items()
+        }
+        for row in ordered.to_dict("records")
+    ]
+    return str(_strict_canonical_sha256(rows)).lower()
+
+
+def _validate_native_producer_receipt(
+    name: str,
+    receipt: Mapping[str, Any],
+    *,
+    native_artifact: pd.DataFrame,
+    native_artifact_record: Mapping[str, Any],
+    source_receipt: Mapping[str, Any],
+    train_ids: Sequence[str],
+    validation_ids: Sequence[str],
+    cutoff: str,
+    expected_features: Sequence[str],
+) -> None:
+    """Verify the producer-owned native receipt before adapter values bind."""
+
+    if name == "current_sequential_rating":
+        try:
+            from lol_kills.research.future_value_rating_ledger import (
+                validate_fold_current_rating_feature_ledger,
+            )
+            validate_fold_current_rating_feature_ledger(
+                native_artifact,
+                receipt,
+                source_receipt=source_receipt,
+                train_game_ids=train_ids,
+                validation_game_ids=validation_ids,
+                fit_window_end=cutoff,
+            )
+        except FutureValueSourceError:
+            raise
+        except Exception as error:
+            raise FutureValueSourceError(
+                "current rating native receipt failed validation"
+            ) from error
+        if receipt.get("artifact") != dict(native_artifact_record):
+            raise FutureValueSourceError("current rating native artifact binding changed")
+        frame_features = tuple(str(value) for value in receipt.get("feature_names", ()))
+        if frame_features != tuple(expected_features):
+            raise FutureValueSourceError("current rating native feature list changed")
+        source_frames = receipt.get("source_frame_sha256")
+        if not isinstance(source_frames, Mapping) or set(source_frames) != {
+            "maps", "players", "teams"
+        } or any(
+            re.fullmatch(r"[0-9a-f]{64}", str(source_frames.get(label) or ""), re.I)
+            is None
+            for label in ("maps", "players", "teams")
+        ):
+            raise FutureValueSourceError("current rating native source frame binding is invalid")
+        return
+
+    if name != "strict_prior_atomized_scaling":
+        raise FutureValueSourceError(f"unknown native producer: {name}")
+
+    allowed = {
+        "accepted_game_count",
+        "accepted_game_ids",
+        "authority",
+        "checkpoint_targets",
+        "columns",
+        "evaluation_mode",
+        "excluded_extra_game_count",
+        "excluded_extra_identity_sha256",
+        "fit_window_end",
+        "fold_blocker",
+        "fold_evaluation_usable",
+        "implementation_sha256",
+        "model_eligible_only",
+        "model_excluded_game_count",
+        "model_excluded_identity_sha256",
+        "output_game_count",
+        "output_game_ids",
+        "output_identity_sha256",
+        "public_authority",
+        "receipt_sha256",
+        "row_value_digest_sha256",
+        "rows",
+        "same_timestamp_batch_receipts",
+        "same_timestamp_batching",
+        "same_timestamp_policy",
+        "source_as_of",
+        "source_extra_game_ids",
+        "source_frame_sha256",
+        "source_identity_sha256",
+        "source_receipt_sha256",
+        "source_row_value_sha256",
+        "schema_version",
+        "status",
+        "team_identity",
+        "train_game_ids",
+        "train_identity_sha256",
+        "validation_game_ids",
+        "validation_identity_sha256",
+    }
+    if set(receipt) != allowed:
+        raise FutureValueSourceError("scaling native receipt schema is invalid")
+    claimed_hash = receipt.get("receipt_sha256")
+    payload = dict(receipt)
+    payload.pop("receipt_sha256", None)
+    if not isinstance(claimed_hash, str) or re.fullmatch(r"[0-9a-f]{64}", claimed_hash, re.I) is None:
+        raise FutureValueSourceError("scaling native receipt hash is invalid")
+    if hashlib.sha256(_canonical_json_bytes(payload)).hexdigest() != claimed_hash.lower():
+        raise FutureValueSourceError("scaling native receipt hash changed")
+    if receipt.get("schema_version") != "scryglass:atomized-scaling-feature-ledger:v1":
+        raise FutureValueSourceError("scaling native receipt schema is invalid")
+    if receipt.get("status") != "research_only" or receipt.get("authority") is not False:
+        raise FutureValueSourceError("scaling native receipt authority is invalid")
+    if receipt.get("public_authority") is not False:
+        raise FutureValueSourceError("scaling native receipt public authority is invalid")
+    if receipt.get("source_receipt_sha256") != source_receipt.get("receipt_sha256"):
+        raise FutureValueSourceError("scaling native source receipt binding changed")
+    if receipt.get("source_identity_sha256") != source_receipt.get("source_identity_sha256"):
+        raise FutureValueSourceError("scaling native source identity changed")
+    if receipt.get("source_as_of") != _utc_text(source_receipt["source_as_of"]):
+        raise FutureValueSourceError("scaling native source cutoff changed")
+    accepted_ids = tuple(str(value) for value in source_receipt["accepted_game_ids"])
+    if tuple(str(value) for value in receipt.get("accepted_game_ids", ())) != accepted_ids:
+        raise FutureValueSourceError("scaling native accepted census changed")
+    if receipt.get("accepted_game_count") != len(accepted_ids):
+        raise FutureValueSourceError("scaling native accepted count changed")
+    model_ids = tuple(sorted(str(value) for value in native_artifact["game_id"]))
+    if tuple(sorted(str(value) for value in receipt.get("output_game_ids", ()))) != model_ids:
+        raise FutureValueSourceError("scaling native output census changed")
+    if receipt.get("output_game_count") != len(model_ids) or receipt.get(
+        "output_identity_sha256"
+    ) != identity_sha256(model_ids):
+        raise FutureValueSourceError("scaling native output identity changed")
+    if receipt.get("rows") != len(native_artifact):
+        raise FutureValueSourceError("scaling native row count changed")
+    columns = tuple(str(value) for value in receipt.get("columns", ()))
+    if columns != tuple(str(value) for value in native_artifact.columns):
+        raise FutureValueSourceError("scaling native artifact columns changed")
+    if any(feature not in native_artifact.columns for feature in expected_features):
+        raise FutureValueSourceError("scaling native feature columns are incomplete")
+    implementation_path = Path(__file__).resolve().parents[2] / (
+        "lol_kills/research/atomized_rf_composite.py"
+    )
+    if receipt.get("implementation_sha256") != _sha256_path(implementation_path):
+        raise FutureValueSourceError("scaling native implementation binding changed")
+    source_frames = receipt.get("source_frame_sha256")
+    if not isinstance(source_frames, Mapping) or set(source_frames) != {
+        "maps", "players", "teams"
+    } or any(
+        re.fullmatch(r"[0-9a-f]{64}", str(source_frames.get(label) or ""), re.I)
+        is None
+        for label in ("maps", "players", "teams")
+    ):
+        raise FutureValueSourceError("scaling native source frame binding is invalid")
+    if receipt.get("evaluation_mode") != "fold_local" or receipt.get("fold_evaluation_usable") is not True:
+        raise FutureValueSourceError("scaling native evaluation mode is invalid")
+    if tuple(str(value) for value in receipt.get("train_game_ids", ())) != tuple(train_ids):
+        raise FutureValueSourceError("scaling native training IDs changed")
+    if tuple(str(value) for value in receipt.get("validation_game_ids", ())) != tuple(validation_ids):
+        raise FutureValueSourceError("scaling native validation IDs changed")
+    if receipt.get("train_identity_sha256") != identity_sha256(train_ids) or receipt.get(
+        "validation_identity_sha256"
+    ) != identity_sha256(validation_ids):
+        raise FutureValueSourceError("scaling native fold identity changed")
+    if receipt.get("fit_window_end") != cutoff:
+        raise FutureValueSourceError("scaling native fit cutoff changed")
+    row_digest = str(receipt.get("row_value_digest_sha256") or "").lower()
+    if re.fullmatch(r"[0-9a-f]{64}", row_digest, re.I) is None:
+        raise FutureValueSourceError("scaling native row digest is invalid")
+    if _scaling_native_rows_sha256(native_artifact) != row_digest:
+        raise FutureValueSourceError("scaling native artifact values changed")
+    if receipt.get("artifact") is not None:
+        raise FutureValueSourceError("scaling native receipt has an unexpected artifact binding")
+
+
+def _compare_native_frame_bindings(
+    native_frame: pd.DataFrame,
+    frame: pd.DataFrame,
+    name: str,
+) -> None:
+    """Bind native output dates and optional series IDs to the fold frame."""
+
+    left = native_frame[["game_id", "date"]].copy()
+    right = frame[["game_id", "date"]].copy()
+    left["game_id"] = left["game_id"].astype(str)
+    right["game_id"] = right["game_id"].astype(str)
+    left["date"] = pd.to_datetime(left["date"], utc=True, errors="coerce")
+    right["date"] = pd.to_datetime(right["date"], utc=True, errors="coerce")
+    left = left.sort_values("game_id", kind="stable").reset_index(drop=True)
+    right = right.sort_values("game_id", kind="stable").reset_index(drop=True)
+    if tuple(left["game_id"]) != tuple(right["game_id"]) or not left["date"].equals(
+        right["date"]
+    ):
+        raise FutureValueSourceError(f"{name} native date binding changed")
+    if "series_id" in native_frame.columns:
+        native_series = native_frame[["game_id", "series_id"]].copy()
+        frame_series = frame[["game_id", "series_id"]].copy()
+        native_series["game_id"] = native_series["game_id"].astype(str)
+        frame_series["game_id"] = frame_series["game_id"].astype(str)
+        native_series["series_id"] = native_series["series_id"].astype(str).str.strip()
+        frame_series["series_id"] = frame_series["series_id"].astype(str).str.strip()
+        native_series = native_series.sort_values("game_id", kind="stable").reset_index(drop=True)
+        frame_series = frame_series.sort_values("game_id", kind="stable").reset_index(drop=True)
+        if not native_series.equals(frame_series):
+            raise FutureValueSourceError(f"{name} native series binding changed")
+
+
 def _producer_manifest_descriptors(
     producer: Mapping[str, Any] | None,
 ) -> tuple[dict[str, Any], ...]:
@@ -1825,7 +2112,9 @@ def _producer_manifest_descriptors(
     output: list[dict[str, Any]] = []
     names: set[str] = set()
     for raw in raw_adapters:
-        if not isinstance(raw, Mapping) or set(raw) != {"name", "artifact", "receipt"}:
+        if not isinstance(raw, Mapping) or set(raw) != {
+            "name", "artifact", "native_artifact", "receipt", "native_receipt"
+        }:
             raise FutureValueSourceError("rating feature producer manifest adapter is invalid")
         name = str(raw.get("name") or "").strip()
         if name in names:
@@ -1835,8 +2124,19 @@ def _producer_manifest_descriptors(
         if expected is None:
             raise FutureValueSourceError(f"unknown rating feature producer: {name}")
         artifact = _file_record(raw.get("artifact"), f"{name} artifact")
+        native_artifact = _file_record(raw.get("native_artifact"), f"{name} native artifact")
         receipt = _file_record(raw.get("receipt"), f"{name} receipt")
-        output.append({"name": name, "artifact": artifact, "receipt": receipt, "expected": expected})
+        native_receipt = _file_record(raw.get("native_receipt"), f"{name} native receipt")
+        output.append(
+            {
+                "name": name,
+                "artifact": artifact,
+                "native_artifact": native_artifact,
+                "receipt": receipt,
+                "native_receipt": native_receipt,
+                "expected": expected,
+            }
+        )
     return tuple(output)
 
 
@@ -1876,6 +2176,8 @@ def _verify_durable_producer_adapters(
             "authority",
             "producer",
             "artifact",
+            "native_artifact",
+            "native_receipt",
             "source_identity_sha256",
             "source_receipt_sha256",
             "source_receipt_file",
@@ -1930,6 +2232,16 @@ def _verify_durable_producer_adapters(
         artifact_record = _file_record(receipt.get("artifact"), f"{name} artifact")
         if artifact_record != descriptor["artifact"]:
             raise FutureValueSourceError(f"{name} producer artifact binding changed")
+        native_artifact_record = _file_record(
+            receipt.get("native_artifact"), f"{name} native artifact"
+        )
+        if native_artifact_record != descriptor["native_artifact"]:
+            raise FutureValueSourceError(f"{name} producer native artifact binding changed")
+        native_receipt_record = _file_record(
+            receipt.get("native_receipt"), f"{name} native receipt"
+        )
+        if native_receipt_record != descriptor["native_receipt"]:
+            raise FutureValueSourceError(f"{name} producer native receipt binding changed")
         if receipt.get("source_receipt_file") is not None:
             source_file = _file_record(receipt["source_receipt_file"], f"{name} source receipt")
             try:
@@ -1943,6 +2255,37 @@ def _verify_durable_producer_adapters(
                 raise FutureValueSourceError(f"{name} source receipt file binding changed")
         artifact_path = _safe_file_path(artifact_record["path"], f"{name} artifact")
         artifact_frame = _load_feature_artifact(artifact_path, expected_features)
+        native_artifact_record = descriptor["native_artifact"]
+        native_artifact_path = _safe_file_path(
+            native_artifact_record["path"], f"{name} native artifact"
+        )
+        native_artifact_frame = _load_native_producer_artifact(native_artifact_path, name)
+        native_receipt_path = _safe_file_path(
+            descriptor["native_receipt"]["path"], f"{name} native receipt"
+        )
+        try:
+            native_receipt_value = json.loads(
+                native_receipt_path.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise FutureValueSourceError(
+                f"{name} native receipt cannot be loaded"
+            ) from error
+        if not isinstance(native_receipt_value, Mapping):
+            raise FutureValueSourceError(f"{name} native receipt is invalid")
+        _validate_native_producer_receipt(
+            name,
+            native_receipt_value,
+            native_artifact=native_artifact_frame,
+            native_artifact_record=native_artifact_record,
+            source_receipt=source_receipt,
+            train_ids=train_ids,
+            validation_ids=validation_ids,
+            cutoff=cutoff,
+            expected_features=expected_features,
+        )
+        _compare_native_frame_bindings(native_artifact_frame, frame, name)
+        _compare_artifact_values(native_artifact_frame, artifact_frame, expected_features)
         if set(artifact_frame["game_id"].astype(str)) != set(frame["game_id"].astype(str)):
             raise FutureValueSourceError(f"{name} producer artifact game identity changed")
         row_digest = _ledger_rows_sha256(artifact_frame, expected_features)
@@ -1960,7 +2303,9 @@ def _verify_durable_producer_adapters(
                 "feature_names": list(expected_features),
                 "row_values_sha256": row_digest,
                 "artifact": artifact_record,
+                "native_artifact": native_artifact_record,
                 "receipt": descriptor["receipt"],
+                "native_receipt": descriptor["native_receipt"],
                 "receipt_sha256": claimed_receipt_hash,
                 "code_receipt": code_receipt,
             }
@@ -1987,6 +2332,8 @@ def write_rating_feature_producer_receipt(
     artifact_path: Path | str,
     receipt_path: Path | str,
     *,
+    native_artifact_path: Path | str,
+    native_receipt_path: Path | str,
     source_receipt: Mapping[str, Any],
     train_game_ids: Iterable[str],
     validation_game_ids: Iterable[str],
@@ -1994,7 +2341,13 @@ def write_rating_feature_producer_receipt(
     evaluation_mode: str = "fold_local",
     source_receipt_path: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Write one canonical receipt for a file-backed producer artifact."""
+    """Write one canonical receipt for a file-backed producer artifact.
+
+    The selected adapter artifact is paired with the producer's full native
+    ledger and its native receipt.  The native pair is mandatory.  This keeps
+    a caller from creating a finite table and then self-sealing it as a
+    current-rating or scaling output.
+    """
 
     key = str(name).strip()
     expected = _TRUSTED_FEATURE_PRODUCER_SPECS.get(key)
@@ -2012,7 +2365,19 @@ def write_rating_feature_producer_receipt(
         },
         f"{key} artifact",
     )
+    native_artifact_file = _safe_file_path(
+        native_artifact_path, f"{key} native artifact"
+    )
+    native_artifact = _file_record(
+        {
+            "path": str(native_artifact_file),
+            "bytes": native_artifact_file.stat().st_size,
+            "sha256": _sha256_path(native_artifact_file),
+        },
+        f"{key} native artifact",
+    )
     feature_names = tuple(str(value) for value in expected["feature_names"])
+    native_frame = _load_native_producer_artifact(native_artifact_file, key)
     artifact_frame = _load_feature_artifact(Path(artifact["path"]), feature_names)
     model_ids = tuple(sorted(artifact_frame["game_id"].astype(str)))
     train_ids = tuple(sorted({str(value) for value in train_game_ids}))
@@ -2021,6 +2386,9 @@ def write_rating_feature_producer_receipt(
         raise FutureValueSourceError("file-backed producer fold IDs are invalid")
     if tuple(sorted((*train_ids, *validation_ids))) != model_ids:
         raise FutureValueSourceError("file-backed producer fold IDs do not match artifact")
+    native_ids = tuple(sorted(native_frame["game_id"].astype(str)))
+    if native_ids != model_ids:
+        raise FutureValueSourceError("file-backed native producer IDs do not match artifact")
     cutoff = _utc_text(fit_window_end)
     source_file = None
     if source_receipt_path is not None:
@@ -2037,12 +2405,42 @@ def write_rating_feature_producer_receipt(
         _verified_identity, verified_hash = _verified_source_receipt_for_ledger(payload)
         if verified_hash != source_hash or dict(payload) != dict(source_receipt):
             raise FutureValueSourceError(f"{key} source receipt file does not match source")
+    native_receipt_file = _safe_file_path(native_receipt_path, f"{key} native receipt")
+    native_receipt_record = _file_record(
+        {
+            "path": str(native_receipt_file),
+            "bytes": native_receipt_file.stat().st_size,
+            "sha256": _sha256_path(native_receipt_file),
+        },
+        f"{key} native receipt",
+    )
+    try:
+        native_payload = json.loads(native_receipt_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueSourceError(f"{key} native receipt cannot be loaded") from error
+    if not isinstance(native_payload, Mapping):
+        raise FutureValueSourceError(f"{key} native receipt is invalid")
+    cutoff = _utc_text(fit_window_end)
+    _validate_native_producer_receipt(
+        key,
+        native_payload,
+        native_artifact=native_frame,
+        native_artifact_record=native_artifact,
+        source_receipt=source_receipt,
+        train_ids=train_ids,
+        validation_ids=validation_ids,
+        cutoff=cutoff,
+        expected_features=feature_names,
+    )
+    _compare_artifact_values(native_frame, artifact_frame, feature_names)
     payload: dict[str, Any] = {
         "schema_version": RATING_FEATURE_PRODUCER_RECEIPT_SCHEMA_VERSION,
         "status": "research_only",
         "authority": dict(RATING_FEATURE_PRODUCER_AUTHORITY),
         "producer": dict(expected),
         "artifact": artifact,
+        "native_artifact": native_artifact,
+        "native_receipt": native_receipt_record,
         "source_identity_sha256": source_identity,
         "source_receipt_sha256": source_hash,
         "source_receipt_file": source_file,
@@ -2066,7 +2464,13 @@ def write_rating_feature_producer_receipt(
         },
         f"{key} receipt",
     )
-    return {"name": key, "artifact": artifact, "receipt": receipt_record}
+    return {
+        "name": key,
+        "artifact": artifact,
+        "native_artifact": native_artifact,
+        "receipt": receipt_record,
+        "native_receipt": native_receipt_record,
+    }
 
 
 def build_rating_feature_producer_manifest(
@@ -2078,13 +2482,21 @@ def build_rating_feature_producer_manifest(
     for adapter in adapters:
         if not isinstance(adapter, Mapping):
             raise FutureValueSourceError("rating feature producer adapter is invalid")
-        if set(adapter) != {"name", "artifact", "receipt"}:
+        if set(adapter) != {
+            "name", "artifact", "native_artifact", "receipt", "native_receipt"
+        }:
             raise FutureValueSourceError("rating feature producer adapter schema is invalid")
         normalized.append(
             {
                 "name": str(adapter["name"]),
                 "artifact": _file_record(adapter["artifact"], f"{adapter['name']} artifact"),
+                "native_artifact": _file_record(
+                    adapter["native_artifact"], f"{adapter['name']} native artifact"
+                ),
                 "receipt": _file_record(adapter["receipt"], f"{adapter['name']} receipt"),
+                "native_receipt": _file_record(
+                    adapter["native_receipt"], f"{adapter['name']} native receipt"
+                ),
             }
         )
     payload: dict[str, Any] = {
@@ -4735,9 +5147,13 @@ def evaluate_future_value(
             durable_payload = json.loads(durable_receipt.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise FutureValueSourceError("durable source receipt cannot be read") from error
-        if not isinstance(durable_payload, Mapping) or durable_payload.get(
-            "receipt_sha256"
-        ) != source_receipt.get("receipt_sha256"):
+        if not isinstance(durable_payload, Mapping):
+            raise FutureValueSourceError("durable source receipt payload changed")
+        validate_future_value_source_receipt_payload(
+            durable_payload,
+            expected_receipt_sha256=str(source_receipt.get("receipt_sha256") or ""),
+        )
+        if durable_payload != dict(source_receipt):
             raise FutureValueSourceError("durable source receipt payload changed")
     form = build_time_decayed_prior_player_form(map_frame, players, half_life_days=half_life_days)
     folds = chronological_whole_series_folds(

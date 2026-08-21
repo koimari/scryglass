@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import copy
 
 import numpy as np
 import pandas as pd
@@ -29,7 +30,20 @@ from lol_kills.research.future_value_rating import (
     build_rating_feature_producer_manifest,
     trusted_feature_producer_receipt,
     validate_rating_feature_ledger,
+    validate_future_value_source_receipt_payload,
     write_rating_feature_producer_receipt,
+    _ledger_rows_sha256,
+    _scaling_native_rows_sha256,
+    _sha256_path,
+    _utc_text,
+)
+from lol_kills.research.future_value_rating_ledger import (
+    IMPLEMENTATION_LOCATOR as CURRENT_LEDGER_IMPLEMENTATION_LOCATOR,
+    RECEIPT_SCHEMA_VERSION as CURRENT_LEDGER_RECEIPT_SCHEMA_VERSION,
+    SCHEMA_VERSION as CURRENT_LEDGER_SCHEMA_VERSION,
+    _artifact_digest as current_artifact_digest,
+    _implementation_hash as current_implementation_hash,
+    _RECEIPT_STATE_KEY_POLICY,
 )
 from lol_kills.research import future_value_training as training_module
 from lol_kills.research.future_value_training import FutureValueTrainingError
@@ -271,6 +285,8 @@ def _durable_manifest(
 ):
     artifact_path = tmp_path / f"{name}.parquet"
     receipt_path = tmp_path / f"{name}.receipt.json"
+    native_artifact_path = tmp_path / f"{name}.native.parquet"
+    native_receipt_path = tmp_path / f"{name}.native.receipt.json"
     names = tuple(
         feature_names
         or (
@@ -280,12 +296,116 @@ def _durable_manifest(
         )
     )
     raw[["game_id", *names]].to_parquet(artifact_path, index=False)
+    native_frame = raw[["game_id", "date", "series_id", *names]].copy()
+    native_frame.to_parquet(native_artifact_path, index=False)
     train_ids = sorted(str(value) for value in raw["game_id"].iloc[: len(raw) // 2])
     validation_ids = sorted(str(value) for value in raw["game_id"].iloc[len(raw) // 2 :])
+    native_artifact = {
+        "path": str(native_artifact_path.resolve()),
+        "bytes": native_artifact_path.stat().st_size,
+        "sha256": _sha256_path(native_artifact_path),
+    }
+    game_ids = sorted(str(value) for value in raw["game_id"])
+    if name == "current_sequential_rating":
+        native_payload = {
+            "schema_version": CURRENT_LEDGER_RECEIPT_SCHEMA_VERSION,
+            "ledger_schema_version": CURRENT_LEDGER_SCHEMA_VERSION,
+            "source_receipt_sha256": str(source["receipt_sha256"]),
+            "source_as_of": str(source["source_as_of"]),
+            "source_game_count": int(source["source_game_count"]),
+            "source_identity_sha256": str(source["source_identity_sha256"]),
+            "model_eligible_game_count": len(game_ids),
+            "model_eligible_identity_sha256": identity_sha256(game_ids),
+            "model_eligible_game_ids": game_ids,
+            "output_game_ids": game_ids,
+            "output_game_count": len(game_ids),
+            "output_game_identity_sha256": identity_sha256(game_ids),
+            "train_game_ids": train_ids,
+            "train_game_count": len(train_ids),
+            "train_game_identity_sha256": identity_sha256(train_ids),
+            "validation_game_ids": validation_ids,
+            "validation_game_count": len(validation_ids),
+            "validation_game_identity_sha256": identity_sha256(validation_ids),
+            "train_series_ids": ["s1"],
+            "train_series_count": 1,
+            "train_series_identity_sha256": identity_sha256(["s1"]),
+            "validation_series_ids": ["s2"],
+            "validation_series_count": 1,
+            "validation_series_identity_sha256": identity_sha256(["s2"]),
+            "series_disjoint": True,
+            "state_key_policy": dict(_RECEIPT_STATE_KEY_POLICY),
+            "fit_window_end": _utc_text("2026-01-03T00:00:00Z"),
+            "strict_prior_timing": "train_outcomes_only_strictly_before_cutoff",
+            "same_timestamp_policy": "score_full_utc_timestamp_batch_before_training_updates",
+            "masked_nontraining_map_columns": [],
+            "masked_nontraining_player_columns": [],
+            "source_frame_sha256": {label: "0" * 64 for label in ("maps", "players", "teams")},
+            "feature_names": list(names),
+            "ledger_rows_sha256": current_artifact_digest(native_frame, names),
+            "implementation_locator": CURRENT_LEDGER_IMPLEMENTATION_LOCATOR,
+            "implementation_sha256": current_implementation_hash(),
+            "artifact": native_artifact,
+            "authority": {
+                "research_only": True,
+                "public_player_rating": False,
+                "public_team_rating": False,
+                "public_probability": False,
+                "promotion": False,
+                "merge": False,
+                "deployment": False,
+                "betting": False,
+            },
+        }
+    else:
+        native_payload = {
+            "schema_version": "scryglass:atomized-scaling-feature-ledger:v1",
+            "status": "research_only",
+            "authority": False,
+            "public_authority": False,
+            "source_receipt_sha256": str(source["receipt_sha256"]),
+            "source_identity_sha256": str(source["source_identity_sha256"]),
+            "source_as_of": _utc_text(source["source_as_of"]),
+            "accepted_game_count": len(game_ids),
+            "accepted_game_ids": game_ids,
+            "model_eligible_only": True,
+            "output_game_count": len(game_ids),
+            "output_game_ids": game_ids,
+            "output_identity_sha256": identity_sha256(game_ids),
+            "model_excluded_game_count": 0,
+            "model_excluded_identity_sha256": identity_sha256([]),
+            "implementation_sha256": _sha256_path(
+                __import__("pathlib").Path("lol_kills/research/atomized_rf_composite.py").resolve()
+            ),
+            "source_frame_sha256": {label: "0" * 64 for label in ("maps", "players", "teams")},
+            "source_row_value_sha256": "0" * 64,
+            "source_extra_game_ids": {label: [] for label in ("maps", "players", "teams")},
+            "excluded_extra_game_count": 0,
+            "excluded_extra_identity_sha256": identity_sha256([]),
+            "team_identity": {},
+            "row_value_digest_sha256": _scaling_native_rows_sha256(native_frame),
+            "same_timestamp_policy": "score_all_maps_then_update_all_maps",
+            "same_timestamp_batching": "score_all_maps_then_update_all_maps",
+            "same_timestamp_batch_receipts": {},
+            "evaluation_mode": "fold_local",
+            "fold_evaluation_usable": True,
+            "fold_blocker": None,
+            "train_game_ids": train_ids,
+            "train_identity_sha256": identity_sha256(train_ids),
+            "validation_game_ids": validation_ids,
+            "validation_identity_sha256": identity_sha256(validation_ids),
+            "fit_window_end": _utc_text("2026-01-03T00:00:00Z"),
+            "columns": list(native_frame.columns),
+            "rows": len(native_frame),
+            "checkpoint_targets": "update_only_after_current_map_scoring",
+        }
+    native_payload["receipt_sha256"] = hashlib.sha256(_canonical(native_payload)).hexdigest()
+    native_receipt_path.write_bytes(_canonical(native_payload))
     adapter = write_rating_feature_producer_receipt(
         name,
         artifact_path,
         receipt_path,
+        native_artifact_path=native_artifact_path,
+        native_receipt_path=native_receipt_path,
         source_receipt=source,
         train_game_ids=train_ids,
         validation_game_ids=validation_ids,
@@ -461,12 +581,16 @@ def test_file_backed_manifest_supports_combined_current_and_scaling_features(tmp
             {
                 "name": current["name"],
                 "artifact": current["artifact"],
+                "native_artifact": current["native_artifact"],
                 "receipt": current["receipt"],
+                "native_receipt": current["native_receipt"],
             },
             {
                 "name": scaling["name"],
                 "artifact": scaling["artifact"],
+                "native_artifact": scaling["native_artifact"],
                 "receipt": scaling["receipt"],
+                "native_receipt": scaling["native_receipt"],
             },
         ]
     )
@@ -529,6 +653,96 @@ def test_file_backed_manifest_rejects_path_and_hash_mutations(tmp_path, mutation
             feature_names=features,
             producer=producer,
         )
+
+
+@pytest.mark.parametrize(
+    ("name", "features"),
+    [
+        ("current_sequential_rating", CURRENT_RATING_SIGNED_MAP_FEATURES),
+        ("strict_prior_atomized_scaling", SCALING_CURVE_SIGNED_MAP_FEATURES),
+    ],
+)
+def test_native_producer_receipt_rejects_resealed_999_values(
+    tmp_path,
+    name: str,
+    features: tuple[str, ...],
+) -> None:
+    """A finite adapter cannot replace a producer-native ledger."""
+
+    game_ids = ["g1", "g2", "g3", "g4"]
+    source = _source_receipt(game_ids)
+    raw = pd.DataFrame(
+        {
+            "game_id": game_ids,
+            "date": pd.date_range("2026-01-01", periods=4, tz="UTC"),
+            "series_id": ["s1", "s1", "s2", "s2"],
+            **{feature: np.arange(1.0, 5.0) for feature in features},
+        }
+    )
+    producer = _durable_manifest(raw, source, tmp_path, name=name, feature_names=features)
+    mutated = copy.deepcopy(producer)
+    native_path = tmp_path / f"{name}.native.parquet"
+    native = pd.read_parquet(native_path)
+    native.loc[native["game_id"] == "g3", features[0]] = 999.0
+    native.to_parquet(native_path, index=False)
+    native_record = {
+        "path": str(native_path.resolve()),
+        "bytes": native_path.stat().st_size,
+        "sha256": _sha256_path(native_path),
+    }
+    adapter = mutated["adapters"][0]
+    adapter["native_artifact"] = native_record
+    receipt_path = tmp_path / f"{name}.receipt.json"
+    receipt_payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt_payload["native_artifact"] = native_record
+    receipt_payload.pop("receipt_sha256", None)
+    receipt_payload["receipt_sha256"] = hashlib.sha256(_canonical(receipt_payload)).hexdigest()
+    receipt_path.write_bytes(_canonical(receipt_payload))
+    adapter["receipt"] = {
+        "path": str(receipt_path.resolve()),
+        "bytes": receipt_path.stat().st_size,
+        "sha256": _sha256_path(receipt_path),
+    }
+    mutated["manifest_sha256"] = hashlib.sha256(
+        _canonical({key: value for key, value in mutated.items() if key != "manifest_sha256"})
+    ).hexdigest()
+    with pytest.raises(
+        FutureValueSourceError,
+        match="native artifact|native.*values|artifact bytes|ledger values",
+    ):
+        bind_rating_feature_ledger(
+            raw,
+            source_receipt=source,
+            train_game_ids=["g1", "g2"],
+            validation_game_ids=["g3", "g4"],
+            fit_window_end="2026-01-03T00:00:00Z",
+            feature_names=features,
+            producer=mutated,
+        )
+
+
+def test_source_receipt_path_records_check_bytes_and_expected_receipt_hash(tmp_path) -> None:
+    game_ids = ["g1", "g2"]
+    source = _source_receipt(game_ids)
+    source_files = {}
+    for label in ("maps", "players", "teams", "accepted_census"):
+        path = tmp_path / f"{label}.dat"
+        path.write_bytes(label.encode("utf-8"))
+        source_files[label] = {
+            "path": str(path.resolve()),
+            "bytes": path.stat().st_size,
+            "sha256": _sha256_path(path),
+        }
+    source["source_files"] = source_files
+    source.pop("receipt_sha256", None)
+    source["receipt_sha256"] = hashlib.sha256(_canonical(source)).hexdigest()
+    validate_future_value_source_receipt_payload(
+        source,
+        expected_receipt_sha256=source["receipt_sha256"],
+    )
+    (tmp_path / "maps.dat").write_bytes(b"changed")
+    with pytest.raises(FutureValueSourceError, match="source file"):
+        validate_future_value_source_receipt_payload(source)
 
 
 @pytest.mark.parametrize("field", ["producer", "source", "fold", "cutoff", "evaluation"])
