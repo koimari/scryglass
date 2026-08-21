@@ -25,6 +25,24 @@ def _source_receipt(*, row_digest: str | None = None) -> dict[str, object]:
         "source_game_count": len(IDS),
         "source_identity_sha256": identity_sha256(IDS),
         "accepted_game_ids": list(IDS),
+        "model_eligible_game_count": len(IDS),
+        "model_eligible_identity_sha256": identity_sha256(IDS),
+        "model_eligible_game_ids": list(IDS),
+        "authority": {"research_only": True},
+        "source_files": {
+            label: {
+                "bytes": 1,
+                "locator": label,
+                "sha256": "a" * 64,
+            }
+            for label in (
+                "annual_2025",
+                "annual_2026",
+                "bridge_oe_api_meta.json",
+                "bridge_oe_api_player_games.parquet",
+                "bridge_oe_api_team_games.parquet",
+            )
+        },
     }
     if row_digest is not None:
         payload["source_row_value_sha256"] = row_digest
@@ -104,6 +122,8 @@ def test_ledger_is_strict_prior_and_same_timestamp_maps_are_independent() -> Non
     assert first.loc["g3", "forecast_gold_diff_10"] == 1200.0
     assert receipt["same_timestamp_policy"] == RATING_BATCH_POLICY
     assert receipt["same_timestamp_batching"] == "score_all_maps_then_update_all_maps"
+    assert receipt["fold_evaluation_usable"] is False
+    assert receipt["fold_blocker"]
     assert all("target_" not in column for column in ledger.columns)
 
 
@@ -207,6 +227,78 @@ def test_excluded_source_maps_are_bound_then_filtered() -> None:
     )
 
 
+def test_missing_stable_team_ids_use_alias_fallback_for_both_sides() -> None:
+    maps, players, teams = _frames()
+    aliases = {"Blue": "Blue Org", "Red": "Red Org"}
+    players = players.copy()
+    teams = teams.copy()
+    players["teamname"] = players["side"].map(aliases)
+    teams["teamname"] = teams["side"].map(aliases)
+    players["teamid"] = None
+    teams["teamid"] = None
+
+    ledger, receipt = _build(maps, players, teams)
+    assert len(ledger) == len(IDS)
+    assert receipt["team_identity"]["mode_counts"] == {
+        "stable_oe": 0,
+        "alias_fallback": len(IDS),
+    }
+    assert receipt["team_identity"]["stable_oe_identity_sha256"] == identity_sha256([])
+    assert receipt["team_identity"]["alias_fallback_identity_sha256"] == identity_sha256(IDS)
+
+
+def test_team_identity_mismatch_fails_closed() -> None:
+    maps, players, teams = _frames()
+    mismatched_stable = teams.copy()
+    mask = (mismatched_stable["gameid"] == "g1") & (mismatched_stable["side"] == "Blue")
+    mismatched_stable.loc[mask, "teamid"] = "oe:team:wrong"
+    with pytest.raises(AtomizedResearchError, match="IDs disagree"):
+        _build(maps, players, mismatched_stable)
+
+    aliases = {"Blue": "Blue Org", "Red": "Red Org"}
+    alias_players = players.copy()
+    alias_teams = teams.copy()
+    alias_players["teamid"] = None
+    alias_teams["teamid"] = None
+    alias_players["teamname"] = alias_players["side"].map(aliases)
+    alias_teams["teamname"] = alias_teams["side"].map(aliases)
+    alias_players.loc[
+        (alias_players["gameid"] == "g1") & (alias_players["side"] == "Blue"),
+        "teamname",
+    ] = "Different Org"
+    with pytest.raises(AtomizedResearchError, match="conflicting team aliases"):
+        _build(maps, alias_players, alias_teams)
+
+
+def test_fold_local_mode_updates_train_only_and_binds_fold_identity() -> None:
+    maps, players, teams = _frames()
+    maps = maps.copy()
+    maps.loc[maps["game_uid"] == "g2", "date"] = "2026-01-02T00:00:00Z"
+    maps.loc[maps["game_uid"] == "g3", "date"] = "2026-01-03T00:00:00Z"
+    kwargs = {
+        "train_game_ids": ["g1"],
+        "validation_game_ids": ["g2", "g3"],
+        "fit_window_end": "2026-01-02T00:00:00Z",
+    }
+    baseline, receipt = build_scaling_feature_ledger(
+        maps, players, teams, source_receipt=_source_receipt(), **kwargs
+    )
+    mutated_players = players.copy()
+    mask = mutated_players["gameid"] == "g2"
+    mutated_players.loc[mask, "golddiffat10"] = mutated_players.loc[mask, "golddiffat10"] + 5000
+    changed, changed_receipt = build_scaling_feature_ledger(
+        maps, mutated_players, teams, source_receipt=_source_receipt(), **kwargs
+    )
+    left = baseline.set_index("game_id")
+    right = changed.set_index("game_id")
+    assert receipt["evaluation_mode"] == "fold_local"
+    assert receipt["fold_evaluation_usable"] is True
+    assert receipt["train_game_ids"] == ["g1"]
+    assert receipt["validation_game_ids"] == ["g2", "g3"]
+    assert left.loc["g3", "forecast_gold_diff_10"] == right.loc["g3", "forecast_gold_diff_10"]
+    assert changed_receipt["train_identity_sha256"] == receipt["train_identity_sha256"]
+
+
 def test_receipt_binds_source_identity_and_implementation() -> None:
     maps, players, teams = _frames()
     ledger, receipt = _build(maps, players, teams)
@@ -217,3 +309,36 @@ def test_receipt_binds_source_identity_and_implementation() -> None:
     assert len(str(receipt["implementation_sha256"])) == 64
     assert len(str(receipt["row_value_digest_sha256"])) == 64
     assert len(str(receipt["receipt_sha256"])) == 64
+
+
+def test_source_receipt_requires_canonical_research_only_contract() -> None:
+    maps, players, teams = _frames()
+    forged = _source_receipt()
+    forged["forged_extra"] = "resealed"
+    unsigned = {key: value for key, value in forged.items() if key != "receipt_sha256"}
+    forged["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    with pytest.raises(AtomizedResearchError, match="unknown fields"):
+        _build(maps, players, teams, source=forged)
+
+    blocked = _source_receipt()
+    blocked["authority"] = {"research_only": False}
+    unsigned = {key: value for key, value in blocked.items() if key != "receipt_sha256"}
+    blocked["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    with pytest.raises(AtomizedResearchError, match="research-only"):
+        _build(maps, players, teams, source=blocked)

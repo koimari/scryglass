@@ -1550,6 +1550,46 @@ SCALING_LEDGER_COLUMNS = tuple(
         f"forecast_{metric}_missing_{checkpoint}",
     )
 )
+SCALING_SOURCE_RECEIPT_SCHEMA = "scryglass:future-value-rating-source:v1"
+SCALING_SOURCE_RECEIPT_REQUIRED_FILES = frozenset(
+    {
+        "annual_2025",
+        "annual_2026",
+        "bridge_oe_api_meta.json",
+        "bridge_oe_api_player_games.parquet",
+        "bridge_oe_api_team_games.parquet",
+    }
+)
+SCALING_SOURCE_RECEIPT_FIELDS = frozenset(
+    {
+        "accepted_game_ids",
+        "authority",
+        "checkpoint_coverage",
+        "identity_coverage",
+        "model_contract",
+        "model_eligible_game_count",
+        "model_eligible_game_ids",
+        "model_eligible_identity_sha256",
+        "model_exclusions",
+        "receipt_sha256",
+        "schema_version",
+        "source_as_of",
+        "source_extra_game_ids",
+        "source_files",
+        "source_game_count",
+        "source_identity_sha256",
+        "source_rows",
+        "status",
+    }
+)
+SCALING_SOURCE_RECEIPT_EXTENSIONS = frozenset(
+    {
+        "source_row_value_sha256",
+        "source_frame_sha256",
+        "row_value_sha256",
+        "frame_digests",
+    }
+)
 
 
 def _scaling_frame(value: pd.DataFrame | Path | str, label: str) -> pd.DataFrame:
@@ -1629,14 +1669,28 @@ def _scaling_source_receipt(
     if not isinstance(source_receipt, Mapping):
         raise AtomizedResearchError("scaling ledger needs a source receipt")
     required = (
+        "schema_version",
         "source_as_of",
         "source_game_count",
         "source_identity_sha256",
         "accepted_game_ids",
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
+        "model_eligible_game_ids",
+        "source_files",
+        "authority",
         "receipt_sha256",
     )
     if any(field not in source_receipt for field in required):
         raise AtomizedResearchError("scaling source receipt is incomplete")
+    unknown_fields = set(source_receipt) - SCALING_SOURCE_RECEIPT_FIELDS - SCALING_SOURCE_RECEIPT_EXTENSIONS
+    if unknown_fields:
+        raise AtomizedResearchError(
+            "scaling source receipt contains unknown fields: "
+            + ", ".join(sorted(str(field) for field in unknown_fields))
+        )
+    if source_receipt.get("schema_version") != SCALING_SOURCE_RECEIPT_SCHEMA:
+        raise AtomizedResearchError("scaling source receipt schema is invalid")
     raw_hash = str(source_receipt.get("receipt_sha256") or "").lower()
     if not re.fullmatch(r"[0-9a-f]{64}", raw_hash):
         raise AtomizedResearchError("scaling source receipt hash is invalid")
@@ -1659,18 +1713,52 @@ def _scaling_source_receipt(
         raise AtomizedResearchError("scaling source receipt hash does not match payload")
     if source_receipt_sha256 is not None and str(source_receipt_sha256).lower() != raw_hash:
         raise AtomizedResearchError("scaling source receipt hash differs from the supplied binding")
+    if not isinstance(source_receipt.get("accepted_game_ids"), list):
+        raise AtomizedResearchError("scaling source receipt accepted IDs are not a list")
+    if not isinstance(source_receipt.get("model_eligible_game_ids"), list):
+        raise AtomizedResearchError("scaling source receipt eligible IDs are not a list")
     try:
         raw_ids = tuple(str(value) for value in source_receipt["accepted_game_ids"])
+        eligible_ids = tuple(str(value) for value in source_receipt["model_eligible_game_ids"])
     except (TypeError, ValueError) as exc:
         raise AtomizedResearchError("scaling source receipt game IDs are invalid") from exc
     canonical_ids = tuple(canonical_game_ids(raw_ids))
+    canonical_eligible_ids = tuple(canonical_game_ids(eligible_ids))
     if (
         not raw_ids
         or raw_ids != canonical_ids
         or int(source_receipt["source_game_count"]) != len(raw_ids)
         or str(source_receipt["source_identity_sha256"]).lower() != identity_sha256(raw_ids)
+        or eligible_ids != canonical_eligible_ids
+        or not set(eligible_ids).issubset(set(raw_ids))
+        or int(source_receipt["model_eligible_game_count"]) != len(eligible_ids)
+        or str(source_receipt["model_eligible_identity_sha256"]).lower()
+        != identity_sha256(eligible_ids)
     ):
         raise AtomizedResearchError("scaling source receipt census identity is invalid")
+    authority = source_receipt.get("authority")
+    if not isinstance(authority, Mapping) or authority.get("research_only") is not True:
+        raise AtomizedResearchError("scaling source receipt authority is not research-only")
+    if any(
+        bool(value)
+        for field, value in authority.items()
+        if field != "research_only"
+    ):
+        raise AtomizedResearchError("scaling source receipt grants non-research authority")
+    source_files = source_receipt.get("source_files")
+    if not isinstance(source_files, Mapping) or not SCALING_SOURCE_RECEIPT_REQUIRED_FILES.issubset(source_files):
+        raise AtomizedResearchError("scaling source receipt source files are incomplete")
+    for label, record in source_files.items():
+        if not isinstance(record, Mapping):
+            raise AtomizedResearchError(f"scaling source file record is invalid: {label}")
+        if set(record) - {"bytes", "locator", "sha256", "year"}:
+            raise AtomizedResearchError(f"scaling source file record has unknown fields: {label}")
+        if not isinstance(record.get("bytes"), int) or int(record["bytes"]) <= 0:
+            raise AtomizedResearchError(f"scaling source file byte count is invalid: {label}")
+        if not str(record.get("locator") or "").strip():
+            raise AtomizedResearchError(f"scaling source file locator is invalid: {label}")
+        if re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256") or ""), re.I) is None:
+            raise AtomizedResearchError(f"scaling source file hash is invalid: {label}")
     if accepted_game_ids is not None:
         supplied_ids = tuple(canonical_game_ids(accepted_game_ids))
         if supplied_ids != raw_ids:
@@ -1751,10 +1839,136 @@ def _scaling_checkpoint_value(row: Mapping[str, Any], metric: str, checkpoint: i
     return value
 
 
+def _scaling_stable_team(row: Mapping[str, Any]) -> str | None:
+    """Return a stable OE team ID when the row carries one."""
+
+    for field in ("teamid", "team_id", "team"):
+        value = row.get(field)
+        if value is None:
+            continue
+        try:
+            if bool(pd.isna(value)):
+                continue
+        except (TypeError, ValueError):
+            pass
+        token = str(value).strip()
+        if token.startswith("oe:team:"):
+            return token
+    return None
+
+
+def _scaling_alias(value: Any) -> str | None:
+    """Normalize one team alias and reject empty sentinel values."""
+
+    if value is None:
+        return None
+    try:
+        if bool(pd.isna(value)):
+            return None
+    except (TypeError, ValueError):
+        pass
+    token = str(value).strip()
+    if not token or token.casefold() in {"nan", "nat", "none", "<na>"}:
+        return None
+    if token.startswith("oe:team:"):
+        return None
+    normalized = normalize_team(token).strip()
+    if not normalized or normalized.casefold() in {"nan", "nat", "none", "<na>"}:
+        return None
+    return normalized.casefold()
+
+
+def _scaling_row_aliases(row: Mapping[str, Any]) -> list[str]:
+    return [
+        alias
+        for field in ("teamname", "team_name", "team_key", "team")
+        if (alias := _scaling_alias(row.get(field))) is not None
+    ]
+
+
+def _scaling_map_aliases(map_row: Mapping[str, Any], side: str) -> list[str]:
+    prefix = side.casefold()
+    return [
+        alias
+        for field in (
+            f"{prefix}_team_key",
+            f"{prefix}_team",
+            f"{prefix}_teamname",
+        )
+        if (alias := _scaling_alias(map_row.get(field))) is not None
+    ]
+
+
+def _scaling_team_identity(
+    map_row: Mapping[str, Any],
+    player_rows: Sequence[Mapping[str, Any]],
+    team_rows: Sequence[Mapping[str, Any]],
+    *,
+    game_id: str,
+) -> tuple[dict[str, str], str]:
+    """Resolve both sides with stable IDs or both sides with aliases.
+
+    A partial stable-ID set never mixes with aliases.  It falls back to one
+    normalized alias contract for both sides.  Every available player/team
+    identity must agree inside that contract.
+    """
+
+    stable_by_source: dict[str, dict[str, set[str]]] = {
+        "players": {side: set() for side in ("blue", "red")},
+        "teams": {side: set() for side in ("blue", "red")},
+    }
+    aliases_by_side: dict[str, set[str]] = {side: set() for side in ("blue", "red")}
+    for row in player_rows:
+        side = _side(row.get("side")).casefold()
+        stable = _scaling_stable_team(row)
+        if stable is not None:
+            stable_by_source["players"][side].add(stable)
+        aliases_by_side[side].update(_scaling_row_aliases(row))
+    for row in team_rows:
+        side = _side(row.get("side")).casefold()
+        stable = _scaling_stable_team(row)
+        if stable is not None:
+            stable_by_source["teams"][side].add(stable)
+        aliases_by_side[side].update(_scaling_row_aliases(row))
+    for side in ("blue", "red"):
+        aliases_by_side[side].update(_scaling_map_aliases(map_row, side))
+        if any(len(stable_by_source[source][side]) > 1 for source in stable_by_source):
+            raise AtomizedResearchError(f"scaling map {game_id} has conflicting stable team IDs")
+
+    stable_complete = all(
+        len(stable_by_source[source][side]) == 1
+        for source in ("players", "teams")
+        for side in ("blue", "red")
+    )
+    if stable_complete:
+        stable_ids = {
+            side: next(iter(stable_by_source["players"][side]))
+            for side in ("blue", "red")
+        }
+        if any(
+            stable_ids[side] != next(iter(stable_by_source["teams"][side]))
+            for side in ("blue", "red")
+        ) or stable_ids["blue"] == stable_ids["red"]:
+            raise AtomizedResearchError(f"scaling map {game_id} player/team IDs disagree")
+        return stable_ids, "stable_oe"
+
+    aliases: dict[str, str] = {}
+    for side in ("blue", "red"):
+        if not aliases_by_side[side]:
+            raise AtomizedResearchError(f"scaling map {game_id} has no team alias fallback")
+        if len(aliases_by_side[side]) != 1:
+            raise AtomizedResearchError(f"scaling map {game_id} has conflicting team aliases")
+        aliases[side] = next(iter(aliases_by_side[side]))
+    if aliases["blue"] == aliases["red"]:
+        raise AtomizedResearchError(f"scaling map {game_id} has colliding team aliases")
+    return aliases, "alias_fallback"
+
+
 def _scaling_lineup(
     rows: Sequence[Mapping[str, Any]],
     *,
     game_id: str,
+    team_identity: Mapping[str, str],
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """Normalize one exact five-player side per side."""
 
@@ -1768,7 +1982,7 @@ def _scaling_lineup(
         side = _side(raw.get("side")).casefold()
         role = _scaling_role(raw.get("position") or raw.get("role"))
         player = _player_id(raw)
-        team = _team_id(raw)
+        team = str(team_identity[side])
         champion = str(raw.get("champion") or raw.get("champion_name") or "").strip()
         if not champion:
             raise AtomizedResearchError(f"scaling map {game_id} has a blank champion")
@@ -1814,6 +2028,9 @@ def build_scaling_feature_ledger(
     source_receipt: Mapping[str, Any],
     accepted_game_ids: Iterable[Any] | None = None,
     source_receipt_sha256: str | None = None,
+    train_game_ids: Iterable[Any] | None = None,
+    validation_game_ids: Iterable[Any] | None = None,
+    fit_window_end: Any | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Build the slim, full-census, strictly prior checkpoint forecast ledger.
 
@@ -1835,6 +2052,33 @@ def build_scaling_feature_ledger(
         accepted_game_ids=accepted_game_ids,
         source_receipt_sha256=source_receipt_sha256,
     )
+    fold_arguments = (train_game_ids, validation_game_ids, fit_window_end)
+    fold_mode = any(value is not None for value in fold_arguments)
+    if fold_mode and any(value is None for value in fold_arguments):
+        raise AtomizedResearchError(
+            "fold-local scaling ledger needs train_game_ids, validation_game_ids, and fit_window_end"
+        )
+    accepted_set = set(accepted_ids)
+    if fold_mode:
+        train_ids = tuple(canonical_game_ids(train_game_ids or ()))
+        validation_ids = tuple(canonical_game_ids(validation_game_ids or ()))
+        if not train_ids or not validation_ids:
+            raise AtomizedResearchError("fold-local scaling ledger needs non-empty train and validation IDs")
+        if set(train_ids) & set(validation_ids):
+            raise AtomizedResearchError("fold-local train and validation IDs overlap")
+        if not set(train_ids).issubset(accepted_set) or not set(validation_ids).issubset(accepted_set):
+            raise AtomizedResearchError("fold-local IDs are outside the accepted census")
+        try:
+            fit_cutoff = pd.Timestamp(fit_window_end)
+        except (TypeError, ValueError) as exc:
+            raise AtomizedResearchError("fold-local fit_window_end is invalid") from exc
+        if pd.isna(fit_cutoff) or fit_cutoff.tzinfo is None:
+            raise AtomizedResearchError("fold-local fit_window_end must include a timezone")
+        fit_cutoff = fit_cutoff.tz_convert("UTC")
+    else:
+        train_ids = tuple(accepted_ids)
+        validation_ids = tuple()
+        fit_cutoff = None
     maps_frame = _scaling_frame(maps, "maps")
     players_frame = _scaling_frame(players, "players")
     teams_frame = _scaling_frame(teams, "teams")
@@ -1876,6 +2120,16 @@ def build_scaling_feature_ledger(
         raise AtomizedResearchError("maps contain an invalid or post-census date")
     if len(accepted_map_rows) != len(accepted_ids) or accepted_map_rows["_game_id"].duplicated().any():
         raise AtomizedResearchError("maps must contain exactly one row per accepted game")
+    if fold_mode:
+        date_by_id = accepted_map_rows.set_index("_game_id")["date"]
+        train_dates = date_by_id.reindex(train_ids)
+        validation_dates = date_by_id.reindex(validation_ids)
+        if train_dates.isna().any() or validation_dates.isna().any():
+            raise AtomizedResearchError("fold-local IDs have no accepted map date")
+        if train_dates.ge(fit_cutoff).any() or validation_dates.lt(fit_cutoff).any():
+            raise AtomizedResearchError("fold-local map dates violate fit_window_end")
+        if train_dates.max() >= validation_dates.min():
+            raise AtomizedResearchError("fold-local train maps must precede validation maps")
     # Hash the full frozen source before selecting the accepted census.  The
     # source may contain explicitly excluded maps, which stay in provenance.
     map_dates = maps_frame.set_index("_game_id")["date"]
@@ -1919,8 +2173,13 @@ def build_scaling_feature_ledger(
     teams_by_game = {str(key): value for key, value in teams_frame.groupby("_game_id", sort=False)}
     states: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
     champion_states: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    train_set = set(train_ids)
     output: list[dict[str, Any]] = []
     batch_receipts: dict[str, str] = {}
+    team_identity_modes: dict[str, list[str]] = {
+        "stable_oe": [],
+        "alias_fallback": [],
+    }
     ordered_maps = maps_frame.sort_values(["date", "_game_id"], kind="stable")
     for timestamp, same_time in ordered_maps.groupby("date", sort=False):
         game_ids = sorted(str(value) for value in same_time["_game_id"])
@@ -1937,16 +2196,20 @@ def build_scaling_feature_ledger(
             team_group = teams_by_game.get(game_id)
             if player_group is None or team_group is None or len(team_group) != 2:
                 raise AtomizedResearchError(f"scaling map {game_id} has incomplete source rows")
-            lineup, player_teams = _scaling_lineup(player_group.to_dict("records"), game_id=game_id)
-            team_sides: dict[str, str] = {}
-            for raw_team in team_group.to_dict("records"):
-                side = _side(raw_team.get("side")).casefold()
-                team = _team_id(raw_team)
-                if side in team_sides or team in team_sides.values():
-                    raise AtomizedResearchError(f"scaling map {game_id} has duplicate team side")
-                team_sides[side] = team
-            if set(team_sides) != {"blue", "red"} or team_sides != player_teams:
-                raise AtomizedResearchError(f"scaling map {game_id} team and player identities differ")
+            player_records = player_group.to_dict("records")
+            team_records = team_group.to_dict("records")
+            team_identity, identity_mode = _scaling_team_identity(
+                map_row,
+                player_records,
+                team_records,
+                game_id=game_id,
+            )
+            lineup, player_teams = _scaling_lineup(
+                player_records,
+                game_id=game_id,
+                team_identity=team_identity,
+            )
+            team_identity_modes[identity_mode].append(game_id)
             by_side = {
                 side: [row for row in lineup if row["side"] == side]
                 for side in ("blue", "red")
@@ -2007,8 +2270,12 @@ def build_scaling_feature_ledger(
             pending.append((game_id, lineup))
 
         # Strict prior policy: every map at this timestamp scores before any
-        # map at this timestamp updates the shared histories.
+        # map at this timestamp updates the shared histories.  Fold-local mode
+        # updates only train IDs.  Validation and other non-train rows remain
+        # scoreable observations and never enter the fit history.
         for game_id, lineup in pending:
+            if fold_mode and game_id not in train_set:
+                continue
             for row in lineup:
                 player = _player_id(row)
                 champion = str(row["champion"])
@@ -2060,10 +2327,36 @@ def build_scaling_feature_ledger(
         "excluded_extra_identity_sha256": identity_sha256(
             set().union(*(set(values) for values in source_extra_game_ids.values()))
         ),
+        "team_identity": {
+            "mode_counts": {
+                mode: len(game_ids) for mode, game_ids in team_identity_modes.items()
+            },
+            "stable_oe_game_ids": team_identity_modes["stable_oe"],
+            "stable_oe_identity_sha256": identity_sha256(team_identity_modes["stable_oe"]),
+            "alias_fallback_game_ids": team_identity_modes["alias_fallback"],
+            "alias_fallback_identity_sha256": identity_sha256(
+                team_identity_modes["alias_fallback"]
+            ),
+            "contract": "stable_ids_when_both_sides_complete_else_normalized_aliases_for_both_sides",
+        },
         "row_value_digest_sha256": row_value_digest,
         "same_timestamp_policy": RATING_BATCH_POLICY,
         "same_timestamp_batching": "score_all_maps_then_update_all_maps",
         "same_timestamp_batch_receipts": batch_receipts,
+        "evaluation_mode": "fold_local" if fold_mode else "online_full_census",
+        "fold_evaluation_usable": bool(fold_mode),
+        "fold_blocker": None
+        if fold_mode
+        else "full-census online ledger is not valid for fold evaluation",
+        "train_game_ids": list(train_ids) if fold_mode else None,
+        "train_identity_sha256": identity_sha256(train_ids) if fold_mode else None,
+        "validation_game_ids": list(validation_ids) if fold_mode else None,
+        "validation_identity_sha256": identity_sha256(validation_ids)
+        if fold_mode
+        else None,
+        "fit_window_end": fit_cutoff.isoformat().replace("+00:00", "Z")
+        if fit_cutoff is not None
+        else None,
         "columns": list(ledger.columns),
         "rows": len(ledger),
         "checkpoint_targets": "update_only_after_current_map_scoring",
