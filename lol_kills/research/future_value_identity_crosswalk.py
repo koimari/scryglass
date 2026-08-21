@@ -915,9 +915,6 @@ def _build_identity_crosswalk(
     )
     candidate_game_ids = set(player_ids[player_missing_mask]) | set(team_ids[team_missing_mask])
     candidate_game_ids &= accepted_set
-    map_groups = _map_groups(
-        maps_frame, game_column=map_game_column, accepted=accepted_set, selected=candidate_game_ids
-    )
     player_groups = _map_groups(
         players_frame, game_column=player_game_column, accepted=accepted_set, selected=candidate_game_ids
     )
