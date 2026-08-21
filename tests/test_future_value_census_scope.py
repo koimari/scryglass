@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -94,7 +98,12 @@ def test_accepted_map_scope_rejects_missing_and_duplicate_ids() -> None:
             helper(duplicate, source_receipt=source)
 
 
-def _crosswalk_fixture(*, artifact_authoritative: bool, receipt_authoritative: bool):
+def _crosswalk_fixture(
+    tmp_path: Path,
+    *,
+    artifact_authoritative: bool,
+    receipt_authoritative: bool,
+):
     ids = ("g1", "g2")
     source = _source(ids)
     artifact: dict[str, object] = {
@@ -124,7 +133,19 @@ def _crosswalk_fixture(*, artifact_authoritative: bool, receipt_authoritative: b
     artifact["crosswalk_sha256"] = canonical_sha256(
         {key: value for key, value in artifact.items() if key != "crosswalk_sha256"}
     )
-    artifact_record = {"bytes": 1, "locator": "fixture/crosswalk.json", "sha256": "a" * 64}
+    artifact_path = tmp_path / "crosswalk.json"
+    artifact_bytes = json.dumps(
+        artifact,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    artifact_path.write_bytes(artifact_bytes)
+    artifact_record = {
+        "bytes": len(artifact_bytes),
+        "locator": str(artifact_path),
+        "sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+    }
     receipt: dict[str, object] = {
         "status": "verified_research_only",
         "authority": {
@@ -140,19 +161,37 @@ def _crosswalk_fixture(*, artifact_authoritative: bool, receipt_authoritative: b
         "crosswalk_sha256": artifact["crosswalk_sha256"],
         "mapped_game_ids": list(ids),
         "mapped_game_identity_sha256": identity_sha256(ids),
-        "artifact": artifact_record,
+        "artifact": {
+            "path": str(artifact_path),
+            "bytes": artifact_record["bytes"],
+            "sha256": artifact_record["sha256"],
+        },
     }
     receipt["receipt_sha256"] = canonical_sha256(receipt)
-    return source, artifact, receipt, artifact_record, {"bytes": 1, "sha256": "b" * 64}
+    receipt_path = tmp_path / "crosswalk.receipt.json"
+    receipt_bytes = json.dumps(
+        receipt,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    receipt_path.write_bytes(receipt_bytes)
+    receipt_record = {
+        "bytes": len(receipt_bytes),
+        "locator": str(receipt_path),
+        "sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+    }
+    return source, artifact, receipt, artifact_record, receipt_record
 
 
-def test_full_authority_requires_both_authoritative_series_flags() -> None:
+def test_full_authority_requires_both_authoritative_series_flags(tmp_path: Path) -> None:
     for artifact_authoritative, receipt_authoritative, expected in (
         (False, True, False),
         (True, False, False),
         (True, True, True),
     ):
         source, artifact, receipt, artifact_file, receipt_file = _crosswalk_fixture(
+            tmp_path,
             artifact_authoritative=artifact_authoritative,
             receipt_authoritative=receipt_authoritative,
         )
@@ -167,8 +206,9 @@ def test_full_authority_requires_both_authoritative_series_flags() -> None:
         assert summary["authoritative_for_accepted_census"] is expected
 
 
-def test_full_authority_keeps_receipt_public_flags_fail_closed() -> None:
+def test_full_authority_keeps_receipt_public_flags_fail_closed(tmp_path: Path) -> None:
     source, artifact, receipt, artifact_file, receipt_file = _crosswalk_fixture(
+        tmp_path,
         artifact_authoritative=True,
         receipt_authoritative=True,
     )
@@ -187,4 +227,107 @@ def test_full_authority_keeps_receipt_public_flags_fail_closed() -> None:
         crosswalk_receipt_file=receipt_file,
     )
     assert summary["receipt_authority_safe"] is False
+    assert summary["authoritative_for_accepted_census"] is False
+
+
+def test_full_authority_requires_existing_byte_bound_files(tmp_path: Path) -> None:
+    source, artifact, receipt, artifact_file, receipt_file = _crosswalk_fixture(
+        tmp_path,
+        artifact_authoritative=True,
+        receipt_authoritative=True,
+    )
+    missing_file = dict(artifact_file)
+    missing_file["locator"] = str(tmp_path / "missing-crosswalk.json")
+    summary = _crosswalk_summary(
+        artifact,
+        receipt,
+        source_receipt=source,
+        accepted_ids=("g1", "g2"),
+        crosswalk_artifact_file=missing_file,
+        crosswalk_receipt_file=receipt_file,
+    )
+    assert summary["crosswalk_artifact_file_verified"] is False
+    assert summary["authoritative_for_accepted_census"] is False
+
+
+def test_full_authority_rejects_wrong_file_bytes(tmp_path: Path) -> None:
+    source, artifact, receipt, artifact_file, receipt_file = _crosswalk_fixture(
+        tmp_path,
+        artifact_authoritative=True,
+        receipt_authoritative=True,
+    )
+    wrong_bytes = dict(artifact_file)
+    wrong_bytes["bytes"] = int(wrong_bytes["bytes"]) + 1
+    summary = _crosswalk_summary(
+        artifact,
+        receipt,
+        source_receipt=source,
+        accepted_ids=("g1", "g2"),
+        crosswalk_artifact_file=wrong_bytes,
+        crosswalk_receipt_file=receipt_file,
+    )
+    assert summary["crosswalk_artifact_file_verified"] is False
+    assert summary["authoritative_for_accepted_census"] is False
+
+
+def test_full_authority_rejects_symlinked_files(tmp_path: Path) -> None:
+    source, artifact, receipt, artifact_file, receipt_file = _crosswalk_fixture(
+        tmp_path,
+        artifact_authoritative=True,
+        receipt_authoritative=True,
+    )
+    target = Path(str(artifact_file["locator"]))
+    link = tmp_path / "crosswalk-link.json"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    symlink_record = dict(artifact_file)
+    symlink_record["locator"] = str(link)
+    summary = _crosswalk_summary(
+        artifact,
+        receipt,
+        source_receipt=source,
+        accepted_ids=("g1", "g2"),
+        crosswalk_artifact_file=symlink_record,
+        crosswalk_receipt_file=receipt_file,
+    )
+    assert summary["crosswalk_artifact_file_verified"] is False
+    assert summary["authoritative_for_accepted_census"] is False
+
+
+def test_full_authority_rejects_resealed_caller_metadata(tmp_path: Path) -> None:
+    source, artifact, receipt, artifact_file, receipt_file = _crosswalk_fixture(
+        tmp_path,
+        artifact_authoritative=True,
+        receipt_authoritative=True,
+    )
+    resealed_artifact = dict(artifact)
+    resealed_artifact["status"] = "forged"
+    resealed_artifact["crosswalk_sha256"] = canonical_sha256(
+        {
+            key: value
+            for key, value in resealed_artifact.items()
+            if key != "crosswalk_sha256"
+        }
+    )
+    resealed_receipt = dict(receipt)
+    resealed_receipt["crosswalk_sha256"] = resealed_artifact["crosswalk_sha256"]
+    resealed_receipt["receipt_sha256"] = canonical_sha256(
+        {
+            key: value
+            for key, value in resealed_receipt.items()
+            if key != "receipt_sha256"
+        }
+    )
+    summary = _crosswalk_summary(
+        resealed_artifact,
+        resealed_receipt,
+        source_receipt=source,
+        accepted_ids=("g1", "g2"),
+        crosswalk_artifact_file=artifact_file,
+        crosswalk_receipt_file=receipt_file,
+    )
+    assert summary["crosswalk_artifact_file_verified"] is True
+    assert summary["crosswalk_artifact_payload_matches"] is False
     assert summary["authoritative_for_accepted_census"] is False

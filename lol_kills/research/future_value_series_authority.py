@@ -80,7 +80,7 @@ def _valid_file_record(record: Mapping[str, Any] | None) -> bool:
     if not isinstance(record, Mapping):
         return False
     value = str(record.get("sha256") or "")
-    locator = record.get("locator")
+    locator = record.get("path") or record.get("locator")
     if not isinstance(locator, str) or not locator.strip():
         return False
     return (
@@ -89,6 +89,63 @@ def _valid_file_record(record: Mapping[str, Any] | None) -> bool:
         and not isinstance(record.get("bytes"), bool)
         and int(record["bytes"]) > 0
     )
+
+
+def _read_verified_json_file(
+    record: Mapping[str, Any] | None,
+    *,
+    label: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Read and verify one caller-described JSON artifact.
+
+    A locator is evidence only after it resolves to a regular, non-symlink
+    file.  The bytes and digest in the caller record must match the bytes read
+    from that file.  The returned record is the normalized on-disk binding.
+    """
+
+    if not _valid_file_record(record):
+        return None, None
+    assert record is not None
+    raw_locator = record.get("path") or record.get("locator")
+    if not isinstance(raw_locator, str) or not raw_locator.strip():
+        return None, None
+    candidate = Path(raw_locator).expanduser()
+    if candidate.is_symlink():
+        return None, None
+    try:
+        path = candidate.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None, None
+    if path.is_symlink() or not path.is_file():
+        return None, None
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None, None
+    digest = hashlib.sha256(raw).hexdigest()
+    if int(record["bytes"]) != len(raw) or str(record["sha256"]).lower() != digest:
+        return None, None
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(parsed, Mapping):
+        return None, None
+    return dict(parsed), {
+        "path": str(path),
+        "bytes": len(raw),
+        "sha256": digest,
+        "label": label,
+    }
+
+
+def _payloads_match(left: Mapping[str, Any] | None, right: Mapping[str, Any] | None) -> bool:
+    if left is None or right is None:
+        return False
+    try:
+        return canonical_sha256(left) == canonical_sha256(right)
+    except (TypeError, ValueError):
+        return False
 
 
 def _as_count(value: Any) -> int | None:
@@ -193,26 +250,48 @@ def _crosswalk_summary(
         and crosswalk_source_identity == accepted_source_identity
         and crosswalk_accepted_count == accepted_count
     )
+    artifact_payload, verified_artifact_file = _read_verified_json_file(
+        crosswalk_artifact_file,
+        label="leaguepedia crosswalk artifact",
+    )
+    receipt_payload, verified_receipt_file = _read_verified_json_file(
+        crosswalk_receipt_file,
+        label="leaguepedia crosswalk receipt",
+    )
+    crosswalk_artifact_file_verified = verified_artifact_file is not None
+    crosswalk_receipt_file_verified = verified_receipt_file is not None
+    crosswalk_artifact_payload_matches = _payloads_match(crosswalk, artifact_payload)
+    crosswalk_receipt_payload_matches = _payloads_match(
+        crosswalk_receipt, receipt_payload
+    )
     crosswalk_hash_valid = (
-        artifact_present and _hash_matches(crosswalk, "crosswalk_sha256")
+        artifact_present
+        and _hash_matches(crosswalk, "crosswalk_sha256")
+        and artifact_payload is not None
+        and _hash_matches(artifact_payload, "crosswalk_sha256")
     )
     crosswalk_receipt_hash_valid = (
-        receipt_present and _hash_matches(crosswalk_receipt, "receipt_sha256")
+        receipt_present
+        and _hash_matches(crosswalk_receipt, "receipt_sha256")
+        and receipt_payload is not None
+        and _hash_matches(receipt_payload, "receipt_sha256")
     )
     receipt_crosswalk_hash_matches = (
         artifact_present
         and receipt_present
         and crosswalk_receipt.get("crosswalk_sha256")
         == crosswalk.get("crosswalk_sha256")
+        and isinstance(artifact_payload, Mapping)
+        and isinstance(receipt_payload, Mapping)
+        and receipt_payload.get("crosswalk_sha256")
+        == artifact_payload.get("crosswalk_sha256")
     )
     receipt_artifact_binding_matches = False
-    receipt_artifact = crosswalk_receipt.get("artifact") if receipt_present else None
-    if isinstance(receipt_artifact, Mapping) and _valid_file_record(
-        crosswalk_artifact_file
-    ):
+    receipt_artifact = receipt_payload.get("artifact") if receipt_payload else None
+    if isinstance(receipt_artifact, Mapping) and verified_artifact_file is not None:
         receipt_artifact_binding_matches = (
-            receipt_artifact.get("bytes") == crosswalk_artifact_file.get("bytes")
-            and receipt_artifact.get("sha256") == crosswalk_artifact_file.get("sha256")
+            receipt_artifact.get("bytes") == verified_artifact_file.get("bytes")
+            and receipt_artifact.get("sha256") == verified_artifact_file.get("sha256")
         )
     mapped_identity_hash = (
         identity_sha256(tuple(sorted(assignment_ids))) if assignment_ids else None
@@ -279,6 +358,10 @@ def _crosswalk_summary(
         and receipt_authority_safe
         and artifact_authoritative_series
         and receipt_authoritative_series
+        and crosswalk_artifact_file_verified
+        and crosswalk_receipt_file_verified
+        and crosswalk_artifact_payload_matches
+        and crosswalk_receipt_payload_matches
     )
     return {
         "status": "verified_full_coverage_candidate" if complete else "unavailable",
@@ -301,6 +384,16 @@ def _crosswalk_summary(
         "crosswalk_accepted_game_count": crosswalk_accepted_count,
         "crosswalk_source_receipt_sha256": receipt_source_hash,
         "accepted_source_receipt_sha256": source_hash,
+        "crosswalk_sha256": (
+            _as_string(crosswalk.get("crosswalk_sha256"))
+            if artifact_present
+            else None
+        ),
+        "crosswalk_receipt_sha256": (
+            _as_string(crosswalk_receipt.get("receipt_sha256"))
+            if receipt_present
+            else None
+        ),
         "crosswalk_source_identity_sha256": crosswalk_source_identity,
         "accepted_source_identity_sha256": accepted_source_identity,
         "source_census_matches": source_census_matches,
@@ -312,6 +405,10 @@ def _crosswalk_summary(
         "source_receipt_sha256_matches": receipt_source_hash == source_hash,
         "crosswalk_hash_valid": crosswalk_hash_valid,
         "crosswalk_receipt_hash_valid": crosswalk_receipt_hash_valid,
+        "crosswalk_artifact_file_verified": crosswalk_artifact_file_verified,
+        "crosswalk_receipt_file_verified": crosswalk_receipt_file_verified,
+        "crosswalk_artifact_payload_matches": crosswalk_artifact_payload_matches,
+        "crosswalk_receipt_payload_matches": crosswalk_receipt_payload_matches,
         "receipt_crosswalk_hash_matches": receipt_crosswalk_hash_matches,
         "receipt_artifact_binding_matches": receipt_artifact_binding_matches,
         "receipt_mapped_identity_matches": receipt_mapped_identity_matches,
@@ -510,6 +607,16 @@ def build_series_authority_audit(
         blockers.append("leaguepedia_oe_crosswalk_receipt_missing")
     if not crosswalk_summary["authoritative_for_accepted_census"]:
         blockers.append("leaguepedia_oe_bridge_is_not_full_source_bound_coverage")
+    if (
+        crosswalk_summary["artifact_present"]
+        and not crosswalk_summary["crosswalk_artifact_file_verified"]
+    ):
+        blockers.append("leaguepedia_crosswalk_artifact_file_unverified")
+    if (
+        crosswalk_summary["receipt_present"]
+        and not crosswalk_summary["crosswalk_receipt_file_verified"]
+    ):
+        blockers.append("leaguepedia_crosswalk_receipt_file_unverified")
     if (
         crosswalk_summary["artifact_present"]
         and crosswalk_summary["receipt_present"]
@@ -764,6 +871,57 @@ def verify_series_authority_audit(
             raise SeriesAuthorityAuditError(
                 "series authority audit bridge lacks dual authoritative-series flags"
             )
+        if bridge.get("authoritative_for_accepted_census") is True:
+            if (
+                bridge.get("crosswalk_artifact_file_verified") is not True
+                or bridge.get("crosswalk_receipt_file_verified") is not True
+                or bridge.get("crosswalk_artifact_payload_matches") is not True
+                or bridge.get("crosswalk_receipt_payload_matches") is not True
+            ):
+                raise SeriesAuthorityAuditError(
+                    "series authority audit bridge files are not byte-bound"
+                )
+            artifact_payload, artifact_file = _read_verified_json_file(
+                bridge.get("artifact_file"),
+                label="leaguepedia crosswalk artifact",
+            )
+            receipt_payload, receipt_file = _read_verified_json_file(
+                bridge.get("receipt_file"),
+                label="leaguepedia crosswalk receipt",
+            )
+            if artifact_payload is None or receipt_payload is None:
+                raise SeriesAuthorityAuditError(
+                    "series authority audit bridge files cannot be read"
+                )
+            if not _hash_matches(artifact_payload, "crosswalk_sha256"):
+                raise SeriesAuthorityAuditError(
+                    "series authority audit crosswalk artifact hash is invalid"
+                )
+            if not _hash_matches(receipt_payload, "receipt_sha256"):
+                raise SeriesAuthorityAuditError(
+                    "series authority audit crosswalk receipt hash is invalid"
+                )
+            if (
+                artifact_payload.get("crosswalk_sha256")
+                != bridge.get("crosswalk_sha256")
+                or receipt_payload.get("receipt_sha256")
+                != bridge.get("crosswalk_receipt_sha256")
+                or receipt_payload.get("crosswalk_sha256")
+                != artifact_payload.get("crosswalk_sha256")
+            ):
+                raise SeriesAuthorityAuditError(
+                    "series authority audit bridge payload binding changed"
+                )
+            receipt_artifact = receipt_payload.get("artifact")
+            if (
+                not isinstance(receipt_artifact, Mapping)
+                or artifact_file is None
+                or receipt_artifact.get("bytes") != artifact_file.get("bytes")
+                or receipt_artifact.get("sha256") != artifact_file.get("sha256")
+            ):
+                raise SeriesAuthorityAuditError(
+                    "series authority audit bridge artifact binding changed"
+                )
         for name in ("artifact_file", "receipt_file"):
             record = bridge.get(name)
             if record is not None and not _valid_file_record(record):
