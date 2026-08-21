@@ -18,6 +18,7 @@ from lol_kills.research.future_value_rating import (
     _baseline_output_alignment,
     _baseline_source_binding,
     _bind_baseline_fold_series,
+    _current_rating_method_comparison,
     _fold_level_imputation_values,
     build_future_value_design,
     build_time_decayed_prior_player_form,
@@ -782,6 +783,55 @@ def test_baseline_output_alignment_reports_missing_and_extra_ids() -> None:
         "research_baseline_coverage_incomplete",
         "research_baseline_extra_prediction_ids",
     ]
+
+
+def test_current_rating_methods_keep_partial_bt_out_of_shared_cohort() -> None:
+    validation = pd.DataFrame(
+        {"game_id": ["g1", "g2", "g3", "g4"]}
+    )
+    target = pd.Series([0.0, 1.0, 1.0, 0.0], index=validation.index)
+    paired_mask = pd.Series([True, True, True, True], index=validation.index)
+    sequential = pd.Series([0.2, 0.8, 0.7, 0.3], index=validation.index)
+    hierarchical = pd.Series([0.25, 0.75, np.nan, np.nan], index=validation.index)
+    reports = {
+        "sequential_player_elo": {
+            "status": "available",
+            "blockers": [],
+            "source_binding": {"status": "available", "blockers": []},
+        },
+        "hierarchical_bt": {
+            "status": "partial",
+            "blockers": ["hierarchical_bt_coverage_incomplete"],
+            "exclusion_reason": "validation rows with unseen teams are excluded",
+            "source_binding": {"status": "available", "blockers": []},
+        },
+    }
+
+    evidence = _current_rating_method_comparison(
+        validation,
+        target,
+        paired_mask,
+        sequential,
+        hierarchical,
+        reports,
+    )
+
+    assert evidence["method_specific"]["sequential_player_elo"]["status"] == (
+        "available"
+    )
+    assert evidence["method_specific"]["sequential_player_elo"]["scored_rows"] == 4
+    assert evidence["method_specific"]["sequential_player_elo"]["missing_game_ids"] == []
+    bt = evidence["method_specific"]["hierarchical_bt"]
+    assert bt["status"] == "partial"
+    assert bt["scored_rows"] == 2
+    assert bt["missing_game_ids"] == ["g3", "g4"]
+    assert bt["exclusion_reason"] == "validation rows with unseen teams are excluded"
+    assert evidence["common_all_method"]["status"] == "blocked"
+    assert evidence["common_all_method"]["rows"] == 2
+    assert evidence["common_all_method"]["game_ids"] == ["g1", "g2"]
+    assert "current_rating_row_id_parity_incomplete" in evidence["blockers"]
+    assert "hierarchical_bt_coverage_incomplete" in evidence["blockers"]
+    assert pd.isna(hierarchical.iloc[2])
 
 
 def test_hierarchical_binding_requires_the_declared_proxy_series_receipt() -> None:

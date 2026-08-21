@@ -5619,6 +5619,103 @@ def _ledger_value(value: Any) -> float | None:
     return numeric if np.isfinite(numeric) else None
 
 
+def _current_rating_method_comparison(
+    validation: pd.DataFrame,
+    target: pd.Series,
+    paired_mask: pd.Series,
+    sequential_probability: pd.Series,
+    hierarchical_probability: pd.Series,
+    current_reports: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Report each current-rating method on its own finite paired cohort.
+
+    The sequential player Elo baseline and hierarchical BT baseline have
+    different coverage contracts.  The method rows stay separate.  The
+    shared cohort is retained for an all-method comparison and never receives
+    an imputed hierarchical probability.
+    """
+
+    paired_ids_set = set(validation.loc[paired_mask, "game_id"].astype(str))
+    current_mask = (
+        paired_mask
+        & sequential_probability.notna()
+        & hierarchical_probability.notna()
+    )
+    current_ids = tuple(
+        sorted(validation.loc[current_mask, "game_id"].astype(str))
+    )
+    common_ids_set = set(current_ids)
+    current_blockers: list[str] = []
+    for method_name in ("sequential_player_elo", "hierarchical_bt"):
+        method_report = current_reports[method_name]
+        if method_report.get("status") != "available":
+            current_blockers.extend(str(value) for value in method_report["blockers"])
+        binding = method_report.get("source_binding", {})
+        if binding.get("status") != "available":
+            current_blockers.extend(str(value) for value in binding.get("blockers", []))
+    if common_ids_set != paired_ids_set:
+        current_blockers.append("current_rating_row_id_parity_incomplete")
+
+    method_specific: dict[str, dict[str, Any]] = {}
+    for method_name, values in (
+        ("sequential_player_elo", sequential_probability),
+        ("hierarchical_bt", hierarchical_probability),
+    ):
+        method_report = current_reports[method_name]
+        method_binding = method_report.get("source_binding", {})
+        method_mask = paired_mask & values.notna()
+        method_target = target.loc[method_mask]
+        method_values = values.loc[method_mask]
+        method_ids = sorted(
+            set(validation.loc[method_mask, "game_id"].astype(str))
+        )
+        method_blockers = {
+            str(value) for value in method_report.get("blockers", [])
+        }
+        method_blockers.update(
+            str(value) for value in method_binding.get("blockers", [])
+        )
+        method_requested_rows = int(paired_mask.sum())
+        method_scored_rows = int(len(method_values))
+        if (
+            method_report.get("status") == "available"
+            and method_binding.get("status") == "available"
+            and method_scored_rows == method_requested_rows
+            and not method_blockers
+        ):
+            method_status = "available"
+        elif method_scored_rows:
+            method_status = "partial"
+        else:
+            method_status = "blocked"
+        method_specific[method_name] = {
+            "status": method_status,
+            "requested_rows": method_requested_rows,
+            "scored_rows": method_scored_rows,
+            "scored_game_ids": method_ids,
+            "missing_game_ids": sorted(set(paired_ids_set) - set(method_ids)),
+            "metrics": _classification_metrics(method_target, method_values),
+            "calibration": _calibration_metrics(method_target, method_values),
+            "source_binding_status": str(
+                method_binding.get("status") or "unavailable"
+            ),
+            "blockers": sorted(method_blockers),
+            "exclusion_reason": method_report.get("exclusion_reason"),
+        }
+    return {
+        "current_mask": current_mask,
+        "common_ids": current_ids,
+        "blockers": sorted(set(current_blockers)),
+        "method_specific": method_specific,
+        "common_all_method": {
+            "status": "available" if not current_blockers else "blocked",
+            "rows": int(current_mask.sum()),
+            "game_ids": list(current_ids),
+            "blockers": sorted(set(current_blockers)),
+        },
+    }
+
+
 def evaluate_future_value(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -5819,70 +5916,20 @@ def evaluate_future_value(
                 full_map_frame=map_frame,
             )
         )
-        current_mask = (
-            paired_mask
-            & sequential_probability.notna()
-            & hierarchical_probability.notna()
+        current_evidence = _current_rating_method_comparison(
+            validation,
+            target,
+            paired_mask,
+            sequential_probability,
+            hierarchical_probability,
+            current_reports,
         )
-        current_ids = tuple(
-            sorted(validation.loc[current_mask, "game_id"].astype(str))
-        )
-        paired_ids_set = set(validation.loc[paired_mask, "game_id"].astype(str))
+        current_mask = current_evidence["current_mask"]
+        current_ids = tuple(current_evidence["common_ids"])
         common_ids_set = set(current_ids)
-        current_blockers: list[str] = []
-        for method_name in ("sequential_player_elo", "hierarchical_bt"):
-            method_report = current_reports[method_name]
-            if method_report.get("status") != "available":
-                current_blockers.extend(str(value) for value in method_report["blockers"])
-            binding = method_report.get("source_binding", {})
-            if binding.get("status") != "available":
-                current_blockers.extend(str(value) for value in binding.get("blockers", []))
-        if common_ids_set != paired_ids_set:
-            current_blockers.append("current_rating_row_id_parity_incomplete")
-        method_specific_current_methods: dict[str, dict[str, Any]] = {}
-        for method_name, values in (
-            ("sequential_player_elo", sequential_probability),
-            ("hierarchical_bt", hierarchical_probability),
-        ):
-            method_report = current_reports[method_name]
-            method_binding = method_report.get("source_binding", {})
-            method_mask = paired_mask & values.notna()
-            method_target = target.loc[method_mask]
-            method_values = values.loc[method_mask]
-            method_ids = sorted(
-                set(validation.loc[method_mask, "game_id"].astype(str))
-            )
-            method_blockers = {
-                str(value) for value in method_report.get("blockers", [])
-            }
-            method_blockers.update(
-                str(value) for value in method_binding.get("blockers", [])
-            )
-            method_requested_rows = int(len(paired_target))
-            method_scored_rows = int(len(method_values))
-            if (
-                method_report.get("status") == "available"
-                and method_binding.get("status") == "available"
-                and method_scored_rows == method_requested_rows
-                and not method_blockers
-            ):
-                method_status = "available"
-            elif method_scored_rows:
-                method_status = "partial"
-            else:
-                method_status = "blocked"
-            method_specific_current_methods[method_name] = {
-                "status": method_status,
-                "requested_rows": method_requested_rows,
-                "scored_rows": method_scored_rows,
-                "scored_game_ids": method_ids,
-                "missing_game_ids": sorted(set(paired_ids_set) - set(method_ids)),
-                "metrics": _classification_metrics(method_target, method_values),
-                "calibration": _calibration_metrics(method_target, method_values),
-                "source_binding_status": str(method_binding.get("status") or "unavailable"),
-                "blockers": sorted(method_blockers),
-                "exclusion_reason": method_report.get("exclusion_reason"),
-            }
+        current_blockers = list(current_evidence["blockers"])
+        method_specific_current_methods = current_evidence["method_specific"]
+        paired_ids_set = set(validation.loc[paired_mask, "game_id"].astype(str))
         common_target = target.loc[current_mask]
         common_predictions = {
             "candidate": prediction.loc[current_mask],
@@ -5966,11 +6013,8 @@ def evaluate_future_value(
             "methods": current_methods,
             "method_specific": method_specific_current_methods,
             "common_all_method": {
-                "status": "available" if not current_blockers else "blocked",
-                "rows": int(len(common_target)),
-                "game_ids": list(current_ids),
+                **dict(current_evidence["common_all_method"]),
                 "methods": current_methods,
-                "blockers": sorted(set(current_blockers)),
             },
             "candidate_paired_methods": candidate_paired_method_reports,
             "baselines": {
