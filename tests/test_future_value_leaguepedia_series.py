@@ -16,6 +16,9 @@ from lol_kills.research.future_value_rating import (
     _roster_change_labels,
     bind_verified_leaguepedia_series_crosswalk,
 )
+from lol_kills.research.oe_leaguepedia_series_crosswalk import (
+    build_oe_leaguepedia_series_crosswalk,
+)
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
@@ -63,61 +66,115 @@ def _write_crosswalk(
     assignments: list[dict[str, object]],
 ) -> tuple[str, str, str]:
     accepted = list(source["accepted_game_ids"])
-    series_rows: dict[str, dict[str, object]] = {}
-    for row in assignments:
-        series_id = str(row["series_id"])
-        series_rows.setdefault(
+    requested = {str(row["oe_game_id"]): row for row in assignments}
+    oe_rows = [
+        {
+            "gameid": game_id,
+            "date": f"2026-01-01T00:{index * 10:02d}:00Z",
+            "league": "LEC",
+            "tournament": "Spring",
+            "patch": "16.1",
+            "teams": ["blue", "red"],
+        }
+        for index, game_id in enumerate(accepted, start=1)
+    ]
+    series_orders: dict[str, int] = {}
+    scoreboard_rows: list[dict[str, object]] = []
+    schedule_by_series: dict[str, dict[str, object]] = {}
+    for index, game_id in enumerate(accepted, start=1):
+        requested_row = requested.get(game_id)
+        if requested_row is None:
+            continue
+        series_id = str(requested_row["series_id"])
+        order = series_orders.get(series_id, 0) + 1
+        series_orders[series_id] = order
+        stamp = f"2026-01-01 00:{index * 10:02d}:00"
+        scoreboard_rows.append(
+            {
+                "GameId": f"{series_id}_{order}",
+                "DateTime UTC": stamp,
+                "Team1": "blue",
+                "Team2": "red",
+                "League": "LEC",
+                "OverviewPage": "LEC/2026 Spring",
+                "Tournament": "LEC 2026 Spring",
+                "Patch": "26.1",
+            }
+        )
+        schedule_by_series.setdefault(
             series_id,
             {
-                "series_id": series_id,
-                "oe_game_ids": [],
-                "normalized_team_set": list(row["normalized_team_set"]),
+                "MatchId": series_id,
+                "DateTime UTC": stamp,
+                "Team1": "blue",
+                "Team2": "red",
+                "League": "LEC",
+                "OverviewPage": "LEC/2026 Spring",
+                "Patch": "26.1",
             },
-        )["oe_game_ids"].append(str(row["oe_game_id"]))
-    for row in series_rows.values():
-        row["oe_game_ids"] = sorted(row["oe_game_ids"])
-    artifact: dict[str, object] = {
-        "schema_version": "scryglass:oe-leaguepedia-series-crosswalk:v1",
-        "captured_at": "2026-01-03T00:00:00Z",
-        "status": "partial_authoritative_coverage",
-        "authority": {
-            "research_only": True,
-            "public": False,
-            "probability": False,
-            "draft": False,
-            "promotion": False,
-            "deployment": False,
+        )
+    schedule_rows = list(schedule_by_series.values())
+    tournament_rows = [
+        {
+            "Name": "LEC 2026 Spring",
+            "OverviewPage": "LEC/2026 Spring",
+            "League": "LEC",
         },
-        "source_binding": {
-            "accepted_game_count": len(accepted),
-            "accepted_game_identity_sha256": identity_sha256(accepted),
-            "accepted_game_ids": accepted,
-            "model_eligible_game_count": len(accepted),
-            "model_eligible_game_identity_sha256": identity_sha256(accepted),
-            "model_eligible_game_ids": accepted,
-            "receipt_sha256": source["receipt_sha256"],
-            "selected_game_count": len(accepted),
-            "selected_game_identity_sha256": identity_sha256(accepted),
-            "selected_game_ids": accepted,
-            "selected_is_full_accepted_census": True,
-        },
-        "source_records": {},
-        "competition_mapping": {},
-        "raw_sources": {},
-        "join_contract": {"outcome_used": False},
-        "coverage": {
-            "complete": False,
-            "accepted_game_count": len(accepted),
-            "mapped_game_count": len(assignments),
-            "selected_game_count": len(accepted),
-        },
-        "assignments": assignments,
-        "series": list(series_rows.values()),
-        "issues": [],
+        # This source row is deliberately incomplete.  The production builder
+        # records it as an issue, which keeps the fixture research-only and
+        # partial even when every accepted game has a valid assignment.
+        {"Name": "incomplete fixture row"},
+    ]
+    raw_sources = {
+        "oe": oe_rows,
+        "scoreboardgames": scoreboard_rows,
+        "matchschedule": schedule_rows,
+        "tournaments": tournament_rows,
     }
-    artifact["crosswalk_sha256"] = hashlib.sha256(
-        _canonical_json_bytes(artifact)
-    ).hexdigest()
+    source_records: dict[str, dict[str, object]] = {}
+    raw_source_bytes: dict[str, bytes] = {}
+    for label, rows in raw_sources.items():
+        payload_bytes = _canonical_json_bytes(rows)
+        raw_bytes = b"captured:" + label.encode() + b":" + payload_bytes
+        raw_source_bytes[label] = raw_bytes
+        source_records[label] = {
+            "url": f"https://example.test/{label}",
+            "retrieved_at": "2026-01-03T00:00:00Z",
+            "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+            "bytes": len(raw_bytes),
+            "payload_sha256": hashlib.sha256(payload_bytes).hexdigest(),
+            "payload_bytes": len(payload_bytes),
+        }
+    artifact = build_oe_leaguepedia_series_crosswalk(
+        oe_rows,
+        scoreboard_rows,
+        schedule_rows,
+        tournament_rows,
+        source_receipt=source,
+        source_records=source_records,
+        competition_mapping={
+            "LEC": {
+                "scoreboard": {
+                    "leagues": ["LEC"],
+                    "overview_pages": ["LEC/2026 Spring"],
+                    "tournaments": ["LEC 2026 Spring"],
+                },
+                "schedule": {
+                    "leagues": ["LEC"],
+                    "overview_pages": ["LEC/2026 Spring"],
+                },
+                "patches": {"16.1": ["26.1"]},
+            }
+        },
+        captured_at="2026-01-03T00:00:00Z",
+        raw_source_bytes=raw_source_bytes,
+        allow_partial=True,
+    )
+    assert artifact["status"] == "partial_authoritative_coverage"
+    assert artifact["coverage"]["mapped_game_count"] == len(assignments), json.dumps(
+        artifact["issues"], sort_keys=True
+    )
+    built_assignments = list(artifact["assignments"])
     artifact_path = tmp_path / "crosswalk.json"
     artifact_path.write_bytes(_canonical_json_bytes(artifact))
     artifact_sha256 = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
@@ -135,13 +192,15 @@ def _write_crosswalk(
         "source_identity_sha256": source["source_identity_sha256"],
         "accepted_game_count": len(accepted),
         "accepted_game_identity_sha256": identity_sha256(accepted),
-        "assignment_count": len(assignments),
-        "assignment_sha256": _leaguepedia_assignment_sha256(assignments),
-        "mapped_game_count": len(assignments),
+        "assignment_count": len(built_assignments),
+        "assignment_sha256": _leaguepedia_assignment_sha256(built_assignments),
+        "mapped_game_count": len(built_assignments),
         "mapped_game_identity_sha256": identity_sha256(
-            sorted(str(row["oe_game_id"]) for row in assignments)
+            sorted(str(row["oe_game_id"]) for row in built_assignments)
         ),
-        "mapped_game_ids": sorted(str(row["oe_game_id"]) for row in assignments),
+        "mapped_game_ids": sorted(
+            str(row["oe_game_id"]) for row in built_assignments
+        ),
     }
     receipt["receipt_sha256"] = hashlib.sha256(
         _canonical_json_bytes(receipt)
