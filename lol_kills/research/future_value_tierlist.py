@@ -271,6 +271,7 @@ def _validate_fold_chronology(
     seen_folds: set[int] = set()
     seen_games: set[str] = set()
     fold_audit: list[dict[str, Any]] = []
+    chronology_blockers: set[str] = set()
     for fold_record in folds:
         if not isinstance(fold_record, Mapping):
             raise FutureValueTierListError(f"{variant} fold receipt is invalid")
@@ -344,6 +345,54 @@ def _validate_fold_chronology(
             f"{variant} fold {fold} validation series identity",
         )
 
+        # The rating ledger currently stores only digests for its series
+        # partition.  A digest supplied by the producer does not let this
+        # consumer prove that the train and validation clusters are disjoint.
+        # A future artifact may carry the canonical IDs.  When it does, bind
+        # the IDs to the existing digests and check the partition here.
+        raw_train_series_ids = series_safety.get("train_series_ids")
+        raw_validation_series_ids = series_safety.get("validation_series_ids")
+        if not isinstance(raw_train_series_ids, list) or not isinstance(raw_validation_series_ids, list):
+            series_disjointness = {
+                "status": "blocked",
+                "policy": "whole_series_disjoint",
+                "train_series_identity_sha256": train_series_identity,
+                "validation_series_identity_sha256": validation_series_identity,
+                "blocker": "series_disjointness_not_independently_verified",
+                "limitation": "exact train and validation cluster IDs are not present in the feature ledger",
+            }
+            chronology_blocker = "series_disjointness_not_independently_verified"
+        else:
+            train_series_ids = [str(value).strip() for value in raw_train_series_ids]
+            validation_series_ids = [str(value).strip() for value in raw_validation_series_ids]
+            if (
+                not train_series_ids
+                or not validation_series_ids
+                or any(not value for value in train_series_ids + validation_series_ids)
+                or len(train_series_ids) != len(set(train_series_ids))
+                or len(validation_series_ids) != len(set(validation_series_ids))
+            ):
+                raise FutureValueTierListError(f"{variant} fold {fold} series IDs are invalid")
+            if set(train_series_ids) & set(validation_series_ids):
+                raise FutureValueTierListError(f"{variant} fold {fold} series IDs overlap")
+            if identity_sha256(train_series_ids) != train_series_identity:
+                raise FutureValueTierListError(f"{variant} fold {fold} train series identity changed")
+            if identity_sha256(validation_series_ids) != validation_series_identity:
+                raise FutureValueTierListError(
+                    f"{variant} fold {fold} validation series identity changed"
+                )
+            series_disjointness = {
+                "status": "verified",
+                "policy": "whole_series_disjoint",
+                "train_series_identity_sha256": train_series_identity,
+                "validation_series_identity_sha256": validation_series_identity,
+                "train_series_ids": sorted(train_series_ids),
+                "validation_series_ids": sorted(validation_series_ids),
+                "train_series_count": len(train_series_ids),
+                "validation_series_count": len(validation_series_ids),
+            }
+            chronology_blocker = None
+
         fold_audit.append(
             {
                 "fold": fold,
@@ -352,15 +401,11 @@ def _validate_fold_chronology(
                 "fit_date_max": fit_max.isoformat().replace("+00:00", "Z"),
                 "validation_interval_start": interval_start.isoformat().replace("+00:00", "Z"),
                 "validation_interval_end": interval_end.isoformat().replace("+00:00", "Z"),
-                "series_disjointness": {
-                    "status": "ledger_hash_bound_not_recomputed",
-                    "policy": "whole_series_disjoint",
-                    "train_series_identity_sha256": train_series_identity,
-                    "validation_series_identity_sha256": validation_series_identity,
-                    "limitation": "exact train and validation cluster IDs are not present in the feature ledger",
-                },
+                "series_disjointness": series_disjointness,
             }
         )
+        if chronology_blocker is not None:
+            chronology_blockers.add(chronology_blocker)
 
     if seen_folds != {1, 2, 3} or seen_games != {str(row.get("game_id")) for row in rows}:
         raise FutureValueTierListError(f"{variant} fold coverage does not match the ledger")
@@ -400,7 +445,13 @@ def _validate_fold_chronology(
             if bool((fold_dates < validation_start).any()) or bool((fold_dates > validation_end).any()):
                 raise FutureValueTierListError(f"{variant} fold {fold} scored dates leave the validation window")
         date_check = "verified_against_frozen_maps"
-    return {"status": "verified", "date_check": date_check, "folds": sorted(fold_audit, key=lambda item: item["fold"])}
+    blockers = sorted(chronology_blockers)
+    return {
+        "status": "blocked" if blockers else "verified",
+        "date_check": date_check,
+        "blockers": blockers,
+        "folds": sorted(fold_audit, key=lambda item: item["fold"]),
+    }
 
 
 def load_prediction_offsets(
@@ -492,6 +543,11 @@ def load_prediction_offsets(
         maps_path=maps_path,
         expected_maps_sha256=expected_maps_sha256,
     )
+    chronology_blockers = chronology.get("blockers", [])
+    if not isinstance(chronology_blockers, list) or not all(
+        isinstance(value, str) for value in chronology_blockers
+    ):
+        raise FutureValueTierListError(f"{variant} chronology blocker binding is invalid")
     offsets: dict[str, float] = {}
     targets: dict[str, float] = {}
     ordered_ids: list[str] = []
@@ -523,7 +579,12 @@ def load_prediction_offsets(
         "prediction_ledger_sha256": str(ledger["sha256"]),
         "offsets_sha256": offsets_hash,
         "variant_receipt_sha256": str(result.get("variant_receipt", {}).get("receipt_sha256") or ""),
-        "blockers": sorted(str(value) for value in result.get("blockers", [])),
+        "blockers": sorted(
+            {
+                *(str(value) for value in result.get("blockers", [])),
+                *chronology_blockers,
+            }
+        ),
         "chronology": chronology,
     }
 
@@ -837,6 +898,21 @@ def build_fourway_diff(
             raise FutureValueTierListError(f"{variant} model binding is missing")
         if "offsets_sha256" not in binding or "producer" not in binding:
             raise FutureValueTierListError(f"{variant} model offset binding is incomplete")
+        chronology = binding.get("chronology")
+        if chronology is not None:
+            if not isinstance(chronology, Mapping):
+                raise FutureValueTierListError(f"{variant} chronology binding is invalid")
+            chronology_status = chronology.get("status")
+            chronology_blockers = chronology.get("blockers")
+            if chronology_status == "blocked":
+                if not isinstance(chronology_blockers, list) or not chronology_blockers:
+                    raise FutureValueTierListError(
+                        f"{variant} blocked chronology has no explicit blocker"
+                    )
+                if not all(isinstance(value, str) and value for value in chronology_blockers):
+                    raise FutureValueTierListError(f"{variant} chronology blockers are invalid")
+            elif chronology_status != "verified":
+                raise FutureValueTierListError(f"{variant} chronology is not verified")
         validate_candidate(
             candidates[variant],
             variant=variant,
@@ -865,6 +941,10 @@ def build_fourway_diff(
         for binding in model_bindings.values()
         for blocker in binding.get("blockers", [])
     }
+    for binding in model_bindings.values():
+        chronology = binding.get("chronology")
+        if isinstance(chronology, Mapping):
+            inherited_blockers.update(chronology.get("blockers", []))
     for variant in VARIANTS:
         paired_rows: list[dict[str, Any]] = []
         rank_moves: list[int] = []

@@ -189,6 +189,8 @@ def _model(variant: str) -> dict[str, object]:
     }
     folds = []
     for fold, game_id in enumerate(("g1", "g2", "g3"), 1):
+        train_series_ids = [f"train:{fold}"]
+        validation_series_ids = [f"validation:{fold}"]
         folds.append(
             {
                 "fold": fold,
@@ -208,8 +210,10 @@ def _model(variant: str) -> dict[str, object]:
                     "same_timestamp_policy": "batch_exclude_same_timestamp",
                     "series_safety": {
                         "policy": "whole_series_disjoint",
-                        "train_series_identity_sha256": "5" * 64,
-                        "validation_series_identity_sha256": "6" * 64,
+                        "train_series_identity_sha256": identity_sha256(train_series_ids),
+                        "validation_series_identity_sha256": identity_sha256(validation_series_ids),
+                        "train_series_ids": train_series_ids,
+                        "validation_series_ids": validation_series_ids,
                     },
                 },
             }
@@ -292,6 +296,104 @@ def test_prediction_offsets_are_hash_bound_and_finite(tmp_path: Path) -> None:
             source=SOURCE,
             maps_path=maps_path,
             expected_maps_sha256=maps_hash,
+        )
+
+
+def test_missing_series_ids_blocks_chronology_and_binds_blocker(tmp_path: Path) -> None:
+    path = tmp_path / "model.json"
+    model = _model("future_player_form")
+    for fold in model["variants"]["future_player_form"]["folds"]:  # type: ignore[index]
+        fold["feature_ledger_binding"]["series_safety"].pop("train_series_ids")  # type: ignore[index]
+        fold["feature_ledger_binding"]["series_safety"].pop("validation_series_ids")  # type: ignore[index]
+    raw_hash = _write_json(path, model)
+    maps_path = tmp_path / "maps.parquet"
+    pd.DataFrame(
+        {
+            "game_uid": ["g1", "g2", "g3"],
+            "date": [
+                "2026-01-02T12:00:00Z",
+                "2026-01-02T12:00:00Z",
+                "2026-01-02T12:00:00Z",
+            ],
+            "y_blue_win": [1, 0, 1],
+        }
+    ).to_parquet(maps_path)
+    _, _, binding = load_prediction_offsets(
+        path,
+        variant="future_player_form",
+        expected_raw_sha256=raw_hash,
+        source=SOURCE,
+        maps_path=maps_path,
+        expected_maps_sha256=sha256_path(maps_path),
+    )
+    assert binding["chronology"]["status"] == "blocked"  # type: ignore[index]
+    assert binding["chronology"]["blockers"] == [  # type: ignore[index]
+        "series_disjointness_not_independently_verified"
+    ]
+    assert binding["blockers"] == [  # type: ignore[index]
+        "research_blocker",
+        "series_disjointness_not_independently_verified",
+    ]
+
+
+def test_series_identity_mutation_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "model.json"
+    model = _model("future_player_form")
+    safety = model["variants"]["future_player_form"]["folds"][0]["feature_ledger_binding"]["series_safety"]  # type: ignore[index]
+    safety["train_series_ids"] = ["train:forged"]
+    raw_hash = _write_json(path, model)
+    maps_path = tmp_path / "maps.parquet"
+    pd.DataFrame(
+        {
+            "game_uid": ["g1", "g2", "g3"],
+            "date": [
+                "2026-01-02T12:00:00Z",
+                "2026-01-02T12:00:00Z",
+                "2026-01-02T00:00:00Z",
+            ],
+            "y_blue_win": [1, 0, 1],
+        }
+    ).to_parquet(maps_path)
+    with pytest.raises(FutureValueTierListError, match="train series identity changed"):
+        load_prediction_offsets(
+            path,
+            variant="future_player_form",
+            expected_raw_sha256=raw_hash,
+            source=SOURCE,
+            maps_path=maps_path,
+            expected_maps_sha256=sha256_path(maps_path),
+        )
+
+
+def test_series_overlap_fails_closed_even_with_resealed_digests(tmp_path: Path) -> None:
+    path = tmp_path / "model.json"
+    model = _model("future_player_form")
+    safety = model["variants"]["future_player_form"]["folds"][0]["feature_ledger_binding"]["series_safety"]  # type: ignore[index]
+    safety["train_series_ids"] = ["series:shared"]
+    safety["validation_series_ids"] = ["series:shared"]
+    safety["train_series_identity_sha256"] = identity_sha256(["series:shared"])
+    safety["validation_series_identity_sha256"] = identity_sha256(["series:shared"])
+    raw_hash = _write_json(path, model)
+    maps_path = tmp_path / "maps.parquet"
+    pd.DataFrame(
+        {
+            "game_uid": ["g1", "g2", "g3"],
+            "date": [
+                "2026-01-02T12:00:00Z",
+                "2026-01-02T12:00:00Z",
+                "2026-01-02T12:00:00Z",
+            ],
+            "y_blue_win": [1, 0, 1],
+        }
+    ).to_parquet(maps_path)
+    with pytest.raises(FutureValueTierListError, match="series IDs overlap"):
+        load_prediction_offsets(
+            path,
+            variant="future_player_form",
+            expected_raw_sha256=raw_hash,
+            source=SOURCE,
+            maps_path=maps_path,
+            expected_maps_sha256=sha256_path(maps_path),
         )
 
 
@@ -438,6 +540,39 @@ def test_fourway_diff_uses_exact_stable_identity_and_rank_direction() -> None:
     )
     assert ahri["delta"]["rank_delta"] == -1
     assert report["authority"]["public_tierlist"] is False
+
+
+def test_fourway_diff_preserves_blocked_chronology_evidence() -> None:
+    candidates = {
+        variant: _candidate(variant == "future_player_form", variant)
+        for variant in VARIANTS
+    }
+    bindings = {
+        variant: {
+            "blockers": [],
+            "offsets_sha256": "5" * 64,
+            "producer": f"future_value_rating:{variant}",
+            "chronology": {
+                "status": "blocked",
+                "blockers": ["series_disjointness_not_independently_verified"],
+            },
+        }
+        for variant in VARIANTS
+    }
+    report = build_fourway_diff(
+        candidates,
+        source={
+            "source_as_of": SOURCE["source_as_of"],
+            "source_identity_sha256": "7" * 64,
+            "source_receipt_sha256": "8" * 64,
+        },
+        universe={"game_count": 2, "game_identity_sha256": "7" * 64},
+        model_bindings=bindings,
+        trust_manifest_raw_sha256="8" * 64,
+        baseline_candidate_raw_sha256="9" * 64,
+    )
+    assert "series_disjointness_not_independently_verified" in report["blockers"]
+    assert report["model_bindings"]["current_only"]["chronology"]["status"] == "blocked"
 
 
 def test_fourway_diff_rejects_resealed_offset_digest() -> None:
