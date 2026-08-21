@@ -11,7 +11,10 @@ from lol_kills.research.oe_leaguepedia_series_crosswalk import (
     build_oe_leaguepedia_series_crosswalk,
     verify_crosswalk,
 )
-from tools.build_oe_leaguepedia_series_crosswalk import main as build_crosswalk_cli
+from tools.build_oe_leaguepedia_series_crosswalk import (
+    _safe_capture_path,
+    main as build_crosswalk_cli,
+)
 
 
 def _canonical(value: object) -> bytes:
@@ -292,6 +295,48 @@ def test_tournament_assignment_tamper_changes_hash_and_fails_verification() -> N
     replay["crosswalk_sha256"] = hashlib.sha256(_canonical(replay)).hexdigest()
     with pytest.raises(CrosswalkError, match="conflicting"):
         verify_crosswalk(replay)
+
+
+def test_resealed_raw_tournament_overview_mutation_fails_verification() -> None:
+    result = _build()
+    result["raw_sources"]["tournaments"][0]["OverviewPage"] = "Forged/Overview"
+    tournament_payload = _canonical(result["raw_sources"]["tournaments"])
+    result["source_records"]["tournaments"]["payload_sha256"] = hashlib.sha256(
+        tournament_payload
+    ).hexdigest()
+    result["source_records"]["tournaments"]["payload_bytes"] = len(
+        tournament_payload
+    )
+    result.pop("crosswalk_sha256")
+    result["crosswalk_sha256"] = hashlib.sha256(_canonical(result)).hexdigest()
+
+    with pytest.raises(CrosswalkError, match="tournament evidence changed"):
+        verify_crosswalk(result)
+
+
+def test_safe_capture_path_rejects_symlink_leaf_and_ancestor(tmp_path: Path) -> None:
+    root = tmp_path / "capture"
+    root.mkdir()
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    target = target_dir / "source.json"
+    target.write_text("{}")
+    leaf = root / "leaf.json"
+    ancestor = root / "linked-directory"
+    linked_root = tmp_path / "linked-root"
+    try:
+        leaf.symlink_to(target)
+        ancestor.symlink_to(target_dir, target_is_directory=True)
+        linked_root.symlink_to(root, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    with pytest.raises(CrosswalkError, match="missing or unsafe"):
+        _safe_capture_path(root, "leaf.json", label="leaf")
+    with pytest.raises(CrosswalkError, match="missing or unsafe"):
+        _safe_capture_path(root, "linked-directory/source.json", label="ancestor")
+    with pytest.raises(CrosswalkError, match="missing or unsafe"):
+        _safe_capture_path(linked_root, "leaf.json", label="root")
 
 
 def test_outcome_mutations_do_not_change_assignments() -> None:

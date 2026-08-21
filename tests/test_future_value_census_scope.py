@@ -16,6 +16,9 @@ from lol_kills.research.future_value_series_authority import (
     _crosswalk_summary,
     canonical_sha256,
 )
+from lol_kills.research.oe_leaguepedia_series_crosswalk import (
+    build_oe_leaguepedia_series_crosswalk,
+)
 from lol_kills.research.future_value_training import (
     FutureValueTrainingError,
     _accepted_map_frame as training_accepted_map_frame,
@@ -106,30 +109,85 @@ def _crosswalk_fixture(
 ):
     ids = ("g1", "g2")
     source = _source(ids)
-    artifact: dict[str, object] = {
-        "status": "complete_authoritative_coverage",
-        "authority": {
-            "research_only": True,
-            "authoritative_series": artifact_authoritative,
-            "public": False,
-            "promotion": False,
-            "deployment": False,
-        },
-        "source_binding": {
-            "receipt_sha256": source["receipt_sha256"],
-            "accepted_game_ids": list(ids),
-            "selected_game_ids": list(ids),
-            "selected_is_full_accepted_census": True,
-        },
-        "coverage": {
-            "mapped_is_full_accepted_census": True,
-            "mapped_game_count": len(ids),
-        },
-        "assignments": [
-            {"oe_game_id": game_id, "outcome_used": False}
-            for game_id in ids
-        ],
+    oe = [
+        {
+            "gameid": game_id,
+            "date": f"2026-01-01T00:{index}0:00Z",
+            "league": "LEC",
+            "tournament": "LEC 2026",
+            "patch": "16.1",
+            "teams": ["G2 Esports", "Fnatic"],
+        }
+        for index, game_id in enumerate(ids, 1)
+    ]
+    scoreboard = [
+        {
+            "GameId": f"match-1_{index}",
+            "DateTime UTC": f"2026-01-01 00:{index}0:00",
+            "Team1": "G2 Esports",
+            "Team2": "Fnatic",
+            "League": "LEC",
+            "OverviewPage": "LEC/2026",
+            "Tournament": "LEC 2026",
+            "Patch": "26.1",
+        }
+        for index in (1, 2)
+    ]
+    schedule = [
+        {
+            "MatchId": "match-1",
+            "DateTime UTC": "2026-01-01 00:00:00",
+            "Team1": "G2 Esports",
+            "Team2": "Fnatic",
+            "League": "LEC",
+            "OverviewPage": "LEC/2026",
+            "Patch": "26.1",
+        }
+    ]
+    tournaments = [
+        {"Name": "LEC 2026", "OverviewPage": "LEC/2026", "League": "LEC"}
+    ]
+    raw_sources = {
+        "oe": oe,
+        "scoreboardgames": scoreboard,
+        "matchschedule": schedule,
+        "tournaments": tournaments,
     }
+    source_records: dict[str, dict[str, object]] = {}
+    raw_bytes: dict[str, bytes] = {}
+    for label, rows in raw_sources.items():
+        payload_bytes = json.dumps(
+            rows, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        ).encode()
+        raw = b"captured:" + label.encode() + b":" + payload_bytes
+        raw_bytes[label] = raw
+        source_records[label] = {
+            "url": f"https://example.test/{label}",
+            "retrieved_at": "2026-01-02T00:00:00Z",
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "bytes": len(raw),
+            "payload_sha256": hashlib.sha256(payload_bytes).hexdigest(),
+            "payload_bytes": len(payload_bytes),
+        }
+    artifact = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=source,
+        source_records=source_records,
+        competition_mapping={
+            "LEC": {
+                "scoreboard": {"overview_pages": ["LEC/2026"]},
+                "schedule": {"overview_pages": ["LEC/2026"]},
+                "patches": {"16.1": ["26.1"]},
+            }
+        },
+        captured_at="2026-01-02T00:00:00Z",
+        raw_source_bytes=raw_bytes,
+    )
+    artifact["authority"]["authoritative_series"] = artifact_authoritative
+    artifact.pop("crosswalk_sha256")
     artifact["crosswalk_sha256"] = canonical_sha256(
         {key: value for key, value in artifact.items() if key != "crosswalk_sha256"}
     )
@@ -147,6 +205,9 @@ def _crosswalk_fixture(
         "sha256": hashlib.sha256(artifact_bytes).hexdigest(),
     }
     receipt: dict[str, object] = {
+        "schema_version": (
+            "scryglass:verified-oe-leaguepedia-series-crosswalk-receipt:v1"
+        ),
         "status": "verified_research_only",
         "authority": {
             "research_only": True,
@@ -158,6 +219,10 @@ def _crosswalk_fixture(
         "source_receipt_sha256": source["receipt_sha256"],
         "source_identity_sha256": source["source_identity_sha256"],
         "accepted_game_count": len(ids),
+        "accepted_game_identity_sha256": identity_sha256(ids),
+        "assignment_count": len(ids),
+        "assignment_sha256": artifact["assignment_sha256"],
+        "mapped_game_count": len(ids),
         "crosswalk_sha256": artifact["crosswalk_sha256"],
         "mapped_game_ids": list(ids),
         "mapped_game_identity_sha256": identity_sha256(ids),
@@ -202,6 +267,7 @@ def test_full_authority_requires_both_authoritative_series_flags(tmp_path: Path)
             accepted_ids=("g1", "g2"),
             crosswalk_artifact_file=artifact_file,
             crosswalk_receipt_file=receipt_file,
+            expected_crosswalk_receipt_file_sha256=receipt_file["sha256"],
         )
         assert summary["authoritative_for_accepted_census"] is expected
 
@@ -225,8 +291,63 @@ def test_full_authority_keeps_receipt_public_flags_fail_closed(tmp_path: Path) -
         accepted_ids=("g1", "g2"),
         crosswalk_artifact_file=artifact_file,
         crosswalk_receipt_file=receipt_file,
+        expected_crosswalk_receipt_file_sha256=receipt_file["sha256"],
     )
     assert summary["receipt_authority_safe"] is False
+    assert summary["authoritative_for_accepted_census"] is False
+
+
+def test_full_authority_requires_independent_receipt_file_hash(
+    tmp_path: Path,
+) -> None:
+    source, artifact, receipt, artifact_file, receipt_file = _crosswalk_fixture(
+        tmp_path,
+        artifact_authoritative=True,
+        receipt_authoritative=True,
+    )
+    summary = _crosswalk_summary(
+        artifact,
+        receipt,
+        source_receipt=source,
+        accepted_ids=("g1", "g2"),
+        crosswalk_artifact_file=artifact_file,
+        crosswalk_receipt_file=receipt_file,
+        expected_crosswalk_receipt_file_sha256="0" * 64,
+    )
+    assert summary["crosswalk_receipt_schema_verified"] is False
+    assert summary["authoritative_for_accepted_census"] is False
+
+
+def test_full_authority_rejects_resealed_receipt_schema(tmp_path: Path) -> None:
+    source, artifact, receipt, artifact_file, receipt_file = _crosswalk_fixture(
+        tmp_path,
+        artifact_authoritative=True,
+        receipt_authoritative=True,
+    )
+    receipt["caller_extension"] = "forged"
+    receipt["receipt_sha256"] = canonical_sha256(
+        {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+    )
+    receipt_path = Path(str(receipt_file["locator"]))
+    receipt_bytes = json.dumps(
+        receipt, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    ).encode()
+    receipt_path.write_bytes(receipt_bytes)
+    receipt_file = {
+        "bytes": len(receipt_bytes),
+        "locator": str(receipt_path),
+        "sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+    }
+    summary = _crosswalk_summary(
+        artifact,
+        receipt,
+        source_receipt=source,
+        accepted_ids=("g1", "g2"),
+        crosswalk_artifact_file=artifact_file,
+        crosswalk_receipt_file=receipt_file,
+        expected_crosswalk_receipt_file_sha256=receipt_file["sha256"],
+    )
+    assert summary["crosswalk_receipt_schema_verified"] is False
     assert summary["authoritative_for_accepted_census"] is False
 
 
@@ -245,6 +366,7 @@ def test_full_authority_requires_existing_byte_bound_files(tmp_path: Path) -> No
         accepted_ids=("g1", "g2"),
         crosswalk_artifact_file=missing_file,
         crosswalk_receipt_file=receipt_file,
+        expected_crosswalk_receipt_file_sha256=receipt_file["sha256"],
     )
     assert summary["crosswalk_artifact_file_verified"] is False
     assert summary["authoritative_for_accepted_census"] is False
@@ -265,6 +387,7 @@ def test_full_authority_rejects_wrong_file_bytes(tmp_path: Path) -> None:
         accepted_ids=("g1", "g2"),
         crosswalk_artifact_file=wrong_bytes,
         crosswalk_receipt_file=receipt_file,
+        expected_crosswalk_receipt_file_sha256=receipt_file["sha256"],
     )
     assert summary["crosswalk_artifact_file_verified"] is False
     assert summary["authoritative_for_accepted_census"] is False
@@ -291,6 +414,7 @@ def test_full_authority_rejects_symlinked_files(tmp_path: Path) -> None:
         accepted_ids=("g1", "g2"),
         crosswalk_artifact_file=symlink_record,
         crosswalk_receipt_file=receipt_file,
+        expected_crosswalk_receipt_file_sha256=receipt_file["sha256"],
     )
     assert summary["crosswalk_artifact_file_verified"] is False
     assert summary["authoritative_for_accepted_census"] is False
@@ -327,6 +451,7 @@ def test_full_authority_rejects_resealed_caller_metadata(tmp_path: Path) -> None
         accepted_ids=("g1", "g2"),
         crosswalk_artifact_file=artifact_file,
         crosswalk_receipt_file=receipt_file,
+        expected_crosswalk_receipt_file_sha256=receipt_file["sha256"],
     )
     assert summary["crosswalk_artifact_file_verified"] is True
     assert summary["crosswalk_artifact_payload_matches"] is False

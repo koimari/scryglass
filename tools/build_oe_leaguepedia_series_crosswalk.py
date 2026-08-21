@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import stat
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -117,12 +119,38 @@ def _source_receipt(path: Path) -> dict[str, Any]:
 
 
 def _safe_capture_path(root: Path, relative: Any, *, label: str) -> Path:
-    path = (root / str(relative or "")).resolve()
+    raw_relative = Path(str(relative or ""))
+    if raw_relative.is_absolute() or ".." in raw_relative.parts:
+        raise CrosswalkError(f"capture path escapes its root: {label}")
+    lexical_root = Path(os.path.abspath(root))
+    candidate = lexical_root / raw_relative
     try:
-        path.relative_to(root.resolve())
+        relative_parts = candidate.relative_to(lexical_root).parts
     except ValueError as error:
         raise CrosswalkError(f"capture path escapes its root: {label}") from error
-    if path.is_symlink() or not path.is_file():
+    try:
+        root_mode = os.lstat(lexical_root).st_mode
+    except OSError as error:
+        raise CrosswalkError(f"capture file is missing or unsafe: {label}") from error
+    if stat.S_ISLNK(root_mode):
+        raise CrosswalkError(f"capture file is missing or unsafe: {label}")
+    current = lexical_root
+    for part in relative_parts:
+        current = current / part
+        try:
+            mode = os.lstat(current).st_mode
+        except OSError as error:
+            raise CrosswalkError(
+                f"capture file is missing or unsafe: {label}"
+            ) from error
+        if stat.S_ISLNK(mode):
+            raise CrosswalkError(f"capture file is missing or unsafe: {label}")
+    path = candidate.resolve(strict=True)
+    try:
+        path.relative_to(lexical_root.resolve(strict=True))
+    except ValueError as error:
+        raise CrosswalkError(f"capture path escapes its root: {label}") from error
+    if not path.is_file():
         raise CrosswalkError(f"capture file is missing or unsafe: {label}")
     return path
 

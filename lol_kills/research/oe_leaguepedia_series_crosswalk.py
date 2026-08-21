@@ -1028,6 +1028,41 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
             raise CrosswalkError("crosswalk assignment hash is invalid")
         if claimed_assignment_hash != _assignment_sha256(assignments):
             raise CrosswalkError("crosswalk assignment hash does not match payload")
+    source_binding = payload.get("source_binding")
+    if not isinstance(source_binding, Mapping):
+        raise CrosswalkError("crosswalk source binding is missing")
+    accepted_values = source_binding.get("accepted_game_ids")
+    selected_values = source_binding.get("selected_game_ids")
+    if not isinstance(accepted_values, list) or not isinstance(selected_values, list):
+        raise CrosswalkError("crosswalk source census IDs are missing")
+    try:
+        accepted_ids = tuple(canonical_game_ids(accepted_values))
+        selected_ids = tuple(canonical_game_ids(selected_values))
+    except (TypeError, ValueError) as error:
+        raise CrosswalkError("crosswalk source census IDs are invalid") from error
+    if list(accepted_ids) != accepted_values or list(selected_ids) != selected_values:
+        raise CrosswalkError("crosswalk source census IDs are not canonical")
+    if (
+        source_binding.get("accepted_game_count") != len(accepted_ids)
+        or source_binding.get("accepted_game_identity_sha256")
+        != identity_sha256(accepted_ids)
+        or source_binding.get("selected_game_count") != len(selected_ids)
+        or source_binding.get("selected_game_identity_sha256")
+        != identity_sha256(selected_ids)
+        or not set(selected_ids).issubset(set(accepted_ids))
+    ):
+        raise CrosswalkError("crosswalk source census binding is invalid")
+    assignment_ids = [
+        str(row.get("oe_game_id") or "")
+        for row in assignments
+        if isinstance(row, Mapping)
+    ]
+    if len(assignment_ids) != len(assignments) or len(set(assignment_ids)) != len(
+        assignment_ids
+    ):
+        raise CrosswalkError("crosswalk assignment IDs are invalid")
+    if not set(assignment_ids).issubset(set(selected_ids)):
+        raise CrosswalkError("crosswalk assignments escape selected source census")
     join_contract = payload.get("join_contract")
     tournament_binding = (
         join_contract.get("tournament_binding")
@@ -1076,7 +1111,129 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
             for series_id, values in assignments_by_series.items()
         }:
             raise CrosswalkError("crosswalk series tournament summary does not match assignments")
+        if is_current_binding:
+            source_records = payload.get("source_records")
+            raw_sources = payload.get("raw_sources")
+            if not isinstance(source_records, Mapping) or not isinstance(
+                raw_sources, Mapping
+            ):
+                raise CrosswalkError("crosswalk source evidence is missing")
+            if set(source_records) != set(SOURCE_RECORD_LABELS):
+                raise CrosswalkError("crosswalk source record labels are invalid")
+            for label in SOURCE_RECORD_LABELS:
+                record = source_records.get(label)
+                rows = raw_sources.get(label)
+                if not isinstance(record, Mapping) or not isinstance(rows, list) or any(
+                    not isinstance(row, Mapping) for row in rows
+                ):
+                    raise CrosswalkError(
+                        f"crosswalk raw source evidence is invalid: {label}"
+                    )
+                payload_hash, payload_bytes = _payload_hash(rows)
+                if (
+                    record.get("integrity_verified") is not True
+                    or record.get("payload_sha256") != payload_hash
+                    or record.get("payload_bytes") != payload_bytes
+                ):
+                    raise CrosswalkError(
+                        f"crosswalk raw source payload binding changed: {label}"
+                    )
+
+            scoreboard_by_id: dict[str, list[dict[str, Any]]] = {}
+            for raw in raw_sources["scoreboardgames"]:
+                row = dict(raw)
+                try:
+                    scoreboard_by_id.setdefault(_scoreboard_game_id(row), []).append(row)
+                except CrosswalkError as error:
+                    raise CrosswalkError(
+                        "crosswalk raw ScoreboardGames identity is invalid"
+                    ) from error
+            tournament_issues: list[dict[str, Any]] = []
+            tournaments_by_name = _prepared_tournament_rows(
+                raw_sources["tournaments"], tournament_issues
+            )
+            if tournament_issues:
+                raise CrosswalkError("crosswalk raw tournament identity is invalid")
+            competition_mapping = payload.get("competition_mapping")
+            if not isinstance(competition_mapping, Mapping):
+                raise CrosswalkError("crosswalk competition mapping is missing")
+            for assignment in assignments:
+                assert isinstance(assignment, Mapping)
+                scoreboard_game_id = str(
+                    assignment.get("scoreboard_game_id") or ""
+                ).strip()
+                scoreboard_candidates = scoreboard_by_id.get(scoreboard_game_id, [])
+                if len(scoreboard_candidates) != 1:
+                    raise CrosswalkError(
+                        "crosswalk assignment ScoreboardGames evidence is invalid"
+                    )
+                scoreboard_row = scoreboard_candidates[0]
+                scoreboard_tournament = _first(
+                    scoreboard_row, ("Tournament", "tournament")
+                )
+                if _norm(scoreboard_tournament) != _norm(
+                    assignment.get("scoreboard_tournament")
+                ):
+                    raise CrosswalkError(
+                        "crosswalk assignment tournament differs from ScoreboardGames"
+                    )
+                tournament_candidates = tournaments_by_name.get(
+                    _norm(scoreboard_tournament), []
+                )
+                if len(tournament_candidates) != 1:
+                    raise CrosswalkError(
+                        "crosswalk assignment tournament source evidence is invalid"
+                    )
+                source_league = _norm(assignment.get("source_league"))
+                mapping = next(
+                    (
+                        value
+                        for key, value in competition_mapping.items()
+                        if _norm(key) == source_league
+                    ),
+                    None,
+                )
+                if not isinstance(mapping, Mapping):
+                    raise CrosswalkError(
+                        "crosswalk assignment competition mapping is invalid"
+                    )
+                mapping = _resolve_tournament_mapping(
+                    mapping, assignment.get("source_tournament")
+                )
+                if not isinstance(mapping, Mapping):
+                    raise CrosswalkError(
+                        "crosswalk assignment tournament mapping is invalid"
+                    )
+                tournament_ok, expected_evidence = _tournament_matches_competition(
+                    tournament_candidates[0],
+                    scoreboard_row,
+                    _mapping_section(mapping, "scoreboard"),
+                )
+                evidence = assignment.get("evidence")
+                observed_evidence = (
+                    evidence.get("tournament")
+                    if isinstance(evidence, Mapping)
+                    else None
+                )
+                if not tournament_ok or observed_evidence != expected_evidence:
+                    raise CrosswalkError(
+                        "crosswalk assignment tournament evidence changed"
+                    )
     coverage = payload.get("coverage")
+    if not isinstance(coverage, Mapping):
+        raise CrosswalkError("crosswalk coverage is missing")
+    if (
+        coverage.get("selected_game_count") != len(selected_ids)
+        or coverage.get("accepted_game_count") != len(accepted_ids)
+        or coverage.get("mapped_game_count") != len(assignment_ids)
+        or coverage.get("unmatched_game_count")
+        != len(selected_ids) - len(assignment_ids)
+        or coverage.get("selected_is_full_accepted_census")
+        is not (selected_ids == accepted_ids)
+        or coverage.get("mapped_is_full_accepted_census")
+        is not (set(assignment_ids) == set(accepted_ids))
+    ):
+        raise CrosswalkError("crosswalk coverage does not match source evidence")
     if payload.get("status") == "complete_authoritative_coverage":
         if not isinstance(tournament_binding, Mapping):
             raise CrosswalkError("complete crosswalk tournament binding is missing")
@@ -1097,7 +1254,7 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
             raw_sources.get("tournaments"), list
         ):
             raise CrosswalkError("complete crosswalk tournament source rows are missing")
-    if not isinstance(coverage, Mapping) or coverage.get("complete") is not True:
+    if coverage.get("complete") is not True:
         if payload.get("status") != "partial_authoritative_coverage":
             raise CrosswalkError("incomplete crosswalk does not declare partial coverage")
 
