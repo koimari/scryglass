@@ -6631,8 +6631,24 @@ def evaluate_future_value(
                 for method_name in ("sequential_player_elo", "hierarchical_bt")
             )
         )
+        sequential_complete = (
+            method_specific_current_methods["sequential_player_elo"]["status"]
+            == "available"
+        )
         current_comparison = {
-            "status": "available" if current_complete else "blocked",
+            "status": (
+                "available"
+                if current_complete
+                else "partial"
+                if sequential_complete
+                else "blocked"
+            ),
+            "player_baseline_status": method_specific_current_methods[
+                "sequential_player_elo"
+            ]["status"],
+            "team_baseline_status": method_specific_current_methods[
+                "hierarchical_bt"
+            ]["status"],
             "strict_cutoff": str(fold["validation_start"]),
             "requested_paired_rows": int(len(paired_target)),
             "common_finite_rows": int(len(current_ids)),
@@ -6936,8 +6952,22 @@ def evaluate_future_value(
     blockers = [
         "support_uncertainty_proxy_not_calibrated",
     ]
-    if any(report["status"] != "available" for report in current_fold_reports):
-        blockers.append("current_player_team_rating_comparison_missing")
+    if any(
+        report.get("method_specific", {})
+        .get("sequential_player_elo", {})
+        .get("status")
+        != "available"
+        for report in current_fold_reports
+    ):
+        blockers.append("current_player_rating_comparison_missing")
+    if any(
+        report.get("method_specific", {})
+        .get("hierarchical_bt", {})
+        .get("status")
+        != "available"
+        for report in current_fold_reports
+    ):
+        blockers.append("current_team_rating_comparison_partial")
     if int(n_folds) < 3 or len(fold_reports) < int(n_folds):
         blockers.append("complete_chronological_evaluation_missing")
     if int(n_folds) < 3:
@@ -7064,13 +7094,23 @@ def evaluate_future_value(
             for method_name, values in pooled_current_predictions.items()
             if values
         }
+        pooled_player_status = pooled_method_specific_current[
+            "sequential_player_elo"
+        ]["status"]
+        pooled_team_status = pooled_method_specific_current["hierarchical_bt"][
+            "status"
+        ]
         pooled_current_comparison = {
             "status": (
                 "available"
-                if current_fold_reports
-                and all(report["status"] == "available" for report in current_fold_reports)
+                if pooled_player_status == "available"
+                and pooled_team_status == "available"
+                else "partial"
+                if pooled_player_status == "available"
                 else "blocked"
             ),
+            "player_baseline_status": pooled_player_status,
+            "team_baseline_status": pooled_team_status,
             "requested_folds": int(n_folds),
             "valid_comparison_folds": int(
                 sum(report["status"] == "available" for report in current_fold_reports)
