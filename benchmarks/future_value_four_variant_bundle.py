@@ -212,8 +212,17 @@ def _derive_inner_fold_spec(
     )
     if set(inner_train_ids) & set(inner_validation_ids):
         raise FourVariantBundleError("nested fold train and validation IDs overlap")
-    if set(inner_train_ids) | set(inner_validation_ids) != set(outer_train_ids):
-        raise FourVariantBundleError("nested fold does not cover the outer training census")
+    covered_ids = set(inner_train_ids) | set(inner_validation_ids)
+    excluded_ids = tuple(sorted(set(outer_train_ids) - covered_ids))
+    if not covered_ids.issubset(set(outer_train_ids)):
+        raise FourVariantBundleError("nested fold is outside the outer training census")
+    expected_excluded = int(
+        (candidate.get("overlap_audit") or {}).get(
+            "excluded_boundary_map_count", -1
+        )
+    )
+    if len(excluded_ids) != expected_excluded:
+        raise FourVariantBundleError("nested boundary exclusion count changed")
     if set(inner_train_ids) & set(outer_validation_ids) or set(inner_validation_ids) & set(
         outer_validation_ids
     ):
@@ -228,6 +237,9 @@ def _derive_inner_fold_spec(
             "outer_train_identity_sha256": identity_sha256(outer_train_ids),
             "outer_validation_game_ids": list(outer_validation_ids),
             "outer_validation_identity_sha256": identity_sha256(outer_validation_ids),
+            "boundary_excluded_game_ids": list(excluded_ids),
+            "boundary_excluded_game_count": len(excluded_ids),
+            "boundary_excluded_identity_sha256": identity_sha256(excluded_ids),
         }
     )
     return candidate
@@ -443,6 +455,12 @@ def _build_inner_fold_artifacts(
         "inner_train_identity_sha256": identity_sha256(train_ids),
         "inner_validation_game_count": len(validation_ids),
         "inner_validation_identity_sha256": identity_sha256(validation_ids),
+        "boundary_excluded_game_count": int(
+            inner_fold["boundary_excluded_game_count"]
+        ),
+        "boundary_excluded_identity_sha256": inner_fold[
+            "boundary_excluded_identity_sha256"
+        ],
         "output_game_count": len(output_ids),
         "output_identity_sha256": identity_sha256(output_ids),
         "current_native_receipt_sha256": current_native["receipt_sha256"],

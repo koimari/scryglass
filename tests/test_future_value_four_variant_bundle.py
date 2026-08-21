@@ -40,6 +40,26 @@ def test_nested_fold_covers_outer_train_and_excludes_outer_validation() -> None:
     assert spec["outer_fold"] == 2
     assert spec["inner_fold"] == 1
     assert spec["fit_window_end"] == spec["validation_start"]
+    assert spec["boundary_excluded_game_ids"] == []
+    assert spec["boundary_excluded_game_count"] == 0
+
+
+def test_nested_fold_records_series_boundary_exclusions() -> None:
+    frame = _model_frame()
+    frame.loc[frame["game_id"].isin(["g2", "g5"]), "series_id"] = "crossing"
+
+    spec = _derive_inner_fold_spec(
+        frame,
+        outer_fold=2,
+        outer_train_ids=("g1", "g2", "g3", "g4", "g5"),
+        outer_validation_ids=("g6",),
+    )
+
+    covered = set(spec["train_game_ids"]) | set(spec["validation_game_ids"])
+    excluded = set(spec["boundary_excluded_game_ids"])
+    assert covered | excluded == {"g1", "g2", "g3", "g4", "g5"}
+    assert not covered & excluded
+    assert spec["boundary_excluded_game_count"] == len(excluded)
 
 
 def test_nested_fold_rejects_incomplete_outer_training_census() -> None:
