@@ -24,10 +24,14 @@ from lol_kills.research.future_value_rating import (
     _map_model_frame,
     bind_rating_feature_ledger,
     build_rating_feature_producer_manifest,
+    chronological_whole_series_folds,
     rating_variant_config_receipt,
     validate_future_value_source_receipt_payload,
+    write_rating_feature_producer_receipt,
 )
+from lol_kills.research.atomized_rf_composite import build_scaling_feature_ledger
 from lol_kills.research.future_value_rating_ledger import (
+    build_fold_current_rating_feature_ledger,
     validate_fold_current_rating_feature_ledger,
 )
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
@@ -164,11 +168,298 @@ def _json_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
     return rows
 
 
+def _write_json_no_clobber(path: Path, value: object) -> None:
+    if path.exists() or path.is_symlink():
+        raise FourVariantBundleError(f"output already exists: {path}")
+    if not path.parent.is_dir() or path.parent.is_symlink():
+        raise FourVariantBundleError(f"output parent is unsafe: {path.parent}")
+    path.write_bytes(_canonical_bytes(value))
+
+
+def _derive_inner_fold_spec(
+    model_frame: pd.DataFrame,
+    *,
+    outer_fold: int,
+    outer_train_ids: tuple[str, ...],
+    outer_validation_ids: tuple[str, ...],
+) -> dict[str, Any]:
+    """Derive one nested chronological fold from an outer training census."""
+
+    if not outer_train_ids or not outer_validation_ids:
+        raise FourVariantBundleError("nested fold has an empty outer partition")
+    if set(outer_train_ids) & set(outer_validation_ids):
+        raise FourVariantBundleError("nested fold outer partitions overlap")
+    outer_train = model_frame[
+        model_frame["game_id"].astype(str).isin(outer_train_ids)
+    ].copy()
+    if tuple(sorted(outer_train["game_id"].astype(str))) != outer_train_ids:
+        raise FourVariantBundleError("nested fold outer training census is incomplete")
+    try:
+        candidates = chronological_whole_series_folds(
+            outer_train,
+            n_folds=1,
+            verified_model_frame=outer_train,
+        )
+    except Exception as error:
+        raise FourVariantBundleError("nested chronological fold construction failed") from error
+    if len(candidates) != 1:
+        raise FourVariantBundleError("nested chronological fold count changed")
+    candidate = dict(candidates[0])
+    inner_train_ids = tuple(sorted(str(value) for value in candidate["train_game_ids"]))
+    inner_validation_ids = tuple(
+        sorted(str(value) for value in candidate["validation_game_ids"])
+    )
+    if set(inner_train_ids) & set(inner_validation_ids):
+        raise FourVariantBundleError("nested fold train and validation IDs overlap")
+    if set(inner_train_ids) | set(inner_validation_ids) != set(outer_train_ids):
+        raise FourVariantBundleError("nested fold does not cover the outer training census")
+    if set(inner_train_ids) & set(outer_validation_ids) or set(inner_validation_ids) & set(
+        outer_validation_ids
+    ):
+        raise FourVariantBundleError("nested fold contains outer validation IDs")
+    candidate.update(
+        {
+            "fold": int(outer_fold),
+            "outer_fold": int(outer_fold),
+            "inner_fold": int(candidate["fold"]),
+            "fit_window_end": str(candidate["validation_start"]),
+            "outer_train_game_ids": list(outer_train_ids),
+            "outer_train_identity_sha256": identity_sha256(outer_train_ids),
+            "outer_validation_game_ids": list(outer_validation_ids),
+            "outer_validation_identity_sha256": identity_sha256(outer_validation_ids),
+        }
+    )
+    return candidate
+
+
+def _prepare_inner_output_root(path: Path) -> Path:
+    root = path.resolve()
+    if root.exists() and root.is_symlink():
+        raise FourVariantBundleError("nested inner output root is a symlink")
+    root.mkdir(parents=True, exist_ok=True)
+    if not root.is_dir() or root.is_symlink() or any(root.iterdir()):
+        raise FourVariantBundleError("nested inner output root must be empty")
+    return root
+
+
+def _build_inner_fold_artifacts(
+    *,
+    source_receipt_path: Path,
+    source_receipt: Mapping[str, Any],
+    maps: pd.DataFrame,
+    players: pd.DataFrame,
+    teams: pd.DataFrame,
+    identity: pd.DataFrame,
+    fold_number: int,
+    inner_fold: Mapping[str, Any],
+    output_root: Path,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Build and bind durable producer artifacts for one inner fold."""
+
+    fold_root = output_root / f"fold-{fold_number}"
+    current_root = fold_root / "current"
+    scaling_root = fold_root / "scaling"
+    for directory in (fold_root, current_root, scaling_root):
+        if directory.exists() and directory.is_symlink():
+            raise FourVariantBundleError("nested inner artifact directory is a symlink")
+        directory.mkdir(parents=True, exist_ok=True)
+        if any(directory.iterdir()):
+            raise FourVariantBundleError("nested inner artifact directory is not empty")
+
+    train_ids = tuple(sorted(str(value) for value in inner_fold["train_game_ids"]))
+    validation_ids = tuple(
+        sorted(str(value) for value in inner_fold["validation_game_ids"])
+    )
+    fit_window_end = str(inner_fold["validation_start"])
+    output_ids = tuple(sorted((*train_ids, *validation_ids)))
+
+    current, current_native = build_fold_current_rating_feature_ledger(
+        maps,
+        players,
+        teams,
+        source_receipt=source_receipt,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        fit_window_end=fit_window_end,
+        destination=current_root,
+    )
+    validate_fold_current_rating_feature_ledger(
+        current,
+        current_native,
+        source_receipt=source_receipt,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        fit_window_end=fit_window_end,
+        source_frames={"maps": maps, "players": players, "teams": teams},
+    )
+    current_path = current_root / "current-rating-feature-ledger.parquet"
+    current_native_path = current_root / "current-rating-feature-ledger.receipt.json"
+    current_receipt_path = current_root / "current-rating-producer-receipt.json"
+    current_adapter = write_rating_feature_producer_receipt(
+        "current_sequential_rating",
+        current_path,
+        current_receipt_path,
+        native_artifact_path=current_path,
+        native_receipt_path=current_native_path,
+        source_receipt=source_receipt,
+        source_receipt_path=source_receipt_path,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        fit_window_end=fit_window_end,
+    )
+    _write_json_no_clobber(current_root / "current-rating-adapter.json", current_adapter)
+    current_manifest = build_rating_feature_producer_manifest([current_adapter])
+    _write_json_no_clobber(
+        current_root / "current-rating-producer-manifest.json", current_manifest
+    )
+
+    scaling_native, scaling_native_receipt = build_scaling_feature_ledger(
+        maps,
+        players,
+        teams,
+        source_receipt=source_receipt,
+        source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        fit_window_end=fit_window_end,
+        model_eligible_only=True,
+        output_game_ids=output_ids,
+    )
+    scaling_native_path = scaling_root / "scaling-native.parquet"
+    scaling_native.to_parquet(scaling_native_path, index=False)
+    _write_json_no_clobber(
+        scaling_root / "scaling-native-receipt.json", scaling_native_receipt
+    )
+    scaling_path = scaling_root / "scaling-features.parquet"
+    scaling_native[["game_id", *SCALING_CURVE_SIGNED_MAP_FEATURES]].to_parquet(
+        scaling_path, index=False
+    )
+    scaling_receipt_path = scaling_root / "scaling-producer-receipt.json"
+    scaling_adapter = write_rating_feature_producer_receipt(
+        "strict_prior_atomized_scaling",
+        scaling_path,
+        scaling_receipt_path,
+        native_artifact_path=scaling_native_path,
+        native_receipt_path=scaling_root / "scaling-native-receipt.json",
+        source_receipt=source_receipt,
+        source_receipt_path=source_receipt_path,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        fit_window_end=fit_window_end,
+    )
+    _write_json_no_clobber(scaling_root / "scaling-adapter.json", scaling_adapter)
+    scaling_manifest = build_rating_feature_producer_manifest([scaling_adapter])
+    _write_json_no_clobber(
+        scaling_root / "scaling-producer-manifest.json", scaling_manifest
+    )
+
+    _verify_scaling_native_receipt(
+        scaling_native_receipt,
+        source_receipt=source_receipt,
+        train_ids=train_ids,
+        validation_ids=validation_ids,
+        fit_window_end=fit_window_end,
+        artifact=scaling_native,
+    )
+    _verify_manifest(current_manifest, "nested current rating producer manifest")
+    _verify_manifest(scaling_manifest, "nested scaling producer manifest")
+    _descriptor_adapter(
+        current_root / "current-rating-adapter.json", "current_sequential_rating"
+    )
+    _descriptor_adapter(
+        scaling_root / "scaling-adapter.json", "strict_prior_atomized_scaling"
+    )
+
+    inner_identity = identity[identity["game_id"].astype(str).isin(output_ids)].copy()
+    if tuple(sorted(inner_identity["game_id"].astype(str))) != output_ids:
+        raise FourVariantBundleError("nested identity rows are incomplete")
+    raw = inner_identity.merge(
+        current[["game_id", *CURRENT_RATING_SIGNED_MAP_FEATURES]],
+        on="game_id",
+        how="inner",
+        validate="one_to_one",
+    ).merge(
+        scaling_native[["game_id", *SCALING_CURVE_SIGNED_MAP_FEATURES]],
+        on="game_id",
+        how="inner",
+        validate="one_to_one",
+    )
+    if tuple(sorted(raw["game_id"].astype(str))) != output_ids:
+        raise FourVariantBundleError("nested joined feature rows are incomplete")
+    combined_manifest = build_rating_feature_producer_manifest(
+        [current_adapter, scaling_adapter]
+    )
+    variant_inputs = {
+        "current_only": (CURRENT_RATING_SIGNED_MAP_FEATURES, current_manifest),
+        "future_player_form": (CURRENT_RATING_SIGNED_MAP_FEATURES, current_manifest),
+        "scaling_curve": (
+            (*CURRENT_RATING_SIGNED_MAP_FEATURES, *SCALING_CURVE_SIGNED_MAP_FEATURES),
+            combined_manifest,
+        ),
+        "both": (
+            (*CURRENT_RATING_SIGNED_MAP_FEATURES, *SCALING_CURVE_SIGNED_MAP_FEATURES),
+            combined_manifest,
+        ),
+    }
+    records: dict[str, dict[str, Any]] = {}
+    feature_digests: dict[str, str] = {}
+    producer_receipts: dict[str, str] = {}
+    for variant, (feature_names, manifest) in variant_inputs.items():
+        bound = bind_rating_feature_ledger(
+            raw[["game_id", "date", "series_id", *feature_names]],
+            source_receipt=source_receipt,
+            train_game_ids=train_ids,
+            validation_game_ids=validation_ids,
+            fit_window_end=fit_window_end,
+            feature_names=feature_names,
+            producer=manifest,
+        )
+        if set(bound["game_id"].astype(str)) & set(
+            identity.loc[~identity["game_id"].astype(str).isin(output_ids), "game_id"].astype(str)
+        ):
+            raise FourVariantBundleError("nested bound ledger contains outside IDs")
+        records[variant] = {"rows": _json_rows(bound), "attrs": dict(bound.attrs)}
+        feature_digests[variant] = str(bound.attrs["feature_value_digest"])
+        producer_receipts[variant] = str(bound.attrs["producer_receipt_sha256"])
+
+    receipt = {
+        "fold": int(fold_number),
+        "inner_fold": int(inner_fold["inner_fold"]),
+        "fit_window_end": fit_window_end,
+        "outer_train_game_count": len(inner_fold["outer_train_game_ids"]),
+        "outer_train_identity_sha256": inner_fold["outer_train_identity_sha256"],
+        "outer_validation_game_count": len(inner_fold["outer_validation_game_ids"]),
+        "outer_validation_identity_sha256": inner_fold[
+            "outer_validation_identity_sha256"
+        ],
+        "inner_train_game_count": len(train_ids),
+        "inner_train_identity_sha256": identity_sha256(train_ids),
+        "inner_validation_game_count": len(validation_ids),
+        "inner_validation_identity_sha256": identity_sha256(validation_ids),
+        "output_game_count": len(output_ids),
+        "output_identity_sha256": identity_sha256(output_ids),
+        "current_native_receipt_sha256": current_native["receipt_sha256"],
+        "scaling_native_receipt_sha256": scaling_native_receipt["receipt_sha256"],
+        "current_manifest_sha256": current_manifest["manifest_sha256"],
+        "scaling_manifest_sha256": scaling_manifest["manifest_sha256"],
+        "combined_manifest_sha256": combined_manifest["manifest_sha256"],
+        "variant_feature_value_digests": feature_digests,
+        "variant_producer_receipt_sha256": producer_receipts,
+        "strict_prior": True,
+        "outer_validation_excluded": True,
+        "overlap_audit": dict(inner_fold["overlap_audit"]),
+    }
+    receipt["receipt_sha256"] = hashlib.sha256(_canonical_bytes(receipt)).hexdigest()
+    _write_json_no_clobber(fold_root / "inner-fold-receipt.json", receipt)
+    return records, receipt
+
+
 def build_bundle(
     *,
     source_root: Path,
     source_receipt_path: Path,
     folds_root: Path,
+    inner_output_root: Path | None = None,
 ) -> dict[str, Any]:
     source_receipt = _load_json(source_receipt_path, "source receipt")
     validate_future_value_source_receipt_payload(source_receipt)
@@ -181,10 +472,17 @@ def build_bundle(
     if tuple(sorted(model_frame["game_id"].astype(str))) != eligible_ids:
         raise FourVariantBundleError("model frame does not match the eligible census")
     identity = model_frame[["game_id", "date", "series_id"]].copy()
+    nested_root = _prepare_inner_output_root(
+        folds_root / "nested-inner-v1"
+        if inner_output_root is None
+        else inner_output_root
+    )
     variants: dict[str, dict[str, Any]] = {
-        variant.value: {"folds": {}} for variant in RATING_VARIANT_ORDER
+        variant.value: {"folds": {}, "inner_folds": {}}
+        for variant in RATING_VARIANT_ORDER
     }
     fold_receipts: list[dict[str, Any]] = []
+    inner_fold_receipts: list[dict[str, Any]] = []
     for fold_number in (1, 2, 3):
         fold_spec = _load_json(folds_root / f"fold-{fold_number}-spec.json", "fold spec")
         if int(fold_spec.get("fold") or -1) != fold_number:
@@ -299,6 +597,26 @@ def build_bundle(
                 "rows": _json_rows(bound),
                 "attrs": dict(bound.attrs),
             }
+        inner_fold = _derive_inner_fold_spec(
+            model_frame,
+            outer_fold=fold_number,
+            outer_train_ids=train_ids,
+            outer_validation_ids=validation_ids,
+        )
+        inner_records, inner_receipt = _build_inner_fold_artifacts(
+            source_receipt_path=source_receipt_path,
+            source_receipt=source_receipt,
+            maps=maps,
+            players=players,
+            teams=teams,
+            identity=identity,
+            fold_number=fold_number,
+            inner_fold=inner_fold,
+            output_root=nested_root,
+        )
+        for variant in variants:
+            variants[variant]["inner_folds"][str(fold_number)] = inner_records[variant]
+        inner_fold_receipts.append(inner_receipt)
         fold_receipts.append(
             {
                 "fold": fold_number,
@@ -328,6 +646,12 @@ def build_bundle(
             "source_receipt_file_sha256": _sha256_path(source_receipt_path),
         },
         "fold_receipts": fold_receipts,
+        "nested_inner": {
+            "status": "verified",
+            "output_root": str(nested_root),
+            "fold_count": len(inner_fold_receipts),
+            "fold_receipts": inner_fold_receipts,
+        },
         "variant_configs": {
             variant.value: rating_variant_config_receipt(variant)
             for variant in RATING_VARIANT_ORDER
@@ -356,6 +680,12 @@ def main() -> int:
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--source-receipt", required=True, type=Path)
     parser.add_argument("--folds-root", required=True, type=Path)
+    parser.add_argument(
+        "--inner-output-root",
+        type=Path,
+        default=None,
+        help="Durable empty directory for nested inner producer artifacts",
+    )
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     output = args.output.resolve()
@@ -367,6 +697,9 @@ def main() -> int:
         source_root=args.source_root.resolve(),
         source_receipt_path=args.source_receipt.resolve(),
         folds_root=args.folds_root.resolve(),
+        inner_output_root=(
+            None if args.inner_output_root is None else args.inner_output_root.resolve()
+        ),
     )
     output.write_bytes(_canonical_bytes(payload))
     print(
