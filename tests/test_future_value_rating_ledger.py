@@ -9,9 +9,13 @@ import pytest
 from lol_kills.research.future_value_rating import bind_accepted_future_value_source
 from lol_kills.research.future_value_rating_ledger import (
     CurrentRatingLedgerError,
+    _artifact_digest,
+    _canonical_json_bytes,
     build_fold_current_rating_feature_ledger,
     validate_fold_current_rating_feature_ledger,
 )
+import hashlib
+import json
 
 
 GAME_IDS = ("g1", "g2", "g3", "g4")
@@ -104,6 +108,7 @@ def _build(
     teams: pd.DataFrame,
     receipt: dict[str, object],
     destination: Path | None = None,
+    source_frame_sha256: dict[str, str] | None = None,
 ):
     return build_fold_current_rating_feature_ledger(
         maps,
@@ -114,6 +119,7 @@ def _build(
         validation_game_ids=("g3", "g4"),
         fit_window_end="2026-01-02T00:00:00Z",
         destination=destination,
+        source_frame_sha256=source_frame_sha256,
     )
 
 
@@ -186,3 +192,123 @@ def test_durable_artifact_and_receipt_are_byte_bound(tmp_path: Path) -> None:
             validation_game_ids=("g3", "g4"),
             fit_window_end="2026-01-02T00:00:00Z",
         )
+
+
+def test_forged_source_frame_hashes_fail_closed() -> None:
+    maps, players, teams, receipt = _source()
+    with pytest.raises(CurrentRatingLedgerError, match="do not match"):
+        _build(
+            maps,
+            players,
+            teams,
+            receipt,
+            source_frame_sha256={
+                "maps": "a" * 64,
+                "players": "b" * 64,
+                "teams": "c" * 64,
+            },
+        )
+
+
+def test_receipt_validation_recomputes_source_frame_hashes(tmp_path: Path) -> None:
+    maps, players, teams, receipt = _source()
+    ledger, good_receipt = _build(maps, players, teams, receipt, tmp_path)
+    bad_receipt = json.loads(json.dumps(good_receipt))
+    bad_receipt["source_frame_sha256"]["maps"] = "a" * 64
+    payload = dict(bad_receipt)
+    payload.pop("receipt_sha256")
+    bad_receipt["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(payload)
+    ).hexdigest()
+    with pytest.raises(CurrentRatingLedgerError, match="source frame hashes changed"):
+        validate_fold_current_rating_feature_ledger(
+            ledger,
+            bad_receipt,
+            source_receipt=receipt,
+            train_game_ids=("g1", "g2"),
+            validation_game_ids=("g3", "g4"),
+            fit_window_end="2026-01-02T00:00:00Z",
+            source_frames={"maps": maps, "players": players, "teams": teams},
+        )
+
+
+def test_train_and_validation_series_must_be_disjoint() -> None:
+    maps, players, teams, receipt = _source()
+    maps = maps.copy()
+    maps.loc[maps["game_uid"].eq("g4"), "series_id"] = "series-g1"
+    with pytest.raises(CurrentRatingLedgerError, match="series overlap"):
+        _build(maps, players, teams, receipt)
+
+
+def test_validation_rechecks_series_disjointness_after_receipt_reseal(
+    tmp_path: Path,
+) -> None:
+    maps, players, teams, receipt = _source()
+    ledger, good_receipt = _build(maps, players, teams, receipt, tmp_path)
+    bad_ledger = ledger.copy()
+    bad_ledger.loc[bad_ledger["game_id"].eq("g4"), "series_id"] = "series-g1"
+    bad_receipt = json.loads(json.dumps(good_receipt))
+    bad_receipt["ledger_rows_sha256"] = _artifact_digest(
+        bad_ledger,
+        ("base_team_logit", "team_rating_diff_scaled", "base_player_logit", "player_rating_diff_scaled"),
+    )
+    payload = dict(bad_receipt)
+    payload.pop("receipt_sha256")
+    bad_receipt["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(payload)
+    ).hexdigest()
+    with pytest.raises(CurrentRatingLedgerError, match="series overlap"):
+        validate_fold_current_rating_feature_ledger(
+            bad_ledger,
+            bad_receipt,
+            source_receipt=receipt,
+            train_game_ids=("g1", "g2"),
+            validation_game_ids=("g3", "g4"),
+            fit_window_end="2026-01-02T00:00:00Z",
+            source_frames={"maps": maps, "players": players, "teams": teams},
+        )
+
+
+def test_stable_player_id_preserves_state_across_display_rename() -> None:
+    maps, players, teams, receipt = _source()
+    renamed_a = players.copy()
+    renamed_b = players.copy()
+    source_player = players.loc[
+        players["game_uid"].eq("g1")
+        & players["side"].eq("Blue")
+        & players["position"].eq("top"),
+        "playerid",
+    ].iloc[0]
+    selector = (
+        renamed_a["game_uid"].eq("g3")
+        & renamed_a["side"].eq("Blue")
+        & renamed_a["position"].eq("top")
+    )
+    renamed_a.loc[selector, "playerid"] = source_player
+    renamed_b.loc[selector, "playerid"] = source_player
+    renamed_a.loc[selector, "playername"] = "renamed-player"
+    renamed_b.loc[selector, "playername"] = "same-player"
+    ledger_a, _ = _build(maps, renamed_a, teams, receipt)
+    ledger_b, _ = _build(maps, renamed_b, teams, receipt)
+    columns = [
+        "game_id",
+        "base_player_logit",
+        "player_rating_diff_scaled",
+        "base_team_logit",
+        "team_rating_diff_scaled",
+    ]
+    pd.testing.assert_frame_equal(
+        ledger_a[columns].sort_values("game_id").reset_index(drop=True),
+        ledger_b[columns].sort_values("game_id").reset_index(drop=True),
+        check_exact=True,
+    )
+
+
+def test_display_alias_collision_fails_closed() -> None:
+    maps, players, teams, receipt = _source()
+    broken = players.copy()
+    broken.loc[broken["game_uid"].eq("g3") & broken["position"].eq("top"), "playername"] = (
+        players.loc[players["game_uid"].eq("g1") & players["position"].eq("top"), "playername"].iloc[0]
+    )
+    with pytest.raises(CurrentRatingLedgerError, match="alias collision"):
+        _build(maps, broken, teams, receipt)

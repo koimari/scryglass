@@ -35,7 +35,6 @@ from lol_kills.ratings.dual_elo import (
     _is_intl,
     _momentum_residual as _team_momentum_residual,
     expected_score,
-    lineup_hashes_from_players,
     total_mu,
 )
 from lol_kills.ratings.player_elo import (
@@ -61,8 +60,8 @@ from lol_kills.research.future_value_rating import (
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
-SCHEMA_VERSION = "scryglass:future-value-current-rating-ledger:v1"
-RECEIPT_SCHEMA_VERSION = "scryglass:future-value-current-rating-ledger-receipt:v1"
+SCHEMA_VERSION = "scryglass:future-value-current-rating-ledger:v2"
+RECEIPT_SCHEMA_VERSION = "scryglass:future-value-current-rating-ledger-receipt:v2"
 IMPLEMENTATION_LOCATOR = "lol_kills/research/future_value_rating_ledger.py"
 
 _MAP_ID_COLUMNS = ("game_uid", "gameid", "game_id")
@@ -110,6 +109,13 @@ _STRUCTURAL_PLAYER_COLUMNS = frozenset(
     }
 )
 _EXPECTED_ROLES = {"top", "jng", "mid", "bot", "sup"}
+_ROLE_ORDER = {"top": 0, "jng": 1, "mid": 2, "bot": 3, "sup": 4}
+_RECEIPT_STATE_KEY_POLICY = {
+    "team": "stable_oe_team_id",
+    "player": "stable_oe_player_id",
+    "display_names": "metadata_only",
+    "alias_collision": "fail_closed",
+}
 
 
 class CurrentRatingLedgerError(FutureValueSourceError):
@@ -228,6 +234,158 @@ def _series_ids(frame: pd.DataFrame, game_ids: pd.Series) -> pd.Series:
     return result.astype(str)
 
 
+def _identity_text(value: Any) -> str:
+    """Return one non-null source identity or an empty string."""
+
+    if value is None:
+        return ""
+    try:
+        if bool(pd.isna(value)):
+            return ""
+    except (TypeError, ValueError):
+        return ""
+    return str(value).strip()
+
+
+def _validate_display_identity_mappings(
+    players: pd.DataFrame,
+    teams: pd.DataFrame,
+    maps: pd.DataFrame | None = None,
+) -> None:
+    """Reject one display alias that names more than one stable entity.
+
+    A stable ID may receive a new display name over time.  A display name may
+    not resolve to two stable IDs in one replay.  State keys therefore remain
+    stable when an OE display name changes, while ambiguous aliases fail closed.
+    """
+
+    player_aliases: dict[str, set[str]] = defaultdict(set)
+    team_aliases: dict[str, set[str]] = defaultdict(set)
+    for frame, id_column, name_column, aliases, prefix, label in (
+        (players, "playerid", "playername", player_aliases, "oe:player:", "player"),
+        (players, "teamid", "teamname", team_aliases, "oe:team:", "team"),
+        (teams, "teamid", "teamname", team_aliases, "oe:team:", "team"),
+    ):
+        if id_column not in frame.columns or name_column not in frame.columns:
+            continue
+        for identity, display in zip(frame[id_column], frame[name_column]):
+            stable = _identity_text(identity)
+            alias = _identity_text(display)
+            if not stable.startswith(prefix) or not alias:
+                continue
+            if label == "team":
+                alias = normalize_team(alias).casefold()
+            else:
+                alias = alias.casefold()
+            if alias and alias not in {"nan", "none", "<na>"}:
+                aliases[alias].add(stable)
+    if maps is not None:
+        team_ids_by_game_side = _stable_team_ids_by_game_side(players)
+        map_ids = _game_ids(maps, "maps").astype(str)
+        blue_column = "blue_team" if "blue_team" in maps.columns else "blue_teamname"
+        red_column = "red_team" if "red_team" in maps.columns else "red_teamname"
+        for gid, row in zip(map_ids, maps.to_dict(orient="records")):
+            for side, column in (("Blue", blue_column), ("Red", red_column)):
+                stable = team_ids_by_game_side.get((str(gid), side), "")
+                alias = _identity_text(row.get(column))
+                if stable and alias:
+                    team_aliases[normalize_team(alias).casefold()].add(stable)
+    collisions = [
+        (alias, sorted(ids))
+        for alias, ids in (*player_aliases.items(), *team_aliases.items())
+        if len(ids) > 1
+    ]
+    if collisions:
+        alias, identities = sorted(collisions, key=lambda item: item[0])[0]
+        raise CurrentRatingLedgerError(
+            f"stable identity alias collision: {alias}: {', '.join(identities)}"
+        )
+
+
+def _stable_team_ids_by_game_side(players: pd.DataFrame) -> dict[tuple[str, str], str]:
+    """Map each map-side to its stable OE team ID."""
+
+    if "teamid" not in players.columns or "side" not in players.columns:
+        raise CurrentRatingLedgerError("stable team identity columns are missing")
+    gids = _game_ids(players, "players").astype(str)
+    work = players.copy()
+    work["__gid"] = gids.to_numpy()
+    work["__side"] = work["side"].astype("string").str.strip().str.title()
+    result: dict[tuple[str, str], str] = {}
+    for (gid, side), group in work.groupby(["__gid", "__side"], sort=False):
+        values = {_identity_text(value) for value in group["teamid"]}
+        values.discard("")
+        if len(values) != 1:
+            raise CurrentRatingLedgerError(
+                f"stable team identity is not one-to-one for {gid} {side}"
+            )
+        result[(str(gid), str(side))] = next(iter(values))
+    return result
+
+
+def _stable_player_lineups(
+    players: pd.DataFrame,
+) -> dict[str, dict[str, list[tuple[str, str]]]]:
+    """Build the exact-five lineups with stable player IDs as state keys."""
+
+    required = {"side", "position", "playerid"}
+    if not required.issubset(players.columns):
+        raise CurrentRatingLedgerError(
+            "stable player lineup columns are missing: "
+            + ", ".join(sorted(required - set(players.columns)))
+        )
+    gids = _game_ids(players, "players").astype(str)
+    work = players.copy()
+    work["__gid"] = gids.to_numpy()
+    work["__side"] = work["side"].astype("string").str.strip().str.title()
+    work["__role"] = work["position"].map(_norm_role)
+    work["__player_id"] = work["playerid"].map(_identity_text)
+    result: dict[str, dict[str, list[tuple[str, str]]]] = defaultdict(
+        lambda: {"Blue": [], "Red": []}
+    )
+    for (gid, side), group in work.groupby(["__gid", "__side"], sort=False):
+        if side not in ("Blue", "Red"):
+            continue
+        rows = sorted(
+            group[["__player_id", "__role"]].itertuples(index=False, name=None),
+            key=lambda item: _ROLE_ORDER.get(str(item[1]), 9),
+        )
+        seen: set[str] = set()
+        lineup: list[tuple[str, str]] = []
+        for player_id, role in rows:
+            if not player_id or role in seen:
+                continue
+            seen.add(str(role))
+            lineup.append((str(player_id), str(role)))
+        if len(lineup) != 5 or {role for _player, role in lineup} != _EXPECTED_ROLES:
+            raise CurrentRatingLedgerError(
+                f"stable player lineup is not exact five for {gid} {side}"
+            )
+        result[str(gid)][str(side)] = lineup
+    return result
+
+
+def _stable_lineup_hashes(players: pd.DataFrame) -> dict[str, str]:
+    """Hash roster membership with stable player IDs and stable team IDs."""
+
+    if not {"playerid", "teamid"}.issubset(players.columns):
+        raise CurrentRatingLedgerError("stable lineup identity columns are missing")
+    gids = _game_ids(players, "players").astype(str)
+    work = players.copy()
+    work["__gid"] = gids.to_numpy()
+    work["__player_id"] = work["playerid"].map(_identity_text)
+    work["__team_id"] = work["teamid"].map(_identity_text)
+    result: dict[str, str] = {}
+    for (gid, team_id), group in work.groupby(["__gid", "__team_id"], sort=False):
+        player_ids = sorted(value for value in group["__player_id"] if value)
+        if len(player_ids) != 5 or len(set(player_ids)) != 5:
+            raise CurrentRatingLedgerError(
+                f"stable roster identity is not exact five for {gid} {team_id}"
+            )
+        result[f"{gid}|{team_id}"] = "|".join(player_ids)
+    return result
+
+
 def _validate_source_frames(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -267,6 +425,7 @@ def _validate_source_frames(
     map_work = map_work.loc[map_work["__game_id"].isin(requested)].copy()
     player_work = player_work.loc[player_work["__game_id"].isin(requested)].copy()
     team_work = team_work.loc[team_work["__game_id"].isin(requested)].copy()
+    _validate_display_identity_mappings(player_work, team_work, map_work)
     if not player_work.groupby("__game_id", sort=False).size().reindex(sorted(requested), fill_value=0).eq(10).all():
         raise CurrentRatingLedgerError("players do not contain exactly ten rows per eligible map")
     if not team_work.groupby("__game_id", sort=False).size().reindex(sorted(requested), fill_value=0).eq(2).all():
@@ -280,7 +439,11 @@ def _validate_source_frames(
         tids = group["teamid"].astype("string").str.strip()
         if names.isna().any() or names.eq("").any() or names.str.casefold().isin({"nan", "none", "<na>"}).any() or names.nunique() != 10:
             raise CurrentRatingLedgerError(f"player names are incomplete for {gid}")
-        if ids.isna().any() or not ids.str.startswith("oe:player:").all() or ids.nunique() != 10:
+        if (
+            ids.isna().any()
+            or not ids.str.startswith("oe:player:").all()
+            or ids.nunique() != 10
+        ):
             raise CurrentRatingLedgerError(f"stable player identities are incomplete for {gid}")
         if tids.isna().any() or not tids.str.startswith("oe:team:").all():
             raise CurrentRatingLedgerError(f"stable team identities are incomplete for {gid}")
@@ -361,7 +524,9 @@ def _team_replay(
     frame["__game_id"] = _game_ids(frame, "maps").astype(str).to_numpy()
     frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce").dt.tz_localize(None)
     frame = frame.sort_values(["date", "__game_id"], kind="mergesort").reset_index(drop=True)
-    lineups = lineup_hashes_from_players(players.drop(columns=["__game_id"], errors="ignore"))
+    source_players = players.drop(columns=["__game_id"], errors="ignore")
+    team_ids = _stable_team_ids_by_game_side(source_players)
+    lineups = _stable_lineup_hashes(source_players)
     states: dict[str, TeamState] = defaultdict(lambda: TeamState(sigma=cfg.sigma0))
     rows: list[dict[str, Any]] = []
     blue_col = "blue_team" if "blue_team" in frame.columns else "blue_teamname"
@@ -373,8 +538,12 @@ def _team_replay(
         seen_teams: set[str] = set()
         for raw in batch.to_dict(orient="records"):
             gid = str(raw["__game_id"])
-            blue = normalize_team(str(raw.get(blue_col) or ""))
-            red = normalize_team(str(raw.get(red_col) or ""))
+            blue = team_ids.get((gid, "Blue"), "")
+            red = team_ids.get((gid, "Red"), "")
+            if not blue or not red or blue == red:
+                raise CurrentRatingLedgerError(
+                    f"stable team identity is incomplete for {gid}"
+                )
             for team, side in ((blue, "blue"), (red, "red")):
                 if team in seen_teams:
                     raise CurrentRatingLedgerError(f"team appears in multiple maps at one timestamp: {team}")
@@ -393,8 +562,12 @@ def _team_replay(
         pending: list[tuple[dict[str, Any], str, str, float, float, float, float]] = []
         for raw in batch.to_dict(orient="records"):
             gid = str(raw["__game_id"])
-            blue = normalize_team(str(raw.get(blue_col) or ""))
-            red = normalize_team(str(raw.get(red_col) or ""))
+            blue = team_ids.get((gid, "Blue"), "")
+            red = team_ids.get((gid, "Red"), "")
+            if not blue or not red or blue == red:
+                raise CurrentRatingLedgerError(
+                    f"stable team identity is incomplete for {gid}"
+                )
             sb, sr = states[blue], states[red]
             base_b, base_r = total_mu(sb), total_mu(sr)
             momentum_b = cfg.momentum_scale * _team_momentum_residual(sb, cfg)
@@ -470,20 +643,53 @@ def _player_replay(
     frame["__game_id"] = _game_ids(frame, "maps").astype(str).to_numpy()
     frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce").dt.tz_localize(None)
     frame = frame.sort_values(["date", "__game_id"], kind="mergesort").reset_index(drop=True)
-    lineups, attribution_metrics = _lineups_by_game(source_players, with_metrics=True)
-    attribution, _ = player_attribution_multipliers(attribution_metrics, cfg, baseline_cache=None)
+    _name_lineups, attribution_metrics = _lineups_by_game(
+        source_players, with_metrics=True
+    )
+    stable_lineups = _stable_player_lineups(source_players)
+    team_ids = _stable_team_ids_by_game_side(source_players)
+    attribution_by_name, _ = player_attribution_multipliers(
+        attribution_metrics, cfg, baseline_cache=None
+    )
+    name_to_player_id: dict[tuple[str, str, str], str] = {}
+    player_gids = _game_ids(source_players, "players").astype(str)
+    player_work = source_players.copy()
+    player_work["__gid"] = player_gids.to_numpy()
+    player_work["__side"] = player_work["side"].astype("string").str.strip().str.title()
+    player_work["__name"] = player_work["playername"].map(_identity_text)
+    player_work["__player_id"] = player_work["playerid"].map(_identity_text)
+    for row in player_work[["__gid", "__side", "__name", "__player_id"]].itertuples(
+        index=False, name=None
+    ):
+        gid, side, name, player_id = (str(value) for value in row)
+        key = (gid, side, name)
+        if not name or not player_id or (key in name_to_player_id and name_to_player_id[key] != player_id):
+            raise CurrentRatingLedgerError(
+                f"player display identity is unstable for {gid} {side} {name}"
+            )
+        name_to_player_id[key] = player_id
+    attribution: dict[tuple[str, str, str], float] = {}
+    for (gid, side, name), multiplier in attribution_by_name.items():
+        player_id = name_to_player_id.get((str(gid), str(side), str(name)))
+        if not player_id:
+            raise CurrentRatingLedgerError(
+                f"player attribution identity is unresolved for {gid} {side} {name}"
+            )
+        attribution[(str(gid), str(side), player_id)] = float(multiplier)
     states: dict[str, PlayerState] = {}
     rows: list[dict[str, Any]] = []
-    blue_col = "blue_team" if "blue_team" in frame.columns else "blue_teamname"
-    red_col = "red_team" if "red_team" in frame.columns else "red_teamname"
     for stamp, batch in frame.groupby("date", sort=False, dropna=False):
         seen_players: set[str] = set()
         for raw in batch.to_dict(orient="records"):
             gid = str(raw["__game_id"])
-            blue_lu = lineups.get(gid, {}).get("Blue") or []
-            red_lu = lineups.get(gid, {}).get("Red") or []
-            blue = normalize_team(str(raw.get(blue_col) or ""))
-            red = normalize_team(str(raw.get(red_col) or ""))
+            blue_lu = stable_lineups.get(gid, {}).get("Blue") or []
+            red_lu = stable_lineups.get(gid, {}).get("Red") or []
+            blue = team_ids.get((gid, "Blue"), "")
+            red = team_ids.get((gid, "Red"), "")
+            if not blue or not red or blue == red:
+                raise CurrentRatingLedgerError(
+                    f"stable team identity is incomplete for {gid}"
+                )
             for name, _role in [*blue_lu, *red_lu]:
                 if name in seen_players:
                     raise CurrentRatingLedgerError(f"player appears in multiple maps at one timestamp: {name}")
@@ -499,10 +705,14 @@ def _player_replay(
         pending: list[tuple[dict[str, Any], str, str, float, float, float, float]] = []
         for raw in batch.to_dict(orient="records"):
             gid = str(raw["__game_id"])
-            blue_lu = lineups.get(gid, {}).get("Blue") or []
-            red_lu = lineups.get(gid, {}).get("Red") or []
-            blue = normalize_team(str(raw.get(blue_col) or ""))
-            red = normalize_team(str(raw.get(red_col) or ""))
+            blue_lu = stable_lineups.get(gid, {}).get("Blue") or []
+            red_lu = stable_lineups.get(gid, {}).get("Red") or []
+            blue = team_ids.get((gid, "Blue"), "")
+            red = team_ids.get((gid, "Red"), "")
+            if not blue or not red or blue == red:
+                raise CurrentRatingLedgerError(
+                    f"stable team identity is incomplete for {gid}"
+                )
             base_b, sig_b, known_b, _ = _aggregate(states, blue_lu, cfg, include_momentum=False)
             base_r, sig_r, known_r, _ = _aggregate(states, red_lu, cfg, include_momentum=False)
             mu_b, _, _, details_b = _aggregate(states, blue_lu, cfg)
@@ -543,8 +753,8 @@ def _player_replay(
             pending.append((raw, blue, red, p, p_base, mov, y_value))
         for raw, blue, red, p, p_base, mov, y_value in pending:
             gid = str(raw["__game_id"])
-            blue_lu = lineups.get(gid, {}).get("Blue") or []
-            red_lu = lineups.get(gid, {}).get("Red") or []
+            blue_lu = stable_lineups.get(gid, {}).get("Blue") or []
+            red_lu = stable_lineups.get(gid, {}).get("Red") or []
             intl = _is_intl(str(raw.get("league") or ""), raw.get("tournament"))
             for name, _role in blue_lu:
                 state = states.setdefault(name, PlayerState(sigma=cfg.sigma0))
@@ -627,25 +837,48 @@ def build_fold_current_rating_feature_ledger(
     raw_map_ids = set(_game_ids(maps, "maps").astype(str))
     raw_player_ids = set(_game_ids(players, "players").astype(str))
     raw_team_ids = set(_game_ids(teams, "teams").astype(str))
-    if source_frame_sha256 is None:
-        if not eligible_set.issubset(raw_map_ids) or not eligible_set.issubset(raw_player_ids) or not eligible_set.issubset(raw_team_ids):
-            raise CurrentRatingLedgerError(
-                "full source frame hashes are required when fold inputs are scoped"
-            )
-        source_frames = {
-            "maps": _frame_digest(maps, "maps"),
-            "players": _frame_digest(players, "players"),
-            "teams": _frame_digest(teams, "teams"),
+    if not eligible_set.issubset(raw_map_ids) or not eligible_set.issubset(raw_player_ids) or not eligible_set.issubset(raw_team_ids):
+        raise CurrentRatingLedgerError(
+            "full source frames are required for the accepted eligible census"
+        )
+    computed_source_frames = {
+        "maps": _frame_digest(maps, "maps"),
+        "players": _frame_digest(players, "players"),
+        "teams": _frame_digest(teams, "teams"),
+    }
+    if source_frame_sha256 is not None:
+        claimed_source_frames = {
+            str(label): str(value).lower()
+            for label, value in source_frame_sha256.items()
         }
-    else:
-        source_frames = {str(label): str(value).lower() for label, value in source_frame_sha256.items()}
-        if set(source_frames) != {"maps", "players", "teams"} or any(
-            not re.fullmatch(r"[0-9a-f]{64}", value) for value in source_frames.values()
+        if set(claimed_source_frames) != set(computed_source_frames) or any(
+            not re.fullmatch(r"[0-9a-f]{64}", value)
+            for value in claimed_source_frames.values()
         ):
             raise CurrentRatingLedgerError("full source frame hashes are invalid")
+        if claimed_source_frames != computed_source_frames:
+            raise CurrentRatingLedgerError("full source frame hashes do not match source frames")
+    source_frames = computed_source_frames
     map_frame, player_frame, team_frame = _validate_source_frames(
         maps, players, teams, eligible_ids, output_ids
     )
+    map_frame["series_id"] = _series_ids(
+        map_frame, map_frame["__game_id"].astype(str)
+    ).to_numpy()
+    series_by_id = pd.Series(
+        map_frame["series_id"].astype(str).to_numpy(),
+        index=map_frame["__game_id"].astype(str),
+    )
+    train_series_ids = tuple(sorted(set(series_by_id.loc[list(train_ids)].astype(str))))
+    validation_series_ids = tuple(
+        sorted(set(series_by_id.loc[list(validation_ids)].astype(str)))
+    )
+    overlap_series = set(train_series_ids) & set(validation_series_ids)
+    if overlap_series:
+        raise CurrentRatingLedgerError(
+            "training and validation series overlap: "
+            + ", ".join(sorted(overlap_series))
+        )
     cutoff = _utc_timestamp(fit_window_end, "fit_window_end")
     map_dates = pd.to_datetime(map_frame["date"], utc=True, errors="coerce")
     date_by_id = pd.Series(map_dates.to_numpy(), index=map_frame["__game_id"].astype(str))
@@ -695,6 +928,14 @@ def build_fold_current_rating_feature_ledger(
         "validation_game_ids": list(validation_ids),
         "validation_game_count": len(validation_ids),
         "validation_game_identity_sha256": identity_sha256(validation_ids),
+        "train_series_ids": list(train_series_ids),
+        "train_series_count": len(train_series_ids),
+        "train_series_identity_sha256": identity_sha256(train_series_ids),
+        "validation_series_ids": list(validation_series_ids),
+        "validation_series_count": len(validation_series_ids),
+        "validation_series_identity_sha256": identity_sha256(validation_series_ids),
+        "series_disjoint": True,
+        "state_key_policy": dict(_RECEIPT_STATE_KEY_POLICY),
         "fit_window_end": _utc_text(cutoff),
         "strict_prior_timing": "train_outcomes_only_strictly_before_cutoff",
         "same_timestamp_policy": "score_full_utc_timestamp_batch_before_training_updates",
@@ -760,6 +1001,7 @@ def validate_fold_current_rating_feature_ledger(
     train_game_ids: Iterable[Any],
     validation_game_ids: Iterable[Any],
     fit_window_end: Any,
+    source_frames: Mapping[str, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     """Validate a produced ledger and its durable artifact binding."""
 
@@ -770,6 +1012,9 @@ def validate_fold_current_rating_feature_ledger(
         "output_game_count", "output_game_identity_sha256", "train_game_ids",
         "train_game_count", "train_game_identity_sha256", "validation_game_ids",
         "validation_game_count", "validation_game_identity_sha256", "fit_window_end",
+        "train_series_ids", "train_series_count", "train_series_identity_sha256",
+        "validation_series_ids", "validation_series_count",
+        "validation_series_identity_sha256", "series_disjoint", "state_key_policy",
         "strict_prior_timing", "same_timestamp_policy", "masked_nontraining_map_columns",
         "masked_nontraining_player_columns", "source_frame_sha256", "feature_names",
         "ledger_rows_sha256", "implementation_locator", "implementation_sha256", "artifact",
@@ -786,6 +1031,28 @@ def validate_fold_current_rating_feature_ledger(
         raise CurrentRatingLedgerError("current rating source binding changed")
     if receipt.get("implementation_sha256") != _implementation_hash():
         raise CurrentRatingLedgerError("current rating implementation binding changed")
+    source_frame_hashes = receipt.get("source_frame_sha256")
+    if (
+        not isinstance(source_frame_hashes, Mapping)
+        or set(source_frame_hashes) != {"maps", "players", "teams"}
+        or any(
+            not isinstance(value, str)
+            or re.fullmatch(r"[0-9a-f]{64}", value, re.I) is None
+            for value in source_frame_hashes.values()
+        )
+    ):
+        raise CurrentRatingLedgerError("current rating source frame hashes are invalid")
+    if source_frames is not None:
+        if set(source_frames) != {"maps", "players", "teams"} or any(
+            not isinstance(frame, pd.DataFrame) for frame in source_frames.values()
+        ):
+            raise CurrentRatingLedgerError("current rating source frames are invalid")
+        computed_source_frames = {
+            label: _frame_digest(source_frames[label], label)
+            for label in ("maps", "players", "teams")
+        }
+        if dict(source_frame_hashes) != computed_source_frames:
+            raise CurrentRatingLedgerError("current rating source frame hashes changed")
     train_ids = _as_ids(train_game_ids, "training")
     validation_ids = _as_ids(validation_game_ids, "validation")
     if tuple(receipt.get("train_game_ids", ())) != train_ids or tuple(receipt.get("validation_game_ids", ())) != validation_ids:
@@ -794,6 +1061,8 @@ def validate_fold_current_rating_feature_ledger(
         raise CurrentRatingLedgerError("current rating cutoff changed")
     if tuple(receipt.get("feature_names", ())) != CURRENT_RATING_SIGNED_MAP_FEATURES:
         raise CurrentRatingLedgerError("current rating feature names changed")
+    if receipt.get("state_key_policy") != _RECEIPT_STATE_KEY_POLICY:
+        raise CurrentRatingLedgerError("current rating state key policy changed")
     authority = receipt.get("authority")
     if not isinstance(authority, Mapping) or authority.get("research_only") is not True or any(authority.get(key) is not False for key in ("public_player_rating", "public_team_rating", "public_probability", "promotion", "merge", "deployment", "betting")):
         raise CurrentRatingLedgerError("current rating receipt authority is not research-only")
@@ -809,6 +1078,29 @@ def validate_fold_current_rating_feature_ledger(
         raise CurrentRatingLedgerError("current rating fold output identity changed")
     if tuple(sorted(ledger["game_id"].astype(str))) != expected_ids:
         raise CurrentRatingLedgerError("current rating ledger coverage changed")
+    ledger_series = ledger.set_index(ledger["game_id"].astype(str))["series_id"].astype("string")
+    if ledger_series.isna().any() or ledger_series.str.strip().eq("").any():
+        raise CurrentRatingLedgerError("current rating ledger series identity is incomplete")
+    actual_train_series = tuple(
+        sorted(set(ledger_series.loc[list(train_ids)].astype(str)))
+    )
+    actual_validation_series = tuple(
+        sorted(set(ledger_series.loc[list(validation_ids)].astype(str)))
+    )
+    if set(actual_train_series) & set(actual_validation_series):
+        raise CurrentRatingLedgerError("current rating train and validation series overlap")
+    if receipt.get("series_disjoint") is not True:
+        raise CurrentRatingLedgerError("current rating series disjointness is not bound")
+    if (
+        tuple(receipt.get("train_series_ids", ())) != actual_train_series
+        or tuple(receipt.get("validation_series_ids", ())) != actual_validation_series
+        or receipt.get("train_series_count") != len(actual_train_series)
+        or receipt.get("validation_series_count") != len(actual_validation_series)
+        or receipt.get("train_series_identity_sha256") != identity_sha256(actual_train_series)
+        or receipt.get("validation_series_identity_sha256")
+        != identity_sha256(actual_validation_series)
+    ):
+        raise CurrentRatingLedgerError("current rating series binding changed")
     if _artifact_digest(ledger, CURRENT_RATING_SIGNED_MAP_FEATURES) != receipt["ledger_rows_sha256"]:
         raise CurrentRatingLedgerError("current rating ledger values changed")
     artifact = receipt.get("artifact")
