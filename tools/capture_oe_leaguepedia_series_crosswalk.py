@@ -24,7 +24,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start-date", required=True, help="inclusive ISO date, YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="inclusive ISO date, YYYY-MM-DD")
     parser.add_argument("--root", type=Path, required=True, help="stable local capture/cache root")
-    parser.add_argument("--window-days", type=int, default=1, help="half-open ScoreboardGames/MatchSchedule window size, 1 to 31")
+    parser.add_argument(
+        "--window-days",
+        type=int,
+        default=1,
+        help="half-open event and tournament DateStart window size, 1 to 31",
+    )
     parser.add_argument("--limit", type=int, default=MAX_CARGO_LIMIT, help="Cargo row limit per request, at most 500")
     parser.add_argument("--no-resume", action="store_true", help="fetch requests again instead of using verified cache entries")
     args = parser.parse_args(argv)

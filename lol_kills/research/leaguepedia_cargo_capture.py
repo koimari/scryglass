@@ -28,6 +28,7 @@ from lol_kills.net import require_https_url
 
 
 SCHEMA_VERSION = "scryglass:leaguepedia-cargo-capture:v1"
+QUERY_CONTRACT_VERSION = "scryglass:leaguepedia-cargo-query-contract:v2"
 CARGO_ROOT = "https://lol.fandom.com/wiki/Special:CargoExport"
 CARGO_HOSTS = frozenset({"lol.fandom.com"})
 USER_AGENT = "Scryglass-research/leaguepedia-series-crosswalk-v1"
@@ -374,12 +375,25 @@ def _query_window(
     )
 
 
-def _query_tournaments_window(start: date, end_exclusive: date, *, limit: int) -> str:
-    where = (
-        f'Tournaments.Date >= "{start.isoformat()}" AND '
-        f'Tournaments.Date < "{end_exclusive.isoformat()}" AND '
-        f'Tournaments.DateStart <= "{(end_exclusive - timedelta(days=1)).isoformat()}"'
-    )
+def _query_tournaments_window(
+    start: date,
+    end_exclusive: date,
+    *,
+    requested_start: date,
+    limit: int,
+) -> str:
+    if start == requested_start:
+        where = (
+            f'((Tournaments.DateStart < "{requested_start.isoformat()}" AND '
+            f'Tournaments.Date >= "{requested_start.isoformat()}") OR '
+            f'(Tournaments.DateStart >= "{requested_start.isoformat()}" AND '
+            f'Tournaments.DateStart < "{end_exclusive.isoformat()}"))'
+        )
+    else:
+        where = (
+            f'Tournaments.DateStart >= "{start.isoformat()}" AND '
+            f'Tournaments.DateStart < "{end_exclusive.isoformat()}"'
+        )
     return _cargo_url(
         "Tournaments",
         TOURNAMENT_FIELDS,
@@ -420,9 +434,10 @@ def capture_leaguepedia_sources(
 ) -> dict[str, Any]:
     """Capture bounded Leaguepedia Cargo arrays and return the manifest.
 
-    ``end_date`` is inclusive.  ScoreboardGames, MatchSchedule, and
-    Tournaments use bounded half-open windows.  Tournaments rows are selected
-    by their end date and retain the start-date overlap constraint.
+    ``end_date`` is inclusive.  ScoreboardGames and MatchSchedule use bounded
+    half-open event-time windows.  Tournaments use half-open ``DateStart``
+    windows.  The first tournament window also includes tournaments that
+    started earlier and remain active on ``start_date``.
     The default fetcher is the HTTPS-only client.  Tests can inject a byte
     fetcher that receives the URL and the explicit request headers.
     """
@@ -488,7 +503,12 @@ def capture_leaguepedia_sources(
                 seen_ids[table].add(row_id)
                 all_rows[table].append(row)
             response_records.append(record)
-        tournament_url = _query_tournaments_window(cursor, window_end, limit=limit)
+        tournament_url = _query_tournaments_window(
+            cursor,
+            window_end,
+            requested_start=start,
+            limit=limit,
+        )
         tournament_rows, tournament_record = _capture_one(
             root=root,
             table="Tournaments",
@@ -539,11 +559,19 @@ def capture_leaguepedia_sources(
             "inclusive_end": True,
         },
         "query_contract": {
+            "schema_version": QUERY_CONTRACT_VERSION,
             "max_rows_per_request": limit,
             "truncation_policy": "reject_when_row_count_reaches_limit",
             "duplicate_policy": "reject_by_stable_table_identity",
             "cache_policy": "resume_only_after_raw_bytes_and_metadata_hash_verification",
             "response_format": "JSON array of objects",
+            "tournament_partition_field": "DateStart",
+            "tournament_partition_policy": "half_open_non_overlapping_windows",
+            "tournament_initial_boundary_policy": (
+                "first_window_adds_rows_with_DateStart_before_requested_start_"
+                "and_Date_on_or_after_requested_start"
+            ),
+            "tournament_end_date_upper_bound": None,
         },
         "response_records": response_records,
         "assembled": assembled,
@@ -580,11 +608,15 @@ def verify_capture_manifest(payload: Mapping[str, Any]) -> None:
         raise CargoCaptureError("capture manifest grants public authority")
     if payload.get("status") != "complete_raw_capture":
         raise CargoCaptureError("capture manifest status is not complete")
+    query_contract = payload.get("query_contract")
+    if not isinstance(query_contract, Mapping) or query_contract.get("schema_version") != QUERY_CONTRACT_VERSION:
+        raise CargoCaptureError("capture manifest query contract is obsolete")
 
 
 __all__ = [
     "CargoCaptureError",
     "CARGO_ROOT",
+    "QUERY_CONTRACT_VERSION",
     "SCHEMA_VERSION",
     "USER_AGENT",
     "capture_leaguepedia_sources",
