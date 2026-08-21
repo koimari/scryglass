@@ -21,7 +21,27 @@ NOW = datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc)
 def _inputs(tmp_path: Path) -> dict[str, object]:
     ids = ["game-2", "game-1"]
     receipt = tmp_path / "accepted-source.json"
-    receipt.write_text("accepted\n", encoding="utf-8")
+    receipt_payload = {
+        "schema": "scryglass:oe-source-refresh:v1",
+        "status": "refreshed",
+        "year": "2026",
+        "candidate": {"raw_sha256": "a" * 64},
+        "authority": {
+            "model_validation_authority": False,
+            "probability_authority": False,
+            "recommendation_authority": False,
+            "betting_authority": False,
+        },
+    }
+    receipt_payload["receipt_canonical_sha256"] = hashlib.sha256(
+        json.dumps(
+            receipt_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    receipt.write_text(json.dumps(receipt_payload), encoding="utf-8")
     artifacts: dict[str, str] = {}
     for name in ("model", "snapshot", "tier", "draft"):
         path = tmp_path / f"{name}.json"
@@ -32,7 +52,7 @@ def _inputs(tmp_path: Path) -> dict[str, object]:
         "source_game_ids": ids,
         "source_game_count": 2,
         "source_identity_sha256": identity_sha256(ids),
-        "source_receipt_sha256": "a" * 64,
+        "source_receipt_sha256": receipt_payload["receipt_canonical_sha256"],
         "accepted_source_receipt_path": receipt,
         "current_ratings": {
             "status": "published",
@@ -112,6 +132,33 @@ def test_artifact_hash_mismatch_stays_blocked_and_does_not_copy(tmp_path: Path) 
     assert result["status"] == "research_only_blocked"
     assert "model_artifact_hash_mismatch" in result["blockers"]
     assert artifact.read_text(encoding="utf-8") == "model"
+
+
+def test_hash_only_artifact_is_unverified_and_blocked(tmp_path: Path) -> None:
+    values = _inputs(tmp_path)
+    values["artifacts"] = {
+        **values["artifacts"],  # type: ignore[dict-item]
+        "model": "f" * 64,
+    }
+
+    result = run_future_value_refresh_shadow(runtime_root=tmp_path, **values)
+
+    assert result["status"] == "research_only_blocked"
+    assert result["artifacts"]["model"]["status"] == "unverified_hash"
+    assert "model_artifact_unverified" in result["blockers"]
+
+
+def test_tampered_accepted_source_receipt_is_blocked(tmp_path: Path) -> None:
+    values = _inputs(tmp_path)
+    receipt = Path(str(values["accepted_source_receipt_path"]))
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    payload["year"] = "2025"
+    receipt.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = run_future_value_refresh_shadow(runtime_root=tmp_path, **values)
+
+    assert result["status"] == "research_only_blocked"
+    assert "accepted_source_receipt_unavailable" in result["blockers"]
 
 
 def test_explicit_promotion_is_rejected_before_any_shadow_work() -> None:

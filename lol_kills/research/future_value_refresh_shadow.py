@@ -23,6 +23,7 @@ import re
 import time
 from typing import Any
 
+from lol_kills.etl.oe_ingest import OeDownloadError, load_refresh_receipt
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
 
@@ -158,7 +159,8 @@ def _artifact_record(name: str, value: object, blockers: list[str]) -> dict[str,
 
     if claimed is not None:
         record["sha256"] = claimed
-        record["status"] = "hash_supplied"
+        record["status"] = "unverified_hash"
+        blockers.append(f"{name}_artifact_unverified")
         return record
 
     blockers.append(f"{name}_artifact_missing")
@@ -231,32 +233,27 @@ def _source_binding(
         try:
             source_file["bytes"] = int(accepted_source_receipt_path.stat().st_size)
             source_file["sha256"] = sha256_path(accepted_source_receipt_path)
-        except (OSError, FutureValueShadowError):
+            payload = load_refresh_receipt(accepted_source_receipt_path)
+        except (OSError, FutureValueShadowError, OeDownloadError):
             blockers.append("accepted_source_receipt_unavailable")
         else:
-            try:
-                payload = json.loads(accepted_source_receipt_path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                payload = None
-            if isinstance(payload, Mapping) and "receipt_canonical_sha256" in payload:
-                claimed_canonical = _hash(
-                    payload.get("receipt_canonical_sha256"),
-                    "accepted source receipt canonical hash",
-                )
-                unsigned = dict(payload)
-                unsigned.pop("receipt_canonical_sha256", None)
-                actual_canonical = _sha256_bytes(
-                    json.dumps(
-                        unsigned,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ).encode("utf-8")
-                )
-                if claimed_canonical is None or claimed_canonical != actual_canonical:
-                    blockers.append("accepted_source_receipt_invalid")
-                elif source_receipt not in {None, claimed_canonical}:
-                    blockers.append("accepted_source_receipt_hash_mismatch")
+            claimed_canonical = _hash(
+                payload.get("receipt_canonical_sha256"),
+                "accepted source receipt canonical hash",
+            )
+            source_file["receipt_canonical_sha256"] = claimed_canonical
+            source_file["candidate_raw_sha256"] = _hash(
+                (payload.get("candidate") or {}).get("raw_sha256")
+                if isinstance(payload.get("candidate"), Mapping)
+                else None,
+                "accepted source candidate",
+            )
+            if claimed_canonical is None:
+                blockers.append("accepted_source_receipt_invalid")
+            elif source_receipt not in {None, claimed_canonical}:
+                blockers.append("accepted_source_receipt_hash_mismatch")
+    else:
+        blockers.append("accepted_source_receipt_unavailable")
     if source_receipt is None:
         blockers.append("accepted_source_receipt_hash_missing")
     return {
@@ -344,7 +341,7 @@ def run_future_value_refresh_shadow(
             "accepted_game_count": source["source_game_count"],
             "accepted_game_id_count": len(source["accepted_game_ids"]),
             "artifact_count": sum(
-                record["status"] in {"available", "hash_supplied"}
+                record["status"] == "available"
                 for record in artifact_bindings.values()
             ),
             "artifact_required_count": len(ARTIFACT_NAMES),
