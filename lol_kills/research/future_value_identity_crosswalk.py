@@ -29,8 +29,10 @@ from lol_kills.etl.aliases import normalize_team
 from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
 
 
-SCHEMA_VERSION = "scryglass:future-value-identity-crosswalk:v1"
+SCHEMA_VERSION = "scryglass:future-value-identity-crosswalk:v2"
 STATUS = "research_only_identity_candidates"
+SOURCE_RECEIPT_SCHEMA = "scryglass:future-value-rating-source:v1"
+SOURCE_RECEIPT_STATUS = "accepted_source_bound_development_only"
 AUTHORITY = {
     "research_only": True,
     "public": False,
@@ -41,13 +43,42 @@ AUTHORITY = {
 ROLES = ("top", "jungle", "mid", "bot", "support")
 SIDES = ("blue", "red")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
-_OUTCOME_KEYS = {
-    "result",
-    "winner",
-    "win",
-    "y_blue_win",
-    "outcome",
-    "won",
+_OUTCOME_KEY_TOKENS = {"final", "outcome", "result", "winner", "win", "won"}
+_SOURCE_RECEIPT_FIELDS = {
+    "accepted_game_ids",
+    "authority",
+    "checkpoint_coverage",
+    "identity_coverage",
+    "model_contract",
+    "model_eligible_game_count",
+    "model_eligible_game_ids",
+    "model_eligible_identity_sha256",
+    "model_exclusions",
+    "receipt_sha256",
+    "schema_version",
+    "source_as_of",
+    "source_extra_game_ids",
+    "source_files",
+    "source_game_count",
+    "source_identity_sha256",
+    "source_rows",
+    "status",
+}
+_SOURCE_AUTHORITY = {
+    "deployment": False,
+    "merge": False,
+    "promotion": False,
+    "public_player_rating": False,
+    "public_probability": False,
+    "public_team_rating": False,
+    "research_only": True,
+}
+_CROSSWALK_FIELDS = {
+    "accepted_game_ids", "assignments", "authority", "candidate_key_types",
+    "counts", "method", "receipt_sha256", "rejected", "schema_version",
+    "source_as_of", "source_file_records", "source_game_count",
+    "source_identity_sha256", "source_receipt_file", "source_receipt_sha256",
+    "status",
 }
 
 
@@ -200,42 +231,79 @@ def _canonical_frame_games(frame: pd.DataFrame, label: str) -> pd.Series:
     return result
 
 
+def _safe_regular_file(value: Any, label: str) -> Path:
+    text = _string(value)
+    if text is None:
+        raise IdentityCrosswalkError(f"{label} source file path is required")
+    candidate = Path(text).expanduser()
+    if not candidate.is_absolute():
+        raise IdentityCrosswalkError(f"{label} source file path is unsafe")
+    current = Path(candidate.anchor)
+    for part in candidate.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise IdentityCrosswalkError(f"{label} source file path is unsafe")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as error:
+        raise IdentityCrosswalkError(f"{label} source file path is unsafe") from error
+    if not resolved.is_file():
+        raise IdentityCrosswalkError(f"{label} source file path is unsafe")
+    return resolved
+
+
 def _valid_file_record(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise IdentityCrosswalkError(f"{label} source file record is invalid")
+    if set(map(str, value)) - {"bytes", "locator", "path", "sha256", "year"}:
+        raise IdentityCrosswalkError(f"{label} source file record has unknown fields")
     digest = _hash(value.get("sha256"))
     bytes_value = value.get("bytes")
-    locator = _string(value.get("path")) or _string(value.get("locator"))
+    locator = _string(value.get("locator"))
+    path = _safe_regular_file(value.get("path"), label)
     if (
         digest is None
         or isinstance(bytes_value, bool)
         or not isinstance(bytes_value, int)
         or bytes_value <= 0
-        or locator is None
     ):
         raise IdentityCrosswalkError(f"{label} source file record is invalid")
+    if locator is None:
+        locator = path.name
     result = {
         "bytes": int(bytes_value),
         "locator": locator,
+        "path": str(path),
         "sha256": digest,
     }
-    if "path" in value and _string(value.get("path")) is not None:
-        result["path"] = str(value["path"])
     if "year" in value:
         year = value.get("year")
         if isinstance(year, bool) or not isinstance(year, int):
             raise IdentityCrosswalkError(f"{label} source file year is invalid")
         result["year"] = year
-    path_text = _string(value.get("path"))
-    if path_text is not None:
-        path = Path(path_text)
-        if not path.is_absolute() or path.is_symlink() or not path.is_file():
-            raise IdentityCrosswalkError(f"{label} source file path is unsafe")
-        if path.stat().st_size != int(bytes_value):
-            raise IdentityCrosswalkError(f"{label} source file byte count changed")
-        if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
-            raise IdentityCrosswalkError(f"{label} source file hash changed")
+    if path.stat().st_size != int(bytes_value):
+        raise IdentityCrosswalkError(f"{label} source file byte count changed")
+    if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+        raise IdentityCrosswalkError(f"{label} source file hash changed")
     return result
+
+
+def _bound_source_receipt(
+    source_receipt: Mapping[str, Any],
+    source_receipt_file_record: Mapping[str, Any] | None,
+    trusted_source_receipt_file_sha256: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    record = _valid_file_record(source_receipt_file_record, "source receipt")
+    trusted_digest = _hash(trusted_source_receipt_file_sha256)
+    if trusted_digest is None or trusted_digest != record["sha256"]:
+        raise IdentityCrosswalkError("source receipt file trust digest is invalid")
+    try:
+        loaded = json.loads(Path(record["path"]).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise IdentityCrosswalkError("source receipt file is invalid") from error
+    if not isinstance(loaded, dict) or dict(source_receipt) != loaded:
+        raise IdentityCrosswalkError("source receipt does not match verified bytes")
+    return loaded, record
 
 
 def _source_receipt(
@@ -243,6 +311,13 @@ def _source_receipt(
 ) -> tuple[tuple[str, ...], datetime, str, str]:
     if not isinstance(source_receipt, Mapping):
         raise IdentityCrosswalkError("source receipt is required")
+    if set(source_receipt) - _SOURCE_RECEIPT_FIELDS:
+        raise IdentityCrosswalkError("source receipt contains unknown fields")
+    if (
+        source_receipt.get("schema_version") != SOURCE_RECEIPT_SCHEMA
+        or source_receipt.get("status") != SOURCE_RECEIPT_STATUS
+    ):
+        raise IdentityCrosswalkError("source receipt schema or status is invalid")
     accepted_raw = source_receipt.get("accepted_game_ids")
     if not isinstance(accepted_raw, Sequence) or isinstance(
         accepted_raw, (str, bytes, bytearray)
@@ -265,11 +340,8 @@ def _source_receipt(
     if canonical_sha256(payload) != claimed:
         raise IdentityCrosswalkError("source receipt hash does not match payload")
     authority = source_receipt.get("authority")
-    if not isinstance(authority, Mapping) or authority.get("research_only") is not True:
-        raise IdentityCrosswalkError("source receipt is not research-only")
-    for key, value in authority.items():
-        if key != "research_only" and value is not False:
-            raise IdentityCrosswalkError("source receipt opens an authority gate")
+    if not isinstance(authority, Mapping) or dict(authority) != _SOURCE_AUTHORITY:
+        raise IdentityCrosswalkError("source receipt authority is invalid")
     return accepted, source_as_of, source_identity, claimed
 
 
@@ -288,6 +360,10 @@ def _source_records(
         for label, record in sorted(value.items(), key=lambda item: str(item[0]))
     }
     receipt_records = source_receipt.get("source_files")
+    if not isinstance(receipt_records, Mapping) or set(result) != set(receipt_records):
+        raise IdentityCrosswalkError("source file binding set is invalid")
+    if not {"maps", "players", "teams"}.issubset(result):
+        raise IdentityCrosswalkError("maps, players, and teams source files are required")
     if isinstance(receipt_records, Mapping):
         for label, expected in receipt_records.items():
             if label not in result:
@@ -304,6 +380,47 @@ def _source_records(
             ):
                 raise IdentityCrosswalkError(f"source file binding changed: {label}")
     return result
+
+
+def _load_source_frame(record: Mapping[str, Any], label: str) -> pd.DataFrame:
+    path = Path(str(record["path"]))
+    suffix = path.suffix.casefold()
+    try:
+        if suffix in {".parquet", ".pq"}:
+            frame = pd.read_parquet(path)
+        elif suffix in {".csv", ".gz"}:
+            frame = pd.read_csv(path, low_memory=False)
+        elif suffix in {".jsonl", ".ndjson"}:
+            frame = pd.read_json(path, lines=True)
+        elif suffix == ".json":
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            frame = pd.DataFrame(loaded)
+        else:
+            raise IdentityCrosswalkError(f"{label} source file type is unsupported")
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        raise IdentityCrosswalkError(f"{label} source file cannot be loaded") from error
+    return _frame(frame, label)
+
+
+def _frame_from_verified_file(
+    supplied: Any,
+    record: Mapping[str, Any],
+    label: str,
+) -> pd.DataFrame:
+    supplied_frame = _frame(supplied, label)
+    verified_frame = _load_source_frame(record, label)
+    try:
+        pd.testing.assert_frame_equal(
+            supplied_frame.reset_index(drop=True),
+            verified_frame.reset_index(drop=True),
+            check_dtype=True,
+            check_like=False,
+        )
+    except AssertionError as error:
+        raise IdentityCrosswalkError(
+            f"{label} rows do not match verified source bytes"
+        ) from error
+    return verified_frame
 
 
 def _history_rows(
@@ -543,23 +660,95 @@ def _require_columns(frame: pd.DataFrame, required: Sequence[str], label: str) -
 
 def _outcome_free(value: Any) -> bool:
     if isinstance(value, Mapping):
-        return all(
-            str(key).casefold() not in _OUTCOME_KEYS and _outcome_free(item)
-            for key, item in value.items()
-        )
+        for key, item in value.items():
+            if str(key).casefold() == "outcome_used":
+                if item is not False:
+                    return False
+                continue
+            if _is_outcome_key(key) or not _outcome_free(item):
+                return False
+        return True
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return all(_outcome_free(item) for item in value)
     return True
 
 
-def build_identity_crosswalk(
+def _is_outcome_key(value: Any) -> bool:
+    text = str(value).casefold()
+    tokens = [token for token in re.split(r"[^a-z0-9]+", text) if token]
+    compact = "".join(tokens)
+    return any(token in _OUTCOME_KEY_TOKENS for token in tokens) or any(
+        compact.startswith(prefix) or compact.endswith(prefix)
+        for prefix in ("final", "outcome", "result", "winner")
+    )
+
+
+def _allowed_keys(value: Any, allowed: set[str], label: str) -> None:
+    if not isinstance(value, Mapping) or set(map(str, value)) - allowed:
+        raise IdentityCrosswalkError(f"{label} schema is invalid")
+
+
+def _closed_crosswalk_schema(crosswalk: Mapping[str, Any]) -> None:
+    if set(crosswalk) != _CROSSWALK_FIELDS:
+        raise IdentityCrosswalkError("identity crosswalk schema is not closed")
+    _allowed_keys(crosswalk.get("method"), {
+        "accepted_identity_prefixes", "anonymous_ids_allowed",
+        "model_eligibility_changed", "outcome_used", "target_timestamp_field",
+        "timestamp_rule",
+    }, "identity method")
+    _allowed_keys(crosswalk.get("counts"), {
+        "accepted_game_count", "candidate_game_count",
+        "candidate_player_assignment_count", "candidate_team_assignment_count",
+        "rejected_game_count", "unresolved_reason_counts",
+    }, "identity counts")
+    for assignment in crosswalk.get("assignments") or ():
+        _allowed_keys(assignment, {
+            "game_id", "outcome_used", "player_assignments", "target_timestamp",
+            "team_assignments",
+        }, "identity assignment")
+        for row in assignment.get("player_assignments") or ():
+            _allowed_keys(row, {
+                "candidate_key_type", "evidence", "first_seen_timestamp",
+                "outcome_used", "player_id", "player_name", "role", "side",
+                "team_id",
+            }, "identity player assignment")
+            for evidence in row.get("evidence") or ():
+                _allowed_keys(evidence, {"game_id", "outcome_used", "timestamp"}, "identity evidence")
+        for row in assignment.get("team_assignments") or ():
+            _allowed_keys(row, {
+                "candidate_key_type", "evidence", "first_seen_timestamp",
+                "outcome_used", "side", "team_id", "team_name",
+            }, "identity team assignment")
+            for evidence in row.get("evidence") or ():
+                _allowed_keys(evidence, {"game_id", "outcome_used", "timestamp"}, "identity evidence")
+    for rejected in crosswalk.get("rejected") or ():
+        _allowed_keys(rejected, {
+            "game_id", "outcome_used", "player_rejections", "reasons",
+            "target_timestamp", "team_rejections",
+        }, "identity rejection")
+        for row in rejected.get("player_rejections") or ():
+            _allowed_keys(row, {
+                "candidate_ids", "candidate_key_type", "outcome_used",
+                "player_name", "reason", "role", "side",
+            }, "identity player rejection")
+        for row in rejected.get("team_rejections") or ():
+            _allowed_keys(row, {
+                "candidate_ids", "candidate_key_type", "outcome_used", "reason",
+                "side", "team_name",
+            }, "identity team rejection")
+
+
+def _build_identity_crosswalk(
     *,
     maps: pd.DataFrame | Sequence[Mapping[str, Any]],
     players: pd.DataFrame | Sequence[Mapping[str, Any]],
     teams: pd.DataFrame | Sequence[Mapping[str, Any]],
     source_receipt: Mapping[str, Any],
+    source_receipt_file_record: Mapping[str, Any] | None = None,
+    trusted_source_receipt_file_sha256: str | None = None,
     source_file_records: Mapping[str, Mapping[str, Any]] | None = None,
     source_records: Mapping[str, Mapping[str, Any]] | None = None,
+    _verify_replay: bool = True,
 ) -> dict[str, Any]:
     """Build strict-prior identity candidates for every accepted map.
 
@@ -571,11 +760,16 @@ def build_identity_crosswalk(
 
     if source_file_records is not None and source_records is not None:
         raise IdentityCrosswalkError("source file records were supplied twice")
+    source_receipt, receipt_file = _bound_source_receipt(
+        source_receipt,
+        source_receipt_file_record,
+        trusted_source_receipt_file_sha256,
+    )
     accepted_ids, source_as_of, source_identity, source_receipt_hash = _source_receipt(source_receipt)
     records = _source_records(source_receipt, source_file_records or source_records)
-    maps_frame = _frame(maps, "maps")
-    players_frame = _frame(players, "players")
-    teams_frame = _frame(teams, "teams")
+    maps_frame = _frame_from_verified_file(maps, records["maps"], "maps")
+    players_frame = _frame_from_verified_file(players, records["players"], "players")
+    teams_frame = _frame_from_verified_file(teams, records["teams"], "teams")
     map_game_column = _game_column(maps_frame, "maps")
     player_game_column = _game_column(players_frame, "players")
     team_game_column = _game_column(teams_frame, "teams")
@@ -632,7 +826,9 @@ def build_identity_crosswalk(
         "side",
         "position",
     ]
-    player_history_frame = players_frame[player_history_columns].copy()
+    player_history_frame = players_frame.loc[
+        player_ids.isin(accepted_set), player_history_columns
+    ].copy()
     if "league" not in player_history_frame.columns:
         player_history_frame["league"] = ""
     player_history_rows = _history_rows(
@@ -648,14 +844,14 @@ def build_identity_crosswalk(
         role_column="position",
     )
     team_history_frames: list[pd.DataFrame] = []
-    for frame, game_column, date_column in (
-        (players_frame, player_game_column, player_date_column),
-        (teams_frame, team_game_column, team_date_column),
+    for frame, frame_ids, game_column, date_column in (
+        (players_frame, player_ids, player_game_column, player_date_column),
+        (teams_frame, team_ids, team_game_column, team_date_column),
     ):
         columns = [game_column, date_column, "teamid", "teamname", "side"]
         if "league" in frame.columns:
             columns.append("league")
-        selected = frame[columns].copy()
+        selected = frame.loc[frame_ids.isin(accepted_set), columns].copy()
         selected = selected.rename(columns={game_column: "__game", date_column: "__date"})
         if "league" not in selected.columns:
             selected["league"] = ""
@@ -941,6 +1137,7 @@ def build_identity_crosswalk(
         "source_game_count": len(accepted_ids),
         "source_identity_sha256": source_identity,
         "source_receipt_sha256": source_receipt_hash,
+        "source_receipt_file": receipt_file,
         "accepted_game_ids": list(accepted_ids),
         "source_file_records": records,
         "candidate_key_types": [
@@ -965,8 +1162,41 @@ def build_identity_crosswalk(
         "rejected": rejected,
     }
     payload["receipt_sha256"] = canonical_sha256(payload)
-    verify_identity_crosswalk(payload, source_receipt=source_receipt, source_file_records=records)
+    if _verify_replay:
+        verify_identity_crosswalk(
+            payload,
+            source_receipt=source_receipt,
+            source_receipt_file_record=receipt_file,
+            trusted_source_receipt_file_sha256=receipt_file["sha256"],
+            source_file_records=records,
+        )
     return payload
+
+
+def build_identity_crosswalk(
+    *,
+    maps: pd.DataFrame | Sequence[Mapping[str, Any]],
+    players: pd.DataFrame | Sequence[Mapping[str, Any]],
+    teams: pd.DataFrame | Sequence[Mapping[str, Any]],
+    source_receipt: Mapping[str, Any],
+    source_receipt_file_record: Mapping[str, Any] | None = None,
+    trusted_source_receipt_file_sha256: str | None = None,
+    source_file_records: Mapping[str, Mapping[str, Any]] | None = None,
+    source_records: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build and replay-verify a frozen-source identity crosswalk."""
+
+    return _build_identity_crosswalk(
+        maps=maps,
+        players=players,
+        teams=teams,
+        source_receipt=source_receipt,
+        source_receipt_file_record=source_receipt_file_record,
+        trusted_source_receipt_file_sha256=trusted_source_receipt_file_sha256,
+        source_file_records=source_file_records,
+        source_records=source_records,
+        _verify_replay=True,
+    )
 
 
 def _verify_evidence(
@@ -994,6 +1224,8 @@ def verify_identity_crosswalk(
     crosswalk: Mapping[str, Any],
     *,
     source_receipt: Mapping[str, Any],
+    source_receipt_file_record: Mapping[str, Any] | None = None,
+    trusted_source_receipt_file_sha256: str | None = None,
     source_file_records: Mapping[str, Mapping[str, Any]] | None = None,
     source_records: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> None:
@@ -1005,10 +1237,18 @@ def verify_identity_crosswalk(
 
     if not isinstance(crosswalk, Mapping):
         raise IdentityCrosswalkError("identity crosswalk is required")
+    source_receipt, receipt_file = _bound_source_receipt(
+        source_receipt,
+        source_receipt_file_record,
+        trusted_source_receipt_file_sha256,
+    )
     accepted, source_as_of, source_identity, source_receipt_hash = _source_receipt(source_receipt)
     records = _source_records(source_receipt, source_file_records or source_records)
     if crosswalk.get("schema_version") != SCHEMA_VERSION or crosswalk.get("status") != STATUS:
         raise IdentityCrosswalkError("identity crosswalk schema or status is invalid")
+    if not _outcome_free(crosswalk):
+        raise IdentityCrosswalkError("identity crosswalk contains outcome fields")
+    _closed_crosswalk_schema(crosswalk)
     if dict(crosswalk.get("authority") or {}) != AUTHORITY:
         raise IdentityCrosswalkError("identity crosswalk authority is invalid")
     claimed = _hash(crosswalk.get("receipt_sha256"))
@@ -1023,13 +1263,12 @@ def verify_identity_crosswalk(
         or crosswalk.get("source_game_count") != len(accepted)
         or crosswalk.get("source_identity_sha256") != source_identity
         or crosswalk.get("source_receipt_sha256") != source_receipt_hash
+        or dict(crosswalk.get("source_receipt_file") or {}) != receipt_file
         or _timestamp(crosswalk.get("source_as_of"), label="crosswalk source_as_of") != source_as_of
     ):
         raise IdentityCrosswalkError("identity crosswalk source binding is invalid")
     if dict(crosswalk.get("source_file_records") or {}) != records:
         raise IdentityCrosswalkError("identity crosswalk source file binding is invalid")
-    if not _outcome_free(crosswalk):
-        raise IdentityCrosswalkError("identity crosswalk contains outcome fields")
     assignments = crosswalk.get("assignments")
     rejected = crosswalk.get("rejected")
     if not isinstance(assignments, Sequence) or isinstance(assignments, (str, bytes, bytearray)):
@@ -1130,6 +1369,20 @@ def verify_identity_crosswalk(
             raise IdentityCrosswalkError("identity rejection reason is missing")
     if set(seen_games) - set(accepted):
         raise IdentityCrosswalkError("identity crosswalk contains unknown maps")
+    expected = _build_identity_crosswalk(
+        maps=_load_source_frame(records["maps"], "maps"),
+        players=_load_source_frame(records["players"], "players"),
+        teams=_load_source_frame(records["teams"], "teams"),
+        source_receipt=source_receipt,
+        source_receipt_file_record=receipt_file,
+        trusted_source_receipt_file_sha256=receipt_file["sha256"],
+        source_file_records=records,
+        _verify_replay=False,
+    )
+    if dict(crosswalk) != expected:
+        raise IdentityCrosswalkError(
+            "identity crosswalk does not match verified source-row replay"
+        )
 
 
 # Descriptive aliases keep callers explicit while allowing the module to be

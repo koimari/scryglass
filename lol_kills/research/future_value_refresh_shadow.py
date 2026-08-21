@@ -32,6 +32,7 @@ SCHEMA_VERSION = "scryglass:future-value-refresh-shadow:v1"
 RECEIPT_DIRECTORY = Path("data/lol/runtime/future-value-shadow")
 ARTIFACT_NAMES = ("model", "snapshot", "tier", "draft")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 AUTHORITY: dict[str, bool] = {
     "research_only": True,
@@ -76,11 +77,30 @@ def _sha256_bytes(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _safe_regular_file(path: Path) -> Path:
+    candidate = path.expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    current = Path(candidate.anchor)
+    for part in candidate.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise FutureValueShadowError(f"artifact is missing or unsafe: {path}")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as error:
+        raise FutureValueShadowError(
+            f"artifact is missing or unsafe: {path}"
+        ) from error
+    if not resolved.is_file():
+        raise FutureValueShadowError(f"artifact is missing or unsafe: {path}")
+    return resolved
+
+
 def sha256_path(path: Path) -> str:
     """Hash one regular, non-symlink file."""
 
-    if path.is_symlink() or not path.is_file():
-        raise FutureValueShadowError(f"artifact is missing or unsafe: {path}")
+    path = _safe_regular_file(path)
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -120,7 +140,14 @@ def _safe_ids(values: object) -> tuple[tuple[str, ...], bool, bool]:
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    current = Path(path.anchor)
+    for part in path.parts[1:-1]:
+        current = current / part
+        if current.is_symlink():
+            raise FutureValueShadowError(f"shadow receipt path is unsafe: {path}")
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    if temporary.exists() or temporary.is_symlink() or path.is_symlink():
+        raise FutureValueShadowError(f"shadow receipt path is unsafe: {path}")
     temporary.write_bytes(_canonical_json_bytes(value) + b"\n")
     os.replace(temporary, path)
 
@@ -134,7 +161,7 @@ def _artifact_record(name: str, value: object, blockers: list[str]) -> dict[str,
     if isinstance(value, Mapping):
         raw_path = value.get("path") or value.get("locator")
         if isinstance(raw_path, str) and raw_path.strip():
-            path = Path(raw_path).expanduser().resolve()
+            path = Path(raw_path).expanduser()
         claimed = _hash(
             value.get("sha256") or value.get("artifact_sha256") or value.get("raw_sha256"),
             f"{name} artifact",
@@ -143,16 +170,17 @@ def _artifact_record(name: str, value: object, blockers: list[str]) -> dict[str,
         if SHA256_RE.fullmatch(value.lower()):
             claimed = value.lower()
         elif value.strip():
-            path = Path(value).expanduser().resolve()
+            path = Path(value).expanduser()
 
     if path is not None:
-        record["path"] = str(path)
         try:
-            actual = sha256_path(path)
+            safe_path = _safe_regular_file(path)
+            actual = sha256_path(safe_path)
         except (OSError, FutureValueShadowError):
             blockers.append(f"{name}_artifact_unavailable")
             return record
-        record["bytes"] = int(path.stat().st_size)
+        record["path"] = str(safe_path)
+        record["bytes"] = int(safe_path.stat().st_size)
         record["sha256"] = actual
         if claimed is not None and claimed != actual:
             blockers.append(f"{name}_artifact_hash_mismatch")
@@ -238,11 +266,12 @@ def _source_binding(
     source_receipt = _hash(source_receipt_sha256, "source receipt")
     source_file: dict[str, Any] | None = None
     if accepted_source_receipt_path is not None:
-        source_file = {"path": str(accepted_source_receipt_path)}
         try:
-            source_file["bytes"] = int(accepted_source_receipt_path.stat().st_size)
-            source_file["sha256"] = sha256_path(accepted_source_receipt_path)
-            payload = load_refresh_receipt(accepted_source_receipt_path)
+            safe_receipt_path = _safe_regular_file(accepted_source_receipt_path)
+            source_file = {"path": str(safe_receipt_path)}
+            source_file["bytes"] = int(safe_receipt_path.stat().st_size)
+            source_file["sha256"] = sha256_path(safe_receipt_path)
+            payload = load_refresh_receipt(safe_receipt_path)
         except (OSError, FutureValueShadowError, OeDownloadError):
             blockers.append("accepted_source_receipt_unavailable")
         else:
@@ -277,8 +306,22 @@ def _source_binding(
 
 
 def _receipt_path(runtime_root: Path, run_id: str) -> Path:
-    root = runtime_root.resolve()
-    return root / RECEIPT_DIRECTORY / run_id / "future-value-shadow-receipt.json"
+    if (
+        not isinstance(run_id, str)
+        or run_id in {".", ".."}
+        or RUN_ID_RE.fullmatch(run_id) is None
+    ):
+        raise FutureValueShadowError("shadow run_id is unsafe")
+    root = runtime_root.expanduser().resolve()
+    result = root / RECEIPT_DIRECTORY / run_id / "future-value-shadow-receipt.json"
+    if not result.is_relative_to(root):
+        raise FutureValueShadowError("shadow receipt path escapes runtime root")
+    current = root
+    for part in result.relative_to(root).parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            raise FutureValueShadowError("shadow receipt path contains a symlink")
+    return result
 
 
 def run_future_value_refresh_shadow(
@@ -321,7 +364,9 @@ def run_future_value_refresh_shadow(
     rating_identity = _hash(
         ratings.get("source_identity_sha256"), "current ratings identity"
     )
-    if rating_identity is not None and source["source_identity_sha256"] not in {
+    if rating_identity is None:
+        blockers.append("current_ratings_source_identity_missing")
+    elif source["source_identity_sha256"] not in {
         None,
         rating_identity,
     }:

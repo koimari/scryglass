@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from lol_kills.research.future_value_refresh_shadow import (
+    FutureValueShadowError,
     FutureValueShadowPromotionError,
     run_future_value_refresh_shadow,
     reject_unauthorized_promotion,
@@ -120,6 +121,16 @@ def test_source_identity_and_hash_drift_stays_blocked(tmp_path: Path) -> None:
     assert "current_ratings_source_identity_mismatch" in result["blockers"]
 
 
+def test_missing_current_rating_identity_stays_blocked(tmp_path: Path) -> None:
+    values = _inputs(tmp_path)
+    values["current_ratings"] = {"status": "published", "pack_id": "fixture"}
+
+    result = run_future_value_refresh_shadow(runtime_root=tmp_path, **values)
+
+    assert result["status"] == "research_only_blocked"
+    assert "current_ratings_source_identity_missing" in result["blockers"]
+
+
 def test_artifact_hash_mismatch_stays_blocked_and_does_not_copy(tmp_path: Path) -> None:
     values = _inputs(tmp_path)
     artifact = tmp_path / "model.json"
@@ -159,6 +170,80 @@ def test_tampered_accepted_source_receipt_is_blocked(tmp_path: Path) -> None:
 
     assert result["status"] == "research_only_blocked"
     assert "accepted_source_receipt_unavailable" in result["blockers"]
+
+
+@pytest.mark.parametrize("run_id", ["../escape", "nested/run", "/tmp/escape", ".", ".."])
+def test_run_id_is_a_safe_basename(tmp_path: Path, run_id: str) -> None:
+    with pytest.raises(FutureValueShadowError, match="run_id is unsafe"):
+        run_future_value_refresh_shadow(
+            runtime_root=tmp_path,
+            run_id=run_id,
+            **_inputs(tmp_path),
+        )
+    assert not (tmp_path.parent / "escape" / "future-value-shadow-receipt.json").exists()
+
+
+def test_artifact_leaf_and_ancestor_symlinks_are_blocked(tmp_path: Path) -> None:
+    values = _inputs(tmp_path)
+    target = tmp_path / "model.json"
+    leaf = tmp_path / "model-link.json"
+    leaf.symlink_to(target)
+    values["artifacts"] = {**values["artifacts"], "model": str(leaf)}  # type: ignore[dict-item]
+
+    leaf_result = run_future_value_refresh_shadow(
+        runtime_root=tmp_path, run_id="leaf-link", **values
+    )
+
+    assert "model_artifact_unavailable" in leaf_result["blockers"]
+
+    real_dir = tmp_path / "real-artifacts"
+    real_dir.mkdir()
+    nested_target = real_dir / "model.json"
+    nested_target.write_text("model", encoding="utf-8")
+    linked_dir = tmp_path / "linked-artifacts"
+    linked_dir.symlink_to(real_dir, target_is_directory=True)
+    values["artifacts"] = {
+        **values["artifacts"],  # type: ignore[dict-item]
+        "model": str(linked_dir / "model.json"),
+    }
+
+    ancestor_result = run_future_value_refresh_shadow(
+        runtime_root=tmp_path, run_id="ancestor-link", **values
+    )
+
+    assert "model_artifact_unavailable" in ancestor_result["blockers"]
+
+
+def test_accepted_receipt_symlink_is_blocked(tmp_path: Path) -> None:
+    values = _inputs(tmp_path)
+    receipt = Path(str(values["accepted_source_receipt_path"]))
+    linked = tmp_path / "accepted-source-link.json"
+    linked.symlink_to(receipt)
+    values["accepted_source_receipt_path"] = linked
+
+    result = run_future_value_refresh_shadow(
+        runtime_root=tmp_path, run_id="source-link", **values
+    )
+
+    assert "accepted_source_receipt_unavailable" in result["blockers"]
+
+
+def test_runtime_output_ancestor_symlink_is_rejected(tmp_path: Path) -> None:
+    input_root = tmp_path / "inputs"
+    input_root.mkdir()
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (runtime_root / "data").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(FutureValueShadowError, match="contains a symlink"):
+        run_future_value_refresh_shadow(
+            runtime_root=runtime_root,
+            run_id="safe-name",
+            **_inputs(input_root),
+        )
+    assert not list(outside.rglob("future-value-shadow-receipt.json"))
 
 
 def test_duplicate_source_ids_are_rejected_without_silent_deduplication(
