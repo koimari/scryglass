@@ -6323,6 +6323,7 @@ def evaluate_future_value(
     variant: RatingVariant | str | None = None,
     feature_ledger: pd.DataFrame | Mapping[Any, pd.DataFrame] | None = None,
     inner_feature_ledger: pd.DataFrame | Mapping[Any, pd.DataFrame] | None = None,
+    verified_model_frame: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """Run a development-only chronological whole-series evaluation."""
 
@@ -6338,7 +6339,26 @@ def evaluate_future_value(
             )
         feature_ledger = nested_outer
         inner_feature_ledger = nested_inner
-    if maps.attrs.get("verified_leaguepedia_series_crosswalk") is not None:
+    if verified_model_frame is not None:
+        map_frame = verified_model_frame.copy()
+        required_verified = {"game_id", "date", "target", "series_id"}
+        if not required_verified.issubset(map_frame.columns):
+            raise FutureValueSourceError("verified model frame is incomplete")
+        raw_ids = set(_frame_game_ids(maps, "maps").astype(str))
+        model_ids = set(map_frame["game_id"].astype(str))
+        if raw_ids != model_ids:
+            raise FutureValueSourceError(
+                "verified model frame does not match the supplied maps"
+            )
+        if map_frame.attrs.get("series_cluster_source") != LEAGUEPEDIA_CROSSWALK_SOURCE:
+            raise FutureValueSourceError("verified model frame series source changed")
+        if map_frame.attrs.get("crosswalk_receipt_file_sha256") != str(
+            crosswalk_receipt_file_sha256
+        ):
+            raise FutureValueSourceError(
+                "verified model frame crosswalk receipt changed"
+            )
+    elif maps.attrs.get("verified_leaguepedia_series_crosswalk") is not None:
         map_frame = _map_model_frame(
             maps,
             verified_source_receipt=(
@@ -6359,8 +6379,10 @@ def evaluate_future_value(
         map_frame,
         require_full_eligible_set=True,
     )
-    if isinstance(maps.attrs.get("verified_series_receipt"), Mapping) or isinstance(
+    if verified_model_frame is None and (
+        isinstance(maps.attrs.get("verified_series_receipt"), Mapping) or isinstance(
         maps.attrs.get("verified_leaguepedia_series_crosswalk"), Mapping
+        )
     ):
         map_frame = _map_model_frame(
             maps,

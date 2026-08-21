@@ -30,6 +30,7 @@ from lol_kills.research.future_value_rating import (
     bind_accepted_future_value_source,
     bind_verified_leaguepedia_series_crosswalk,
     evaluate_future_value,
+    _map_model_frame,
     rating_variant_config_receipt,
     validate_future_value_source_receipt_payload,
     write_source_receipt,
@@ -765,6 +766,7 @@ def run_model_evaluation(
     if not isinstance(normalized_contract, Mapping):
         raise FutureValueTrainingError("normalized source file contract is missing")
     frames: dict[str, pd.DataFrame] = {}
+    verified_series_model_frame: pd.DataFrame | None = None
     eligible_ids = set(str(value) for value in source_receipt["model_eligible_game_ids"])
     for label, path in paths.items():
         if not path.is_file() or path.is_symlink():
@@ -777,6 +779,28 @@ def run_model_evaluation(
         ):
             raise FutureValueTrainingError(f"normalized model source changed: {label}")
         frame = pd.read_parquet(path)
+        if label == "maps" and crosswalk_path is not None and crosswalk_receipt_path is not None:
+            bound_full_maps = bind_verified_leaguepedia_series_crosswalk(
+                frame,
+                crosswalk_path=crosswalk_path,
+                receipt_path=crosswalk_receipt_path,
+                source_receipt=source_receipt,
+                expected_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+            )
+            full_series_frame = _map_model_frame(
+                bound_full_maps,
+                verified_source_receipt=source_receipt,
+                verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+                verified_crosswalk_receipt_file_sha256=str(
+                    crosswalk_receipt_file_sha256
+                ),
+            )
+            verified_series_model_frame = full_series_frame[
+                full_series_frame["game_id"].astype(str).isin(eligible_ids)
+            ].copy()
+            verified_series_model_frame.attrs["crosswalk_receipt_file_sha256"] = str(
+                crosswalk_receipt_file_sha256
+            )
         ids = _row_game_ids(frame, label)
         selected = frame.loc[ids.isin(eligible_ids)].copy()
         selected["game_uid"] = ids.loc[selected.index].to_numpy()
@@ -799,13 +823,12 @@ def run_model_evaluation(
             raise FutureValueTrainingError(
                 "crosswalk receipt hash does not match the feature bundle"
             )
-        frames["maps"] = bind_verified_leaguepedia_series_crosswalk(
-            frames["maps"],
-            crosswalk_path=crosswalk_path,
-            receipt_path=crosswalk_receipt_path,
-            source_receipt=source_receipt,
-            expected_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
-        )
+        if verified_series_model_frame is None or set(
+            verified_series_model_frame["game_id"].astype(str)
+        ) != eligible_ids:
+            raise FutureValueTrainingError(
+                "verified crosswalk model frame does not match the eligible census"
+            )
         crosswalk_runtime_binding = {
             "artifact": {
                 "path": str(crosswalk_path),
@@ -861,6 +884,7 @@ def run_model_evaluation(
                 source_receipt_file_sha256=receipt_file_hash,
                 runtime_receipt_path=str(runtime_receipt_path),
                 crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+                verified_model_frame=verified_series_model_frame,
             )
         else:
             variant_results: dict[str, Any] = {}
@@ -894,6 +918,7 @@ def run_model_evaluation(
                     feature_ledger=variant_ledger,
                     inner_feature_ledger=inner_variant_ledger,
                     crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+                    verified_model_frame=verified_series_model_frame,
                 )
             result = {
                 "schema_version": "scryglass:future-value-four-variant-evaluation:v1",
