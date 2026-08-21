@@ -371,6 +371,14 @@ def test_rank_diff_artifact_carries_rank_coverage(tmp_path) -> None:
         receipt={
             "source": {"source_receipt_sha256": "a" * 64},
             "rank_coverage": {"player": coverage, "team": {}},
+            "current_rating_inputs": {
+                "schema_version": "scryglass:future-value-current-rating-input-binding:v1",
+                "receipt": {"sha256": "d" * 64, "receipt_sha256": "e" * 64},
+                "snapshots": {
+                    "player": {"value_digest_sha256": "f" * 64},
+                    "team": {"value_digest_sha256": "0" * 64},
+                },
+            },
         },
     )
 
@@ -381,3 +389,4 @@ def test_rank_diff_artifact_carries_rank_coverage(tmp_path) -> None:
     assert payload["rows"]
     assert payload["source_receipt_sha256"] == "a" * 64
     assert payload["rank_coverage"] == coverage
+    assert payload["current_rating_inputs"] == result.receipt["current_rating_inputs"]

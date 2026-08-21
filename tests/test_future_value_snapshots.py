@@ -9,7 +9,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from benchmarks.build_future_value_snapshots import _verify_source_inputs
+from benchmarks.build_future_value_snapshots import (
+    _canonical_json_bytes as _snapshot_canonical_json_bytes,
+    _snapshot_schema_digest,
+    _snapshot_value_digest,
+    _verify_current_rating_inputs,
+    _verify_source_inputs,
+)
 from lol_kills.research.future_value_rating import (
     FORM_METRICS,
     RATING_VARIANT_SCHEMA_VERSION,
@@ -381,3 +387,117 @@ def test_snapshot_cli_rejects_mutated_player_bytes(tmp_path: Path) -> None:
             source,
             expected_source_receipt_sha256=expected_receipt_hash,
         )
+
+
+def _write_current_snapshot_receipt(
+    tmp_path: Path,
+    source: dict[str, object],
+) -> tuple[Path, Path, Path, dict[str, object], str]:
+    current_root = tmp_path / "current"
+    (current_root / "player").mkdir(parents=True)
+    (current_root / "team").mkdir()
+    player = pd.DataFrame(
+        {
+            "player": ["Alpha", "Beta"],
+            "player_id": ["oe:player:a", "oe:player:b"],
+            "team_id": ["oe:team:t", "oe:team:u"],
+            "mu_effective": [100.0, 90.0],
+        }
+    )
+    team = pd.DataFrame(
+        {
+            "team": ["Team A", "Team B"],
+            "team_id": ["oe:team:t", "oe:team:u"],
+            "mu_effective": [100.0, 90.0],
+        }
+    )
+    player_path = current_root / "player/player_ratings_snapshot.parquet"
+    team_path = current_root / "team/ratings_snapshot.parquet"
+    player.to_parquet(player_path, index=False)
+    team.to_parquet(team_path, index=False)
+
+    def record(frame: pd.DataFrame, path: Path, identity_column: str) -> dict[str, object]:
+        raw = path.read_bytes()
+        return {
+            "locator": path.relative_to(current_root).as_posix(),
+            "bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "rows": len(frame),
+            "columns": [str(column) for column in frame.columns],
+            "dtypes": {str(column): str(frame[column].dtype) for column in frame.columns},
+            "schema_sha256": _snapshot_schema_digest(frame),
+            "identity_column": identity_column,
+            "value_column": "mu_effective",
+            "value_digest_sha256": _snapshot_value_digest(
+                frame, identity_column=identity_column, value_column="mu_effective"
+            ),
+        }
+
+    receipt = {
+        "schema_version": "scryglass:current-rating-snapshot-receipt:v1",
+        "source_receipt_sha256": source["receipt_sha256"],
+        "source_identity_sha256": source["source_identity_sha256"],
+        "source_as_of": source["source_as_of"],
+        "source_game_count": source["source_game_count"],
+        "snapshots": {
+            "player": record(player, player_path, "player_id"),
+            "team": record(team, team_path, "team_id"),
+        },
+    }
+    receipt["receipt_sha256"] = hashlib.sha256(
+        _snapshot_canonical_json_bytes(receipt)
+    ).hexdigest()
+    receipt_path = current_root / "current-rating-snapshot-receipt.json"
+    receipt_path.write_bytes(_snapshot_canonical_json_bytes(receipt))
+    return current_root, receipt_path, player_path, receipt, hashlib.sha256(
+        receipt_path.read_bytes()
+    ).hexdigest()
+
+
+def test_snapshot_cli_requires_independent_current_receipt_for_mutated_values(
+    tmp_path: Path,
+) -> None:
+    source = _source_receipt(["g1", "g2"])
+    current_root, receipt_path, player_path, receipt, original_receipt_hash = (
+        _write_current_snapshot_receipt(tmp_path, source)
+    )
+    _verify_current_rating_inputs(
+        current_root,
+        receipt_path,
+        receipt,
+        source_receipt=source,
+        expected_current_receipt_sha256=original_receipt_hash,
+    )
+
+    mutated = pd.read_parquet(player_path)
+    mutated.loc[1, "mu_effective"] = 110.0
+    mutated.to_parquet(player_path, index=False)
+    receipt["snapshots"]["player"]["sha256"] = hashlib.sha256(
+        player_path.read_bytes()
+    ).hexdigest()
+    receipt["snapshots"]["player"]["bytes"] = player_path.stat().st_size
+    receipt["snapshots"]["player"]["value_digest_sha256"] = _snapshot_value_digest(
+        mutated, identity_column="player_id", value_column="mu_effective"
+    )
+    receipt.pop("receipt_sha256")
+    receipt["receipt_sha256"] = hashlib.sha256(
+        _snapshot_canonical_json_bytes(receipt)
+    ).hexdigest()
+    receipt_path.write_bytes(_snapshot_canonical_json_bytes(receipt))
+
+    with pytest.raises(FutureValueSnapshotError, match="receipt file hash changed"):
+        _verify_current_rating_inputs(
+            current_root,
+            receipt_path,
+            receipt,
+            source_receipt=source,
+            expected_current_receipt_sha256=original_receipt_hash,
+        )
+    updated_receipt_hash = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    _verify_current_rating_inputs(
+        current_root,
+        receipt_path,
+        receipt,
+        source_receipt=source,
+        expected_current_receipt_sha256=updated_receipt_hash,
+    )

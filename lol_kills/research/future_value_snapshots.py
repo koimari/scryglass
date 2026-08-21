@@ -1215,6 +1215,7 @@ def _blocked_result(
     authorization: FinalFitAuthorization,
     *,
     extra_blockers: Iterable[str] = (),
+    current_rating_inputs: Mapping[str, Any] | None = None,
 ) -> FutureValueSnapshotResult:
     blockers = tuple(sorted(set(authorization.blockers) | set(extra_blockers)))
     payload: dict[str, Any] = {
@@ -1231,6 +1232,8 @@ def _blocked_result(
         "blockers": list(blockers),
         "tierlists": {"recalculated": False, "status": "unchanged"},
     }
+    if current_rating_inputs is not None:
+        payload["current_rating_inputs"] = dict(current_rating_inputs)
     payload["receipt_sha256"] = _sha256_bytes(_canonical_json_bytes(payload))
     return FutureValueSnapshotResult(
         "blocked", blockers, (), (), (), (), payload
@@ -1247,6 +1250,7 @@ def build_future_value_snapshots(
     model_receipt: Mapping[str, Any] | None = None,
     current_player_ratings: pd.DataFrame | None = None,
     current_team_ratings: pd.DataFrame | None = None,
+    current_rating_inputs: Mapping[str, Any] | None = None,
     as_of: Any | None = None,
     baseline_cache: Any | None = None,
 ) -> FutureValueSnapshotResult:
@@ -1272,9 +1276,15 @@ def build_future_value_snapshots(
             source_receipt,
             auth,
             extra_blockers=computation_blockers,
+            current_rating_inputs=current_rating_inputs,
         )
     if model is None:
-        return _blocked_result(source_receipt, auth, extra_blockers=("final_fit_model_object_missing",))
+        return _blocked_result(
+            source_receipt,
+            auth,
+            extra_blockers=("final_fit_model_object_missing",),
+            current_rating_inputs=current_rating_inputs,
+        )
 
     form = _latest_player_form(map_frame, player_frame, baseline_cache=baseline_cache)
     form = form[form["date"].le(cutoff)].copy()
@@ -1564,6 +1574,8 @@ def build_future_value_snapshots(
         "blockers": list(blockers),
         "tierlists": {"recalculated": False, "status": "unchanged"},
     }
+    if current_rating_inputs is not None:
+        payload["current_rating_inputs"] = dict(current_rating_inputs)
     payload["receipt_sha256"] = _sha256_bytes(_canonical_json_bytes(payload))
     return FutureValueSnapshotResult(
         "research_only" if not blockers else "research_only_partial",
@@ -1610,6 +1622,10 @@ def write_snapshot_bundle(destination: Path, result: FutureValueSnapshotResult) 
                 payload["rank_coverage"] = dict(
                     result.receipt.get("rank_coverage", {}).get(scope, {})
                 )
+                if result.receipt.get("current_rating_inputs") is not None:
+                    payload["current_rating_inputs"] = dict(
+                        result.receipt["current_rating_inputs"]
+                    )
         else:
             payload = dict(result.receipt)
         path.write_text(
