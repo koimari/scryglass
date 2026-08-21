@@ -283,6 +283,7 @@ def test_benchmark_verifies_strict_prior_atom_and_form_receipts(tmp_path) -> Non
             {"game_id": "g2", "date": "2026-01-03T12:00:00Z", "fit_through": "2026-01-02T12:00:00Z", "status": "available", "edge_components": {"base": 1.0, "ally_synergy": 2.0, "enemy_counter": 3.0, "same_role": 4.0, "archetype_interactions": 5.0, "total": 15.0}},
         ],
     }
+    atom_payload["rows_sha256"] = _sha_bytes(_canonical(atom_payload["rows"]))
     atom_payload["artifact_sha256"] = _sha_bytes(_canonical(atom_payload))
     atom_path = tmp_path / "atoms.json"
     atom_path.write_bytes(_canonical(atom_payload) + b"\n")
@@ -307,6 +308,7 @@ def test_benchmark_verifies_strict_prior_atom_and_form_receipts(tmp_path) -> Non
             {"game_id": "g2", "date": "2026-01-03T12:00:00Z", "fit_through": "2026-01-02T12:00:00Z", "status": "available", "future_player_form_logit": 0.25},
         ],
     }
+    form_payload["rows_sha256"] = _sha_bytes(_canonical(form_payload["rows"]))
     form_payload["artifact_sha256"] = _sha_bytes(_canonical(form_payload))
     form_path = tmp_path / "form.json"
     form_path.write_bytes(_canonical(form_payload) + b"\n")

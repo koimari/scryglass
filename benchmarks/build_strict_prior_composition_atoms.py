@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 import hashlib
 import json
@@ -692,6 +692,7 @@ def build_artifacts(
         "coverage": audit["coverage"],
         "score_audit": audit["score_audit"],
         "rows": rows,
+        "rows_sha256": _sha_bytes(_canonical(rows)),
     }
     atom_payload["artifact_sha256"] = _sha_bytes(_canonical(atom_payload))
     form_payload: dict[str, Any] = {
@@ -722,6 +723,7 @@ def build_artifacts(
             "unavailable_row_count": sum(row["status"] != "available" for row in form_rows),
         },
         "rows": form_rows,
+        "rows_sha256": _sha_bytes(_canonical(form_rows)),
     }
     form_payload["artifact_sha256"] = _sha_bytes(_canonical(form_payload))
     atom_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -738,19 +740,295 @@ def build_artifacts(
     }
 
 
+def _fold_spec(path: Path, fold: int) -> tuple[tuple[str, ...], tuple[str, ...], pd.Timestamp]:
+    payload = _load_json(path / f"fold-{fold}-spec.json", f"fold {fold} specification")
+    train_ids = tuple(sorted(str(value) for value in payload.get("train_game_ids", [])))
+    validation_ids = tuple(sorted(str(value) for value in payload.get("validation_game_ids", [])))
+    cutoff = pd.to_datetime(payload.get("fit_window_end"), utc=True, errors="coerce")
+    if not train_ids or not validation_ids or set(train_ids) & set(validation_ids) or pd.isna(cutoff):
+        raise StrictPriorAtomError(f"fold {fold} specification is invalid")
+    return train_ids, validation_ids, pd.Timestamp(cutoff)
+
+
+def _unavailable_atom_row(game_id: str, date: object, reason: str) -> dict[str, Any]:
+    return {
+        "game_id": game_id,
+        "date": _iso(date),
+        "fit_through": None,
+        "status": "unavailable",
+        "reason": reason,
+        "edge_components": None,
+        "blue_prior_role_games": None,
+        "red_prior_role_games": None,
+    }
+
+
+def _unavailable_form_row(game_id: str, date: object, reason: str) -> dict[str, Any]:
+    return {
+        "game_id": game_id,
+        "date": _iso(date),
+        "fit_through": None,
+        "status": "unavailable",
+        "reason": reason,
+        "future_player_form_logit": None,
+        "support_blue": 0,
+        "support_red": 0,
+        **{f"player_form_{metric}_diff": None for metric in FORM_METRICS},
+    }
+
+
+def build_fold_artifacts(
+    *,
+    source_receipt_path: Path,
+    players_path: Path,
+    maps_path: Path,
+    folds_root: Path,
+    output_root: Path,
+    cache_dir: Path,
+    min_training_games: int = composition_signal.MIN_TRAINING_GAMES,
+    min_support_games: int = 0,
+    worker_commit: str | None = None,
+    workers: int = 1,
+    selected_folds: Sequence[int] = (1, 2, 3),
+) -> dict[str, Any]:
+    """Build one frozen strict-prior atom and form ledger for each outer fold."""
+
+    source = load_source_receipt(source_receipt_path.resolve())
+    players = load_players(players_path.resolve(), source)
+    maps = load_maps(maps_path.resolve(), source)
+    accepted_ids = {str(value) for value in source["accepted_game_ids"]}
+    games = build_games(players, accepted_ids)
+    games_by_id = {str(game["game_uid"]): game for game in games}
+    map_dates = dict(zip(maps["game_id"].astype(str), maps["date"]))
+    specs = {fold: _fold_spec(folds_root.resolve(), fold) for fold in (1, 2, 3)}
+    validation_by_fold = {fold: set(specs[fold][1]) for fold in (1, 2, 3)}
+    producer_code_hash = _sha_path(Path(__file__).resolve())
+    composition_code_hash = _sha_path(Path(composition_signal.__file__).resolve())
+    common_source = {
+        "source_as_of": source["source_as_of"],
+        "source_game_count": source["source_game_count"],
+        "source_identity_sha256": source["source_identity_sha256"],
+        "source_receipt_sha256": source["receipt_sha256"],
+        "input_files": {
+            "players": _source_file_binding(source, "players", players_path.resolve()),
+            "maps": _source_file_binding(source, "maps", maps_path.resolve()),
+        },
+    }
+    outputs: dict[str, Any] = {}
+    requested = {int(value) for value in selected_folds}
+    if not requested or not requested.issubset({1, 2, 3}):
+        raise StrictPriorAtomError("selected folds must be in 1, 2, 3")
+    for fold in sorted(requested):
+        prior_validation_ids = set().union(
+            *(validation_by_fold[prior] for prior in range(1, fold))
+        ) if fold > 1 else set()
+        train_ids, validation_ids_tuple, cutoff = specs[fold]
+        validation_ids = set(validation_ids_tuple)
+        train_set = set(train_ids)
+        excluded_prior_validation = train_set & prior_validation_ids
+        effective_train_ids = train_set - prior_validation_ids
+        expected_ids = train_set | validation_ids
+        train_games = [games_by_id[game_id] for game_id in sorted(effective_train_ids & set(games_by_id))]
+        fold_source = dict(source)
+        fold_source["accepted_game_ids"] = sorted(effective_train_ids)
+        fold_source["source_game_count"] = len(effective_train_ids)
+        train_rows, train_audit = score_static_atoms(
+            train_games,
+            fold_source,
+            maps[maps["game_id"].isin(effective_train_ids)],
+            cache_dir=(cache_dir / f"fold-{fold}").resolve(),
+            min_training_games=min_training_games,
+            min_support_games=min_support_games,
+            worker_commit=worker_commit,
+            workers=workers,
+        )
+        atom_rows_by_id = {str(row["game_id"]): row for row in train_rows}
+
+        validation_history_games = [
+            game
+            for game in train_games
+            if pd.Timestamp(game["date"]).normalize() < cutoff.normalize()
+        ]
+        validation_names = composition_signal._descriptive_feature_names(validation_history_games)
+        validation_model = composition_signal._fit_model(
+            validation_history_games,
+            names=validation_names,
+            include_draft=True,
+            min_training_games=min_training_games,
+            worker_commit=worker_commit,
+            composition_only=True,
+        )
+        for game_id in sorted(validation_ids):
+            game = games_by_id.get(game_id)
+            if game is None:
+                atom_rows_by_id[game_id] = _unavailable_atom_row(
+                    game_id, map_dates[game_id], "composition_input_incomplete"
+                )
+                continue
+            signal = composition_signal.public_signal_for_game(
+                game,
+                validation_model,
+                min_support_games=min_support_games,
+            )
+            edge = _edge_from_signal(signal)
+            atom_rows_by_id[game_id] = {
+                "game_id": game_id,
+                "date": _iso(map_dates[game_id]),
+                "fit_through": signal.get("fit_through"),
+                "status": "available" if edge is not None else str(signal.get("status") or "unavailable"),
+                "reason": signal.get("reason"),
+                "edge_components": edge,
+                "blue_prior_role_games": signal.get("blue", {}).get("prior_role_games") if isinstance(signal.get("blue"), Mapping) else None,
+                "red_prior_role_games": signal.get("red", {}).get("prior_role_games") if isinstance(signal.get("red"), Mapping) else None,
+            }
+        for game_id in sorted(excluded_prior_validation):
+            atom_rows_by_id[game_id] = _unavailable_atom_row(
+                game_id, map_dates[game_id], "excluded_previous_outer_validation"
+            )
+        for game_id in sorted(expected_ids - set(atom_rows_by_id)):
+            atom_rows_by_id[game_id] = _unavailable_atom_row(
+                game_id, map_dates[game_id], "composition_input_incomplete"
+            )
+        atom_rows = [atom_rows_by_id[game_id] for game_id in sorted(expected_ids)]
+
+        form_players = players[players["game_uid"].isin(effective_train_ids | validation_ids)].copy()
+        form_players.loc[form_players["game_uid"].isin(validation_ids), "date"] = cutoff
+        form_rows = build_player_form(
+            form_players,
+            maps[maps["game_id"].isin(effective_train_ids | validation_ids)],
+        )
+        form_rows_by_id = {str(row["game_id"]): row for row in form_rows}
+        for game_id in validation_ids:
+            if game_id in form_rows_by_id:
+                form_rows_by_id[game_id]["date"] = _iso(map_dates[game_id])
+        for game_id in sorted(excluded_prior_validation):
+            form_rows_by_id[game_id] = _unavailable_form_row(
+                game_id, map_dates[game_id], "excluded_previous_outer_validation"
+            )
+        for game_id in sorted(expected_ids - set(form_rows_by_id)):
+            form_rows_by_id[game_id] = _unavailable_form_row(
+                game_id, map_dates[game_id], "player_input_incomplete"
+            )
+        form_rows = [form_rows_by_id[game_id] for game_id in sorted(expected_ids)]
+
+        fold_contract = {
+            "fold": fold,
+            "fit_window_end": _iso(cutoff),
+            "train_game_count": len(train_set),
+            "train_game_identity_sha256": identity_sha256(sorted(train_set)),
+            "effective_train_game_count": len(effective_train_ids),
+            "effective_train_game_identity_sha256": identity_sha256(sorted(effective_train_ids)),
+            "validation_game_count": len(validation_ids),
+            "validation_game_identity_sha256": identity_sha256(sorted(validation_ids)),
+            "excluded_previous_validation_game_count": len(excluded_prior_validation),
+            "excluded_previous_validation_identity_sha256": identity_sha256(sorted(excluded_prior_validation)),
+            "validation_feature_state": "frozen_effective_training_before_cutoff_calendar_day",
+        }
+        producer = {
+            "producer_code_sha256": producer_code_hash,
+            "training_order": "effective outer-fold training rows only; validation state frozen at cutoff",
+        }
+        atom_payload: dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
+            "status": "research_only",
+            "authority": {"research_only": True, "public": False, "probability": False, "promotion": False, "deployment": False},
+            "source": common_source,
+            "fold_contract": fold_contract,
+            "producer": {
+                **producer,
+                "producer_name": "strict_prior_composition_signal_outer_fold",
+                "composition_signal_code_sha256": composition_code_hash,
+                "component_mapping": {
+                    "base": "composition_signal.blue/red.components.base",
+                    "ally_synergy": "composition_signal.blue/red.components.ally_synergy",
+                    "enemy_counter": "composition_signal.blue/red.components.enemy_counter",
+                    "same_role": "composition_signal.blue/red.components.same_role",
+                    "archetype_interactions": "composition_signal.blue/red.components.atomized",
+                },
+            },
+            "coverage": {
+                "row_count": len(atom_rows),
+                "available_game_count": sum(row["status"] == "available" for row in atom_rows),
+                "unavailable_game_count": sum(row["status"] != "available" for row in atom_rows),
+                "fit_through_max": max((row["fit_through"] for row in atom_rows if row.get("fit_through")), default=None),
+            },
+            "score_audit": train_audit,
+            "rows": atom_rows,
+            "rows_sha256": _sha_bytes(_canonical(atom_rows)),
+        }
+        atom_payload["artifact_sha256"] = _sha_bytes(_canonical(atom_payload))
+        form_payload: dict[str, Any] = {
+            "schema_version": FORM_SCHEMA_VERSION,
+            "status": "research_only",
+            "authority": {"research_only": True, "public": False, "probability": False, "promotion": False, "deployment": False},
+            "source": common_source,
+            "fold_contract": fold_contract,
+            "producer": {
+                **producer,
+                "producer_name": "strict_prior_player_form_outer_fold",
+                "metrics": list(FORM_METRICS),
+                "feature_contract": "raw prior player metrics from effective fold training only",
+            },
+            "coverage": {
+                "row_count": len(form_rows),
+                "available_row_count": sum(row["status"] == "available" for row in form_rows),
+                "unavailable_row_count": sum(row["status"] != "available" for row in form_rows),
+                "fit_through_max": max((row["fit_through"] for row in form_rows if row.get("fit_through")), default=None),
+            },
+            "rows": form_rows,
+            "rows_sha256": _sha_bytes(_canonical(form_rows)),
+        }
+        form_payload["artifact_sha256"] = _sha_bytes(_canonical(form_payload))
+        fold_root = output_root.resolve() / f"fold-{fold}"
+        fold_root.mkdir(parents=True, exist_ok=True)
+        atom_path = fold_root / "strict-prior-composition-atoms.json"
+        form_path = fold_root / "strict-prior-player-form.json"
+        atom_path.write_bytes(_canonical(atom_payload) + b"\n")
+        form_path.write_bytes(_canonical(form_payload) + b"\n")
+        outputs[str(fold)] = {
+            "atoms": _hash_record(atom_path),
+            "form": _hash_record(form_path),
+            "fold_contract": fold_contract,
+        }
+    return {"outputs": outputs}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-receipt", required=True, type=Path)
     parser.add_argument("--players", required=True, type=Path)
     parser.add_argument("--maps", required=True, type=Path)
     parser.add_argument("--cache-dir", required=True, type=Path)
-    parser.add_argument("--atoms-out", required=True, type=Path)
-    parser.add_argument("--form-out", required=True, type=Path)
+    parser.add_argument("--atoms-out", type=Path)
+    parser.add_argument("--form-out", type=Path)
+    parser.add_argument("--folds-root", type=Path)
+    parser.add_argument("--fold-output-root", type=Path)
+    parser.add_argument("--only-fold", type=int, choices=(1, 2, 3), action="append")
     parser.add_argument("--min-training-games", type=int, default=composition_signal.MIN_TRAINING_GAMES)
     parser.add_argument("--min-support-games", type=int, default=0)
     parser.add_argument("--worker-commit")
     parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
+    if args.folds_root is not None or args.fold_output_root is not None:
+        if args.folds_root is None or args.fold_output_root is None:
+            parser.error("--folds-root and --fold-output-root are required together")
+        result = build_fold_artifacts(
+            source_receipt_path=args.source_receipt,
+            players_path=args.players,
+            maps_path=args.maps,
+            folds_root=args.folds_root,
+            output_root=args.fold_output_root,
+            cache_dir=args.cache_dir,
+            min_training_games=args.min_training_games,
+            min_support_games=args.min_support_games,
+            worker_commit=args.worker_commit,
+            workers=args.workers,
+            selected_folds=tuple(args.only_fold or (1, 2, 3)),
+        )
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if args.atoms_out is None or args.form_out is None:
+        parser.error("--atoms-out and --form-out are required for a source-wide build")
     result = build_artifacts(
         source_receipt_path=args.source_receipt,
         players_path=args.players,

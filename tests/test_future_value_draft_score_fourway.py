@@ -17,12 +17,15 @@ from benchmarks.future_value_draft_score_fourway import (
     _load_current,
     _load_future,
     _load_scaling,
+    _load_source,
     _map_source,
     _scaling_json_value,
     _side_swap_evidence,
+    _verify_strict_prior_form_artifact,
     build_report,
     write_report,
 )
+from benchmarks.freeze_future_value_draft_score_fourway import build_freeze, write_freeze
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 from lol_kills.research.atomized_rf_composite import _strict_canonical_sha256
 from lol_kills.research.future_value_rating_ledger import _artifact_digest as _current_artifact_digest
@@ -57,6 +60,10 @@ def _source(tmp_path: Path, game_ids: list[str]) -> tuple[Path, Path]:
         }
     )
     maps.to_parquet(source_root / "maps.parquet")
+    players_path = source_root / "players.parquet"
+    pd.DataFrame({"game_uid": game_ids, "player_id": [f"p{i}" for i in range(len(game_ids))]}).to_parquet(players_path)
+    maps_raw = (source_root / "maps.parquet").read_bytes()
+    players_raw = players_path.read_bytes()
     source = {
         "schema_version": "scryglass:future-value-rating-source:v1",
         "status": "accepted_source_bound_development_only",
@@ -64,6 +71,10 @@ def _source(tmp_path: Path, game_ids: list[str]) -> tuple[Path, Path]:
         "source_game_count": len(game_ids),
         "source_identity_sha256": identity_sha256(game_ids),
         "accepted_game_ids": game_ids,
+        "source_files": {
+            "maps": {"bytes": len(maps_raw), "sha256": hashlib.sha256(maps_raw).hexdigest()},
+            "players": {"bytes": len(players_raw), "sha256": hashlib.sha256(players_raw).hexdigest()},
+        },
     }
     source["receipt_sha256"] = hashlib.sha256(_canonical(source)).hexdigest()
     source_path = tmp_path / "source-receipt.json"
@@ -171,6 +182,40 @@ def _fold_inputs(
             }
         )
         current.to_parquet(current_root / "current-rating-feature-ledger.parquet")
+        current_artifact = current_root / "current-rating-feature-ledger.parquet"
+        current_output = current[["game_id", "date", "series_id", *CURRENT_FEATURES]].copy()
+        current_receipt = {
+            "schema_version": "scryglass:future-value-current-rating-ledger-receipt:v2",
+            "ledger_schema_version": "scryglass:future-value-current-rating-ledger:v2",
+            "authority": {
+                "research_only": True,
+                "public_player_rating": False,
+                "public_team_rating": False,
+                "public_probability": False,
+                "promotion": False,
+                "merge": False,
+                "deployment": False,
+                "betting": False,
+            },
+            "source_as_of": source["source_as_of"],
+            "source_game_count": source["source_game_count"],
+            "source_identity_sha256": source["source_identity_sha256"],
+            "source_receipt_sha256": source["receipt_sha256"],
+            "fit_window_end": "2026-01-02T12:00:00Z",
+            "feature_names": list(CURRENT_FEATURES),
+            "output_game_ids": game_ids,
+            "output_game_count": len(game_ids),
+            "train_game_ids": train,
+            "validation_game_ids": validation,
+            "artifact": {
+                "path": str(current_artifact),
+                "bytes": current_artifact.stat().st_size,
+                "sha256": hashlib.sha256(current_artifact.read_bytes()).hexdigest(),
+            },
+            "ledger_rows_sha256": _current_artifact_digest(current_output, CURRENT_FEATURES),
+        }
+        current_receipt["receipt_sha256"] = hashlib.sha256(_canonical(current_receipt)).hexdigest()
+        _write_json(current_root / "current-rating-feature-ledger.receipt.json", current_receipt)
         scaling = pd.DataFrame(
             {
                 "game_id": game_ids,
@@ -181,6 +226,29 @@ def _fold_inputs(
             }
         )
         scaling.to_parquet(scaling_root / "scaling-native.parquet")
+        scaling_columns = list(scaling.columns)
+        ordered = scaling.sort_values(["date", "game_id"], kind="mergesort")
+        scaling_values = [
+            {str(column): _scaling_json_value(value) for column, value in row.items()}
+            for row in ordered[scaling_columns].to_dict("records")
+        ]
+        scaling_receipt = {
+            "schema_version": "scryglass:atomized-scaling-feature-ledger:v1",
+            "status": "research_only",
+            "public_authority": False,
+            "source_identity_sha256": source["source_identity_sha256"],
+            "source_receipt_sha256": source["receipt_sha256"],
+            "accepted_game_count": source["source_game_count"],
+            "fold": fold,
+            "fit_window_end": "2026-01-02T12:00:00Z",
+            "fold_evaluation_usable": True,
+            "output_game_ids": game_ids,
+            "output_game_count": len(game_ids),
+            "columns": scaling_columns,
+            "row_value_digest_sha256": _strict_canonical_sha256(scaling_values),
+        }
+        scaling_receipt["receipt_sha256"] = hashlib.sha256(_canonical(scaling_receipt)).hexdigest()
+        _write_json(scaling_root / "scaling-native-receipt.json", scaling_receipt)
     evidence_rows = []
     for index, game_id in enumerate(game_ids):
         evidence_rows.append(
@@ -219,6 +287,115 @@ def _fold_inputs(
     return folds, evaluation
 
 
+def _strict_fold_inputs(
+    tmp_path: Path,
+    game_ids: list[str],
+    source: dict[str, object],
+    folds: Path,
+) -> Path:
+    root = tmp_path / "strict-folds"
+    prior_validation: set[str] = set()
+    dates = {game_id: pd.Timestamp("2026-01-01", tz="UTC") + pd.Timedelta(days=index) for index, game_id in enumerate(game_ids)}
+    for fold in (1, 2, 3):
+        spec = json.loads((folds / f"fold-{fold}-spec.json").read_text())
+        train = set(spec["train_game_ids"])
+        validation = set(spec["validation_game_ids"])
+        excluded = train & prior_validation
+        effective = train - excluded
+        contract = {
+            "fold": fold,
+            "fit_window_end": "2026-01-02T12:00:00Z",
+            "train_game_count": len(train),
+            "train_game_identity_sha256": identity_sha256(train),
+            "effective_train_game_count": len(effective),
+            "effective_train_game_identity_sha256": identity_sha256(effective),
+            "validation_game_count": len(validation),
+            "validation_game_identity_sha256": identity_sha256(validation),
+            "excluded_previous_validation_game_count": len(excluded),
+            "excluded_previous_validation_identity_sha256": identity_sha256(excluded),
+            "validation_feature_state": "frozen_effective_training_before_cutoff_calendar_day",
+        }
+        source_binding = {
+            "source_as_of": source["source_as_of"],
+            "source_game_count": source["source_game_count"],
+            "source_identity_sha256": source["source_identity_sha256"],
+            "source_receipt_sha256": source["receipt_sha256"],
+            "input_files": source["source_files"],
+        }
+        atom_rows = []
+        form_rows = []
+        for index, game_id in enumerate(sorted(train | validation)):
+            date = dates[game_id]
+            is_excluded = game_id in excluded
+            edge = {
+                "base": 0.1 + index * 0.01,
+                "ally_synergy": 0.02,
+                "enemy_counter": -0.01,
+                "same_role": 0.0,
+                "archetype_interactions": -0.03,
+            }
+            fit_through = "2026-01-01T00:00:00Z" if date > pd.Timestamp("2026-01-01", tz="UTC") else None
+            atom_rows.append({
+                "game_id": game_id,
+                "date": date.isoformat().replace("+00:00", "Z"),
+                "fit_through": None if is_excluded else fit_through,
+                "status": "unavailable" if is_excluded else "available",
+                "reason": "excluded_previous_outer_validation" if is_excluded else None,
+                "edge_components": None if is_excluded else {**edge, "total": sum(edge.values())},
+            })
+            form_rows.append({
+                "game_id": game_id,
+                "date": date.isoformat().replace("+00:00", "Z"),
+                "fit_through": None if is_excluded else fit_through,
+                "status": "unavailable" if is_excluded else "available",
+                "reason": "excluded_previous_outer_validation" if is_excluded else None,
+                "future_player_form_logit": None if is_excluded else float(index) / 10.0,
+            })
+        common = {
+            "status": "research_only",
+            "authority": {"research_only": True, "public": False, "probability": False, "promotion": False, "deployment": False},
+            "source": source_binding,
+            "fold_contract": contract,
+        }
+        atom = {
+            **common,
+            "schema_version": "scryglass:strict-prior-composition-atoms:v1",
+            "producer": {
+                "training_order": "effective outer-fold training rows only; validation state frozen at cutoff",
+                "producer_code_sha256": "a" * 64,
+                "composition_signal_code_sha256": "b" * 64,
+                "component_mapping": {},
+            },
+            "coverage": {"fit_through_max": "2026-01-01T00:00:00Z"},
+            "rows": atom_rows,
+            "rows_sha256": hashlib.sha256(_canonical(atom_rows)).hexdigest(),
+        }
+        atom["artifact_sha256"] = hashlib.sha256(_canonical(atom)).hexdigest()
+        form = {
+            **common,
+            "schema_version": "scryglass:strict-prior-player-form:v1",
+            "producer": {
+                "training_order": "effective outer-fold training rows only; validation state frozen at cutoff",
+                "producer_code_sha256": "a" * 64,
+            },
+            "coverage": {"fit_through_max": "2026-01-01T00:00:00Z"},
+            "rows": form_rows,
+            "rows_sha256": hashlib.sha256(_canonical(form_rows)).hexdigest(),
+        }
+        form["artifact_sha256"] = hashlib.sha256(_canonical(form)).hexdigest()
+        _write_json(root / f"fold-{fold}" / "strict-prior-composition-atoms.json", atom)
+        _write_json(root / f"fold-{fold}" / "strict-prior-player-form.json", form)
+        prior_validation.update(validation)
+    return root
+
+
+def _freeze_inputs(tmp_path: Path, source_path: Path, folds: Path, strict_root: Path) -> tuple[Path, str]:
+    path = tmp_path / "fourway-freeze.json"
+    payload = build_freeze(source_receipt_path=source_path, folds_root=folds, strict_fold_root=strict_root)
+    digest = write_freeze(payload, path)
+    return path, digest
+
+
 def test_zero_intercept_and_side_swap_are_exact() -> None:
     frame = pd.DataFrame({"x": [-2.0, -1.0, 1.0, 2.0]})
     coefficients, fit = _fit_zero_intercept(frame.to_numpy(), np.array([0.0, 0.0, 1.0, 1.0]))
@@ -235,8 +412,13 @@ def test_fourway_evaluation_fits_all_variants_on_complete_fixture(tmp_path: Path
     source = json.loads(source_path.read_text())
     public_root, manifest_hash = _public_pack(tmp_path, source, game_ids)
     folds, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
+    strict_root = _strict_fold_inputs(tmp_path, game_ids, source, folds)
+    freeze_path, freeze_hash = _freeze_inputs(tmp_path, source_path, folds, strict_root)
     report = build_report(
         source_receipt_path=source_path,
+        expected_source_receipt_sha256=hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        trust_root_path=freeze_path,
+        expected_trust_root_sha256=freeze_hash,
         source_root=source_root,
         folds_root=folds,
         evaluation_root=evaluation,
@@ -245,6 +427,7 @@ def test_fourway_evaluation_fits_all_variants_on_complete_fixture(tmp_path: Path
         authority_path=tmp_path / "authority.json",
         expected_authority_sha256=hashlib.sha256((tmp_path / "authority.json").read_bytes()).hexdigest(),
         model_artifact_path=tmp_path / "model.json",
+        strict_fold_root=strict_root,
     )
     assert report["status"] == "research_only"
     assert report["coverage"]["descriptive_subset_game_count"] == 6
@@ -287,8 +470,25 @@ def test_fourway_fails_closed_when_atom_rows_do_not_cover_train(tmp_path: Path) 
     source = json.loads(source_path.read_text())
     public_root, manifest_hash = _public_pack(tmp_path, source, game_ids[2:])
     folds, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
+    strict_root = _strict_fold_inputs(tmp_path, game_ids, source, folds)
+    atom_path = strict_root / "fold-1" / "strict-prior-composition-atoms.json"
+    atom = json.loads(atom_path.read_text())
+    validation = set(json.loads((folds / "fold-1-spec.json").read_text())["validation_game_ids"])
+    for row in atom["rows"]:
+        if row["game_id"] in validation:
+            row["status"] = "unavailable"
+            row["reason"] = "test_missing"
+            row["edge_components"] = None
+    atom["rows_sha256"] = hashlib.sha256(_canonical(atom["rows"])).hexdigest()
+    atom.pop("artifact_sha256")
+    atom["artifact_sha256"] = hashlib.sha256(_canonical(atom)).hexdigest()
+    _write_json(atom_path, atom)
+    freeze_path, freeze_hash = _freeze_inputs(tmp_path, source_path, folds, strict_root)
     report = build_report(
         source_receipt_path=source_path,
+        expected_source_receipt_sha256=hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        trust_root_path=freeze_path,
+        expected_trust_root_sha256=freeze_hash,
         source_root=source_root,
         folds_root=folds,
         evaluation_root=evaluation,
@@ -297,10 +497,11 @@ def test_fourway_fails_closed_when_atom_rows_do_not_cover_train(tmp_path: Path) 
         authority_path=tmp_path / "authority.json",
         expected_authority_sha256=hashlib.sha256((tmp_path / "authority.json").read_bytes()).hexdigest(),
         model_artifact_path=tmp_path / "model.json",
+        strict_fold_root=strict_root,
     )
-    assert report["coverage"]["descriptive_subset_game_count"] == 4
+    assert report["coverage"]["descriptive_subset_game_count"] == 6
     assert report["variants"]["both"]["status"] == "blocked"
-    assert "fold_1_static_atom_coverage_missing" in report["blockers"]
+    assert "fold_1_static_atom_partial_coverage" in report["blockers"]
     assert "both_requires_three_valid_folds" in report["blockers"]
 
 
@@ -310,26 +511,27 @@ def test_variants_do_not_require_unselected_optional_producers(tmp_path: Path) -
     source = json.loads(source_path.read_text())
     public_root, manifest_hash = _public_pack(tmp_path, source, game_ids)
     folds, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
-    model_path = evaluation / "future_player_form" / "model.json"
-    model = json.loads(model_path.read_text())
+    strict_root = _strict_fold_inputs(tmp_path, game_ids, source, folds)
     for fold in (1, 2, 3):
         spec = json.loads((folds / f"fold-{fold}-spec.json").read_text())
-        validation = set(spec["validation_game_ids"])
-        rows = [
-            row
-            for row in model["variants"]["future_player_form"]["folds"][fold - 1][
-                "component_evidence"
-            ]["rows"]
-            if row["game_id"] in validation
-        ]
-        evidence = {"rows": rows, "row_count": len(rows)}
-        evidence["sha256"] = hashlib.sha256(_canonical(rows)).hexdigest()
-        model["variants"]["future_player_form"]["folds"][fold - 1][
-            "component_evidence"
-        ] = evidence
-    _write_json(model_path, model)
+        train = set(spec["train_game_ids"])
+        form_path = strict_root / f"fold-{fold}" / "strict-prior-player-form.json"
+        form = json.loads(form_path.read_text())
+        for row in form["rows"]:
+            if row["game_id"] in train:
+                row["status"] = "unavailable"
+                row["reason"] = "test_missing"
+                row["future_player_form_logit"] = None
+        form["rows_sha256"] = hashlib.sha256(_canonical(form["rows"])).hexdigest()
+        form.pop("artifact_sha256")
+        form["artifact_sha256"] = hashlib.sha256(_canonical(form)).hexdigest()
+        _write_json(form_path, form)
+    freeze_path, freeze_hash = _freeze_inputs(tmp_path, source_path, folds, strict_root)
     report = build_report(
         source_receipt_path=source_path,
+        expected_source_receipt_sha256=hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        trust_root_path=freeze_path,
+        expected_trust_root_sha256=freeze_hash,
         source_root=source_root,
         folds_root=folds,
         evaluation_root=evaluation,
@@ -338,6 +540,7 @@ def test_variants_do_not_require_unselected_optional_producers(tmp_path: Path) -
         authority_path=tmp_path / "authority.json",
         expected_authority_sha256=hashlib.sha256((tmp_path / "authority.json").read_bytes()).hexdigest(),
         model_artifact_path=tmp_path / "model.json",
+        strict_fold_root=strict_root,
     )
     assert report["variants"]["current_only"]["status"] == "evaluated"
     assert report["variants"]["scaling_curve"]["status"] == "evaluated"
@@ -359,7 +562,7 @@ def test_map_source_rejects_mutated_frozen_bytes_before_parquet_read(tmp_path: P
         _map_source(source_root, set(game_ids), source=source)
 
 
-def _write_current_receipt_fixture(tmp_path: Path) -> tuple[Path, list[str]]:
+def _write_current_receipt_fixture(tmp_path: Path) -> tuple[Path, list[str], dict[str, object]]:
     root = tmp_path / "fold" / "current-v2"
     root.mkdir(parents=True)
     game_ids = ["g1", "g2"]
@@ -403,25 +606,31 @@ def _write_current_receipt_fixture(tmp_path: Path) -> tuple[Path, list[str]]:
         "ledger_rows_sha256": _current_artifact_digest(output, CURRENT_FEATURES),
     }
     receipt["receipt_sha256"] = hashlib.sha256(_canonical(receipt)).hexdigest()
-    _write_json(root / "current-rating-feature-ledger.receipt.json", receipt)
-    return root, game_ids
+    receipt_path = root / "current-rating-feature-ledger.receipt.json"
+    _write_json(receipt_path, receipt)
+    binding = {
+        "receipt": {"bytes": receipt_path.stat().st_size, "sha256": hashlib.sha256(receipt_path.read_bytes()).hexdigest()},
+        "artifact": {"bytes": artifact_path.stat().st_size, "sha256": hashlib.sha256(artifact_path.read_bytes()).hexdigest()},
+    }
+    return root, game_ids, binding
 
 
 def test_current_rating_row_mutation_is_rejected_by_receipt(tmp_path: Path) -> None:
-    root, game_ids = _write_current_receipt_fixture(tmp_path)
+    root, game_ids, binding = _write_current_receipt_fixture(tmp_path)
     frame = pd.read_parquet(root / "current-rating-feature-ledger.parquet")
     frame.loc[0, "base_team_logit"] = 99.0
     frame.to_parquet(root / "current-rating-feature-ledger.parquet")
-    with pytest.raises(FourWayDraftScoreError, match="current rating artifact bytes changed"):
+    with pytest.raises(FourWayDraftScoreError, match="bytes changed from trust root"):
         _load_current(
             root,
+            trust_binding=binding,
             train_ids=game_ids,
             cutoff_text="2025-12-31T00:00:00Z",
             require_receipt=True,
         )
 
 
-def _write_scaling_receipt_fixture(tmp_path: Path) -> Path:
+def _write_scaling_receipt_fixture(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     root = tmp_path / "fold" / "scaling-v2"
     root.mkdir(parents=True)
     frame = pd.DataFrame(
@@ -453,17 +662,23 @@ def _write_scaling_receipt_fixture(tmp_path: Path) -> Path:
         "row_value_digest_sha256": _strict_canonical_sha256(row_values),
     }
     receipt["receipt_sha256"] = hashlib.sha256(_canonical(receipt)).hexdigest()
-    _write_json(root / "scaling-native-receipt.json", receipt)
+    receipt_path = root / "scaling-native-receipt.json"
+    _write_json(receipt_path, receipt)
+    binding = {
+        "receipt": {"bytes": receipt_path.stat().st_size, "sha256": hashlib.sha256(receipt_path.read_bytes()).hexdigest()},
+        "artifact": {"bytes": artifact_path.stat().st_size, "sha256": hashlib.sha256(artifact_path.read_bytes()).hexdigest()},
+    }
     frame.loc[0, "forecast_scaling_index"] = 99.0
     frame.to_parquet(artifact_path)
-    return root
+    return root, binding
 
 
 def test_scaling_row_mutation_is_rejected_by_receipt(tmp_path: Path) -> None:
-    root = _write_scaling_receipt_fixture(tmp_path)
-    with pytest.raises(FourWayDraftScoreError, match="scaling native row values changed"):
+    root, binding = _write_scaling_receipt_fixture(tmp_path)
+    with pytest.raises(FourWayDraftScoreError, match="bytes changed from trust root"):
         _load_scaling(
             root,
+            trust_binding=binding,
             fold=1,
             cutoff_text="2025-12-31T00:00:00Z",
             require_receipt=True,
@@ -484,12 +699,92 @@ def test_future_component_value_mutation_is_rejected_by_ledger_hash(tmp_path: Pa
         _load_future(model_path, 1)
 
 
+def test_source_receipt_without_source_files_is_rejected_even_when_resealed(tmp_path: Path) -> None:
+    source_path, _ = _source(tmp_path, ["g1", "g2"])
+    source = json.loads(source_path.read_text())
+    source.pop("source_files")
+    source.pop("receipt_sha256")
+    source["receipt_sha256"] = hashlib.sha256(_canonical(source)).hexdigest()
+    file_hash = _write_json(source_path, source)
+    with pytest.raises(FourWayDraftScoreError, match="file bindings are required"):
+        _load_source(source_path, expected_file_sha256=file_hash)
+
+
+def test_future_component_digest_is_required(tmp_path: Path) -> None:
+    game_ids = [f"g{i}" for i in range(1, 7)]
+    source_path, source_root = _source(tmp_path, game_ids)
+    source = json.loads(source_path.read_text())
+    _, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
+    model_path = evaluation / "future_player_form" / "model.json"
+    model = json.loads(model_path.read_text())
+    model["variants"]["future_player_form"]["folds"][0]["component_evidence"].pop("sha256")
+    _write_json(model_path, model)
+    with pytest.raises(FourWayDraftScoreError, match="component ledger hash"):
+        _load_future(model_path, 1)
+
+
+def test_current_artifact_and_receipt_co_mutation_is_rejected_by_freeze(tmp_path: Path) -> None:
+    root, game_ids, binding = _write_current_receipt_fixture(tmp_path)
+    artifact_path = root / "current-rating-feature-ledger.parquet"
+    receipt_path = root / "current-rating-feature-ledger.receipt.json"
+    frame = pd.read_parquet(artifact_path)
+    frame.loc[0, "base_team_logit"] = 42.0
+    frame.to_parquet(artifact_path)
+    receipt = json.loads(receipt_path.read_text())
+    receipt["artifact"]["bytes"] = artifact_path.stat().st_size
+    receipt["artifact"]["sha256"] = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+    output = frame[["game_id", "date", "series_id", *CURRENT_FEATURES]].copy()
+    receipt["ledger_rows_sha256"] = _current_artifact_digest(output, CURRENT_FEATURES)
+    receipt.pop("receipt_sha256")
+    receipt["receipt_sha256"] = hashlib.sha256(_canonical(receipt)).hexdigest()
+    _write_json(receipt_path, receipt)
+    with pytest.raises(FourWayDraftScoreError, match="bytes changed from trust root"):
+        _load_current(
+            root,
+            trust_binding=binding,
+            train_ids=game_ids,
+            cutoff_text="2025-12-31T00:00:00Z",
+            require_receipt=True,
+        )
+
+
+def test_fold_form_feature_at_cutoff_is_rejected(tmp_path: Path) -> None:
+    game_ids = [f"g{i}" for i in range(1, 7)]
+    source_path, source_root = _source(tmp_path, game_ids)
+    source = json.loads(source_path.read_text())
+    folds, _ = _fold_inputs(tmp_path, game_ids, source_root, source)
+    strict_root = _strict_fold_inputs(tmp_path, game_ids, source, folds)
+    form_path = strict_root / "fold-1" / "strict-prior-player-form.json"
+    form = json.loads(form_path.read_text())
+    validation = set(json.loads((folds / "fold-1-spec.json").read_text())["validation_game_ids"])
+    for row in form["rows"]:
+        if row["game_id"] in validation:
+            row["fit_through"] = "2026-01-02T12:00:00Z"
+    form["rows_sha256"] = hashlib.sha256(_canonical(form["rows"])).hexdigest()
+    form.pop("artifact_sha256")
+    form["artifact_sha256"] = hashlib.sha256(_canonical(form)).hexdigest()
+    file_hash = _write_json(form_path, form)
+    maps = _map_source(source_root, set(game_ids), source=source)
+    with pytest.raises(FourWayDraftScoreError, match="validation fit crossed cutoff"):
+        _verify_strict_prior_form_artifact(
+            form_path,
+            source,
+            maps,
+            expected_sha256=file_hash,
+            fold=1,
+            train_ids=["g1", "g2"],
+            validation_ids=["g3", "g4", "g5", "g6"],
+            cutoff_text="2026-01-02T12:00:00Z",
+        )
+
+
 def test_chronology_mutation_blocks_fold_evaluation(tmp_path: Path) -> None:
     game_ids = [f"g{i}" for i in range(1, 7)]
     source_path, source_root = _source(tmp_path, game_ids)
     source = json.loads(source_path.read_text())
     public_root, manifest_hash = _public_pack(tmp_path, source, game_ids)
     folds, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
+    strict_root = _strict_fold_inputs(tmp_path, game_ids, source, folds)
     spec_path = folds / "fold-1-spec.json"
     spec = json.loads(spec_path.read_text())
     spec["fit_window_end"] = "2026-01-03T12:00:01Z"
@@ -500,19 +795,23 @@ def test_chronology_mutation_blocks_fold_evaluation(tmp_path: Path) -> None:
         "validation_start"
     ] = "2026-01-03T12:00:01Z"
     _write_json(model_path, model)
-    report = build_report(
-        source_receipt_path=source_path,
-        source_root=source_root,
-        folds_root=folds,
-        evaluation_root=evaluation,
-        public_pack_root=public_root,
-        expected_manifest_sha256=manifest_hash,
-        authority_path=tmp_path / "authority.json",
-        expected_authority_sha256=hashlib.sha256((tmp_path / "authority.json").read_bytes()).hexdigest(),
-        model_artifact_path=tmp_path / "model.json",
-    )
-    assert report["variants"]["current_only"]["folds"][0]["status"] == "blocked"
-    assert "current_only_fold_1_validation_chronology_invalid" in report["blockers"]
+    freeze_path, freeze_hash = _freeze_inputs(tmp_path, source_path, folds, strict_root)
+    with pytest.raises(FourWayDraftScoreError, match="fold contract changed: fit_window_end"):
+        build_report(
+            source_receipt_path=source_path,
+            expected_source_receipt_sha256=hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            trust_root_path=freeze_path,
+            expected_trust_root_sha256=freeze_hash,
+            source_root=source_root,
+            folds_root=folds,
+            evaluation_root=evaluation,
+            public_pack_root=public_root,
+            expected_manifest_sha256=manifest_hash,
+            authority_path=tmp_path / "authority.json",
+            expected_authority_sha256=hashlib.sha256((tmp_path / "authority.json").read_bytes()).hexdigest(),
+            model_artifact_path=tmp_path / "model.json",
+            strict_fold_root=strict_root,
+        )
 
 
 def test_report_hash_covers_written_payload_and_descriptive_subset(tmp_path: Path) -> None:

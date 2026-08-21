@@ -7,9 +7,9 @@ strict-prior training rows.  The feature ledger uses producer-level group
 coordinates for future form and scaling.  It records that projection so the
 result cannot be mistaken for the wider public Draft Score contract.
 
-The current public pack has no atom rows in the first two outer folds.  The
-command therefore emits the largest source-bound descriptive subset and an
-explicit evaluation blocker instead of manufacturing a fit.
+The strict path reads one frozen atom and player-form ledger per outer fold.
+Each validation window uses state from its effective training rows only.
+Rows without complete evidence remain outside the paired evaluation subset.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ from lol_kills.research.atomized_rf_composite import (
 SCHEMA_VERSION = "scryglass:future-value-draft-score-fourway:v1"
 STRICT_ATOM_SCHEMA = "scryglass:strict-prior-composition-atoms:v1"
 STRICT_FORM_SCHEMA = "scryglass:strict-prior-player-form:v1"
+TRUST_ROOT_SCHEMA = "scryglass:future-value-draft-score-freeze:v1"
 VARIANTS = ("current_only", "future_player_form", "scaling_curve", "both")
 BOOTSTRAP_SEED = 20260821
 BOOTSTRAP_DRAWS = 2000
@@ -130,7 +131,16 @@ def _require_hash(value: object, label: str) -> str:
     return text
 
 
-def _load_source(receipt_path: Path) -> dict[str, Any]:
+def _load_source(
+    receipt_path: Path,
+    *,
+    expected_file_sha256: str,
+) -> dict[str, Any]:
+    actual_file_sha256 = _sha_path(receipt_path)
+    if actual_file_sha256 != _require_hash(
+        expected_file_sha256, "expected source receipt file hash"
+    ):
+        raise FourWayDraftScoreError("source receipt file bytes changed")
     source = _load_json(receipt_path, "source receipt")
     required = {
         "source_as_of",
@@ -154,7 +164,71 @@ def _load_source(receipt_path: Path) -> dict[str, Any]:
     _require_hash(source["source_identity_sha256"], "source identity")
     if str(source["source_identity_sha256"]).lower() != identity_sha256(accepted):
         raise FourWayDraftScoreError("source receipt identity does not match accepted IDs")
+    source_files = source.get("source_files")
+    if not isinstance(source_files, Mapping):
+        raise FourWayDraftScoreError("source receipt file bindings are required")
+    for name in ("maps", "players"):
+        record = source_files.get(name)
+        if not isinstance(record, Mapping):
+            raise FourWayDraftScoreError(f"source receipt {name} file binding is required")
+        if int(record.get("bytes", -1)) < 0:
+            raise FourWayDraftScoreError(f"source receipt {name} byte count is invalid")
+        _require_hash(record.get("sha256"), f"source receipt {name} hash")
     return source
+
+
+def _load_trust_root(
+    path: Path,
+    *,
+    expected_sha256: str,
+    source_receipt_path: Path,
+    expected_source_receipt_sha256: str,
+) -> dict[str, Any]:
+    actual_sha256 = _sha_path(path)
+    if actual_sha256 != _require_hash(expected_sha256, "expected trust root file hash"):
+        raise FourWayDraftScoreError("trust root file bytes changed")
+    payload = _load_json(path, "four-way trust root")
+    if (
+        payload.get("schema_version") != TRUST_ROOT_SCHEMA
+        or payload.get("status") != "frozen_research_only"
+    ):
+        raise FourWayDraftScoreError("four-way trust root contract changed")
+    authority = payload.get("authority")
+    if (
+        not isinstance(authority, Mapping)
+        or authority.get("research_only") is not True
+        or any(authority.get(field) is not False for field in ("public_probability", "promotion", "deployment"))
+    ):
+        raise FourWayDraftScoreError("four-way trust root authority changed")
+    source_binding = payload.get("source_receipt")
+    if not isinstance(source_binding, Mapping):
+        raise FourWayDraftScoreError("trust root source receipt binding is missing")
+    if (
+        int(source_binding.get("bytes", -1)) != source_receipt_path.stat().st_size
+        or _require_hash(source_binding.get("sha256"), "trust root source receipt hash")
+        != _require_hash(expected_source_receipt_sha256, "expected source receipt file hash")
+    ):
+        raise FourWayDraftScoreError("trust root source receipt binding changed")
+    folds = payload.get("folds")
+    if not isinstance(folds, Mapping) or set(folds) != {"1", "2", "3"}:
+        raise FourWayDraftScoreError("trust root fold bindings are incomplete")
+    return payload
+
+
+def _verify_pinned_file(path: Path, binding: object, *, label: str) -> dict[str, Any]:
+    if not isinstance(binding, Mapping):
+        raise FourWayDraftScoreError(f"{label} trust binding is missing")
+    if not path.is_file() or path.is_symlink():
+        raise FourWayDraftScoreError(f"{label} is missing or unsafe")
+    actual_sha256 = _sha_path(path)
+    expected_sha256 = _require_hash(binding.get("sha256"), f"{label} trust hash")
+    if actual_sha256 != expected_sha256 or path.stat().st_size != int(binding.get("bytes", -1)):
+        raise FourWayDraftScoreError(f"{label} bytes changed from trust root")
+    return {
+        "path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": actual_sha256,
+    }
 
 
 def _verify_public_atom_pack(
@@ -337,7 +411,51 @@ def _verify_strict_prior_source_binding(
             int(actual.get("bytes", -1)) != int(expected.get("bytes", -2))
             or actual_hash != expected_hash
         ):
-            raise FourWayDraftScoreError(f"{label} {name} source bytes changed")
+                raise FourWayDraftScoreError(f"{label} {name} source bytes changed")
+
+
+def _verify_fold_artifact_contract(
+    payload: Mapping[str, Any],
+    *,
+    label: str,
+    fold: int,
+    train_ids: Sequence[str],
+    validation_ids: Sequence[str],
+    prior_validation_ids: Sequence[str],
+    cutoff_text: str,
+) -> tuple[set[str], set[str], set[str], pd.Timestamp]:
+    contract = payload.get("fold_contract")
+    if not isinstance(contract, Mapping):
+        raise FourWayDraftScoreError(f"{label} fold contract is missing")
+    train = {str(value) for value in train_ids}
+    validation = {str(value) for value in validation_ids}
+    excluded = train & {str(value) for value in prior_validation_ids}
+    effective = train - excluded
+    cutoff = pd.to_datetime(cutoff_text, utc=True, errors="coerce")
+    if pd.isna(cutoff):
+        raise FourWayDraftScoreError(f"{label} fold cutoff is invalid")
+    expected: dict[str, object] = {
+        "fold": fold,
+        "fit_window_end": pd.Timestamp(cutoff).isoformat().replace("+00:00", "Z"),
+        "train_game_count": len(train),
+        "train_game_identity_sha256": identity_sha256(train),
+        "effective_train_game_count": len(effective),
+        "effective_train_game_identity_sha256": identity_sha256(effective),
+        "validation_game_count": len(validation),
+        "validation_game_identity_sha256": identity_sha256(validation),
+        "excluded_previous_validation_game_count": len(excluded),
+        "excluded_previous_validation_identity_sha256": identity_sha256(excluded),
+        "validation_feature_state": "frozen_effective_training_before_cutoff_calendar_day",
+    }
+    for field, value in expected.items():
+        if str(contract.get(field)) != str(value):
+            raise FourWayDraftScoreError(f"{label} fold contract changed: {field}")
+    producer = payload.get("producer")
+    if not isinstance(producer, Mapping) or producer.get("training_order") != (
+        "effective outer-fold training rows only; validation state frozen at cutoff"
+    ):
+        raise FourWayDraftScoreError(f"{label} fold training order changed")
+    return effective, validation, excluded, pd.Timestamp(cutoff)
 
 
 def _verify_strict_prior_atom_artifact(
@@ -347,6 +465,11 @@ def _verify_strict_prior_atom_artifact(
     *,
     expected_sha256: str,
     expected_code_sha256: str | None = None,
+    fold: int | None = None,
+    train_ids: Sequence[str] = (),
+    validation_ids: Sequence[str] = (),
+    prior_validation_ids: Sequence[str] = (),
+    cutoff_text: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     actual_sha = _sha_path(path)
     if actual_sha != _require_hash(expected_sha256, "expected strict-prior atom hash"):
@@ -366,11 +489,31 @@ def _verify_strict_prior_atom_artifact(
     unsigned.pop("artifact_sha256", None)
     if _sha_bytes(_canonical_bytes(unsigned)) != claimed:
         raise FourWayDraftScoreError("strict-prior atom artifact self hash changed")
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise FourWayDraftScoreError("strict-prior atom rows are missing")
+    if _sha_bytes(_canonical_bytes(rows)) != _require_hash(
+        payload.get("rows_sha256"), "strict-prior atom row values hash"
+    ):
+        raise FourWayDraftScoreError("strict-prior atom row values changed")
     _verify_strict_prior_source_binding(payload, source, label="strict-prior atom")
     producer = payload.get("producer")
     if not isinstance(producer, Mapping):
         raise FourWayDraftScoreError("strict-prior atom producer binding is missing")
-    if producer.get("training_order") != "earlier accepted calendar-date clusters only":
+    fold_sets: tuple[set[str], set[str], set[str], pd.Timestamp] | None = None
+    if fold is not None:
+        if cutoff_text is None:
+            raise FourWayDraftScoreError("strict-prior atom fold cutoff is missing")
+        fold_sets = _verify_fold_artifact_contract(
+            payload,
+            label="strict-prior atom",
+            fold=fold,
+            train_ids=train_ids,
+            validation_ids=validation_ids,
+            prior_validation_ids=prior_validation_ids,
+            cutoff_text=cutoff_text,
+        )
+    elif producer.get("training_order") != "earlier accepted calendar-date clusters only":
         raise FourWayDraftScoreError("strict-prior atom training order changed")
     composition_code = _require_hash(
         producer.get("composition_signal_code_sha256"),
@@ -379,18 +522,16 @@ def _verify_strict_prior_atom_artifact(
     producer_code = _require_hash(producer.get("producer_code_sha256"), "strict-prior producer code hash")
     if expected_code_sha256 is not None and producer_code != _require_hash(expected_code_sha256, "expected producer code hash"):
         raise FourWayDraftScoreError("strict-prior producer code changed")
-    rows = payload.get("rows")
-    if not isinstance(rows, list) or not rows:
-        raise FourWayDraftScoreError("strict-prior atom rows are missing")
     source_date = dict(zip(source_maps["game_id"].astype(str), source_maps["date"]))
     accepted = {str(value) for value in source["accepted_game_ids"]}
+    expected_rows = accepted if fold_sets is None else (set(train_ids) | set(validation_ids))
     parsed: list[dict[str, Any]] = []
     seen: set[str] = set()
     for raw in rows:
         if not isinstance(raw, Mapping):
             raise FourWayDraftScoreError("strict-prior atom row is invalid")
         game_id = str(raw.get("game_id") or "")
-        if game_id not in accepted or game_id in seen:
+        if game_id not in expected_rows or game_id in seen:
             raise FourWayDraftScoreError("strict-prior atom IDs are invalid")
         seen.add(game_id)
         date = pd.to_datetime(raw.get("date"), utc=True, errors="coerce")
@@ -400,6 +541,16 @@ def _verify_strict_prior_atom_artifact(
         if raw.get("fit_through") is not None and (pd.isna(fit) or fit.normalize() >= date.normalize()):
             raise FourWayDraftScoreError(f"strict-prior atom fit is not prior: {game_id}")
         status = str(raw.get("status") or "unavailable")
+        if fold_sets is not None:
+            effective, validation, excluded, cutoff = fold_sets
+            if game_id in excluded:
+                if status == "available" or raw.get("reason") != "excluded_previous_outer_validation":
+                    raise FourWayDraftScoreError(f"strict-prior atom previous validation row is usable: {game_id}")
+            elif game_id in validation and (
+                raw.get("fit_through") is not None
+                and (pd.isna(fit) or fit.normalize() >= cutoff.normalize())
+            ):
+                raise FourWayDraftScoreError(f"strict-prior atom validation fit crossed cutoff: {game_id}")
         edge = raw.get("edge_components")
         if status == "available":
             if not isinstance(edge, Mapping) or set(edge) != {*STATIC_COMPONENTS, "total"}:
@@ -421,6 +572,7 @@ def _verify_strict_prior_atom_artifact(
                     "static_total_logit": total,
                     "atom_available": True,
                     "atom_fit_through": fit,
+                    "atom_exclusion_reason": None,
                 }
             )
         else:
@@ -431,9 +583,10 @@ def _verify_strict_prior_atom_artifact(
                 "static_total_logit": np.nan,
                 "atom_available": False,
                 "atom_fit_through": fit if raw.get("fit_through") is not None else pd.NaT,
+                "atom_exclusion_reason": raw.get("reason"),
             })
-    if seen != accepted:
-        raise FourWayDraftScoreError("strict-prior atom rows do not match accepted census")
+    if seen != expected_rows:
+        raise FourWayDraftScoreError("strict-prior atom rows do not match expected fold IDs")
     frame = pd.DataFrame(parsed).sort_values("game_id", kind="stable").reset_index(drop=True)
     return frame, {
         "artifact_path": str(path),
@@ -459,6 +612,11 @@ def _verify_strict_prior_form_artifact(
     *,
     expected_sha256: str,
     expected_code_sha256: str | None = None,
+    fold: int | None = None,
+    train_ids: Sequence[str] = (),
+    validation_ids: Sequence[str] = (),
+    prior_validation_ids: Sequence[str] = (),
+    cutoff_text: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     actual_sha = _sha_path(path)
     if actual_sha != _require_hash(expected_sha256, "expected strict-prior form hash"):
@@ -478,27 +636,45 @@ def _verify_strict_prior_form_artifact(
     unsigned.pop("artifact_sha256", None)
     if _sha_bytes(_canonical_bytes(unsigned)) != claimed:
         raise FourWayDraftScoreError("strict-prior form artifact self hash changed")
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise FourWayDraftScoreError("strict-prior form rows are missing")
+    if _sha_bytes(_canonical_bytes(rows)) != _require_hash(
+        payload.get("rows_sha256"), "strict-prior form row values hash"
+    ):
+        raise FourWayDraftScoreError("strict-prior form row values changed")
     _verify_strict_prior_source_binding(payload, source, label="strict-prior form")
     producer = payload.get("producer")
     if not isinstance(producer, Mapping):
         raise FourWayDraftScoreError("strict-prior form producer binding is missing")
-    if producer.get("training_order") != "earlier accepted calendar-date clusters only":
+    fold_sets: tuple[set[str], set[str], set[str], pd.Timestamp] | None = None
+    if fold is not None:
+        if cutoff_text is None:
+            raise FourWayDraftScoreError("strict-prior form fold cutoff is missing")
+        fold_sets = _verify_fold_artifact_contract(
+            payload,
+            label="strict-prior form",
+            fold=fold,
+            train_ids=train_ids,
+            validation_ids=validation_ids,
+            prior_validation_ids=prior_validation_ids,
+            cutoff_text=cutoff_text,
+        )
+    elif producer.get("training_order") != "earlier accepted calendar-date clusters only":
         raise FourWayDraftScoreError("strict-prior form training order changed")
     producer_code = _require_hash(producer.get("producer_code_sha256"), "strict-prior form code hash")
     if expected_code_sha256 is not None and producer_code != _require_hash(expected_code_sha256, "expected producer code hash"):
         raise FourWayDraftScoreError("strict-prior form producer code changed")
     source_date = dict(zip(source_maps["game_id"].astype(str), source_maps["date"]))
     accepted = {str(value) for value in source["accepted_game_ids"]}
-    rows = payload.get("rows")
-    if not isinstance(rows, list) or not rows:
-        raise FourWayDraftScoreError("strict-prior form rows are missing")
+    expected_rows = accepted if fold_sets is None else (set(train_ids) | set(validation_ids))
     parsed: list[dict[str, Any]] = []
     seen: set[str] = set()
     for raw in rows:
         if not isinstance(raw, Mapping):
             raise FourWayDraftScoreError("strict-prior form row is invalid")
         game_id = str(raw.get("game_id") or "")
-        if game_id not in accepted or game_id in seen:
+        if game_id not in expected_rows or game_id in seen:
             raise FourWayDraftScoreError("strict-prior form IDs are invalid")
         seen.add(game_id)
         date = pd.to_datetime(raw.get("date"), utc=True, errors="coerce")
@@ -507,6 +683,17 @@ def _verify_strict_prior_form_artifact(
         fit = pd.to_datetime(raw.get("fit_through"), utc=True, errors="coerce")
         if raw.get("fit_through") is not None and (pd.isna(fit) or fit.normalize() >= date.normalize()):
             raise FourWayDraftScoreError(f"strict-prior form fit is not prior: {game_id}")
+        if fold_sets is not None:
+            effective, validation, excluded, cutoff = fold_sets
+            status = str(raw.get("status") or "unavailable")
+            if game_id in excluded:
+                if status == "available" or raw.get("reason") != "excluded_previous_outer_validation":
+                    raise FourWayDraftScoreError(f"strict-prior form previous validation row is usable: {game_id}")
+            elif game_id in validation and (
+                raw.get("fit_through") is not None
+                and (pd.isna(fit) or fit.normalize() >= cutoff.normalize())
+            ):
+                raise FourWayDraftScoreError(f"strict-prior form validation fit crossed cutoff: {game_id}")
         value = raw.get("future_player_form_logit")
         form_value = float(value) if value is not None else np.nan
         if value is not None and not math.isfinite(form_value):
@@ -518,8 +705,8 @@ def _verify_strict_prior_form_artifact(
             "future_player_support_status": str(raw.get("status") or "unavailable"),
             "future_player_form_fit_through": fit,
         })
-    if seen != accepted:
-        raise FourWayDraftScoreError("strict-prior form rows do not match accepted census")
+    if seen != expected_rows:
+        raise FourWayDraftScoreError("strict-prior form rows do not match expected fold IDs")
     frame = pd.DataFrame(parsed).sort_values("game_id", kind="stable").reset_index(drop=True)
     return frame, {
         "artifact_path": str(path),
@@ -596,13 +783,29 @@ def _fold_spec(path: Path, fold: int) -> tuple[tuple[str, ...], tuple[str, ...],
 def _load_current(
     path: Path,
     *,
+    trust_binding: Mapping[str, Any] | None = None,
     source: Mapping[str, Any] | None = None,
     train_ids: Sequence[str] = (),
     validation_ids: Sequence[str] = (),
     cutoff_text: str | None = None,
     require_receipt: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    frame = pd.read_parquet(path / "current-rating-feature-ledger.parquet")
+    artifact_path = path / "current-rating-feature-ledger.parquet"
+    receipt_path = path / "current-rating-feature-ledger.receipt.json"
+    if require_receipt:
+        if not isinstance(trust_binding, Mapping):
+            raise FourWayDraftScoreError("current rating trust binding is required")
+        _verify_pinned_file(
+            receipt_path,
+            trust_binding.get("receipt"),
+            label="current rating receipt",
+        )
+        _verify_pinned_file(
+            artifact_path,
+            trust_binding.get("artifact"),
+            label="current rating artifact",
+        )
+    frame = pd.read_parquet(artifact_path)
     required = {"game_id", *CURRENT_FEATURES, "date", "series_id"}
     if not required.issubset(frame.columns):
         raise FourWayDraftScoreError("current rating producer columns are incomplete")
@@ -615,7 +818,6 @@ def _load_current(
         raise FourWayDraftScoreError("current rating producer identity changed")
     if not np.isfinite(output[list(CURRENT_FEATURES)].to_numpy(dtype=float)).all():
         raise FourWayDraftScoreError("current rating producer values are not finite")
-    receipt_path = path / "current-rating-feature-ledger.receipt.json"
     metadata: dict[str, Any] = {
         "verified": False,
         "receipt_present": receipt_path.is_file(),
@@ -667,11 +869,10 @@ def _load_current(
         artifact = receipt.get("artifact")
         if not isinstance(artifact, Mapping):
             raise FourWayDraftScoreError("current rating artifact binding is missing")
-        artifact_path = Path(str(artifact.get("path") or ""))
-        actual_path = path / "current-rating-feature-ledger.parquet"
-        if artifact_path.resolve() != actual_path.resolve():
+        receipt_artifact_path = Path(str(artifact.get("path") or ""))
+        if receipt_artifact_path.resolve() != artifact_path.resolve():
             raise FourWayDraftScoreError("current rating artifact path changed")
-        if int(artifact.get("bytes", -1)) != actual_path.stat().st_size or str(artifact.get("sha256")) != _sha_path(actual_path):
+        if int(artifact.get("bytes", -1)) != artifact_path.stat().st_size or str(artifact.get("sha256")) != _sha_path(artifact_path):
             raise FourWayDraftScoreError("current rating artifact bytes changed")
         digest = _current_artifact_digest(output, CURRENT_FEATURES)
         if str(receipt.get("ledger_rows_sha256")) != digest:
@@ -690,12 +891,28 @@ def _load_current(
 def _load_scaling(
     path: Path,
     *,
+    trust_binding: Mapping[str, Any] | None = None,
     source: Mapping[str, Any] | None = None,
     fold: int | None = None,
     cutoff_text: str | None = None,
     require_receipt: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    frame = pd.read_parquet(path / "scaling-native.parquet")
+    artifact_path = path / "scaling-native.parquet"
+    receipt_path = path / "scaling-native-receipt.json"
+    if require_receipt:
+        if not isinstance(trust_binding, Mapping):
+            raise FourWayDraftScoreError("scaling trust binding is required")
+        _verify_pinned_file(
+            receipt_path,
+            trust_binding.get("receipt"),
+            label="scaling receipt",
+        )
+        _verify_pinned_file(
+            artifact_path,
+            trust_binding.get("artifact"),
+            label="scaling artifact",
+        )
+    frame = pd.read_parquet(artifact_path)
     required = {"game_id", "date", "forecast_scaling_index", "forecast_snowball_index", "forecast_curve_available"}
     if not required.issubset(frame.columns):
         raise FourWayDraftScoreError("scaling producer columns are incomplete")
@@ -708,7 +925,6 @@ def _load_scaling(
     if np.isinf(numeric).any():
         raise FourWayDraftScoreError("scaling producer values are not finite")
 
-    receipt_path = path / "scaling-native-receipt.json"
     metadata: dict[str, Any] = {
         "verified": False,
         "receipt_present": receipt_path.is_file(),
@@ -778,6 +994,7 @@ def _load_future(
     model_path: Path,
     fold: int,
     *,
+    trust_binding: Mapping[str, Any] | None = None,
     source: Mapping[str, Any] | None = None,
     train_ids: Sequence[str] = (),
     validation_ids: Sequence[str] = (),
@@ -785,6 +1002,14 @@ def _load_future(
     require_receipt: bool = False,
     expected_artifact_sha256: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if require_receipt:
+        if not isinstance(trust_binding, Mapping):
+            raise FourWayDraftScoreError("future player form trust binding is required")
+        _verify_pinned_file(
+            model_path,
+            trust_binding.get("artifact"),
+            label="future player form artifact",
+        )
     actual_model_sha = _sha_path(model_path)
     if expected_artifact_sha256 is not None and actual_model_sha != _require_hash(expected_artifact_sha256, "expected future model hash"):
         raise FourWayDraftScoreError("future player form model bytes changed")
@@ -854,8 +1079,10 @@ def _load_future(
     if not isinstance(evidence, Mapping) or not isinstance(evidence.get("rows"), list):
         raise FourWayDraftScoreError("future player form component ledger is missing")
     rows = evidence["rows"]
-    claimed = str(evidence.get("sha256") or "").lower()
-    if claimed and _sha_bytes(_canonical_bytes(rows)) != claimed:
+    claimed = _require_hash(
+        evidence.get("sha256"), "future player form component ledger hash"
+    )
+    if _sha_bytes(_canonical_bytes(rows)) != claimed:
         raise FourWayDraftScoreError("future player form component ledger changed")
     output: list[dict[str, Any]] = []
     for raw in rows:
@@ -946,6 +1173,7 @@ def _joined_fold(
     atom_fit_through: pd.Timestamp | None,
     source_maps: pd.DataFrame,
     source: Mapping[str, Any],
+    fold_trust: Mapping[str, Any],
     strict_form: pd.DataFrame | None = None,
     strict_form_metadata: Mapping[str, Any] | None = None,
     strict_form_path: Path | None = None,
@@ -955,6 +1183,7 @@ def _joined_fold(
     train_ids, validation_ids, cutoff_text = _fold_spec(folds_root, fold)
     current, current_metadata = _load_current(
         folds_root / f"fold-{fold}" / "current-v2",
+        trust_binding=fold_trust.get("current"),
         source=source,
         train_ids=train_ids,
         validation_ids=validation_ids,
@@ -963,6 +1192,7 @@ def _joined_fold(
     )
     scaling, scaling_metadata = _load_scaling(
         folds_root / f"fold-{fold}" / "scaling-v2",
+        trust_binding=fold_trust.get("scaling"),
         source=source,
         fold=fold,
         cutoff_text=cutoff_text,
@@ -973,6 +1203,7 @@ def _joined_fold(
         future, future_metadata = _load_future(
             future_path,
             fold,
+            trust_binding=fold_trust.get("future"),
             source=source,
             train_ids=train_ids,
             validation_ids=validation_ids,
@@ -1018,19 +1249,19 @@ def _joined_fold(
         else atom
     )
     static_atom_ids = set(static_atom_available["game_id"].astype(str))
-    static_atom_missing = sorted(expected - static_atom_ids)
+    excluded_previous_ids = set(
+        atom.loc[
+            atom.get("atom_exclusion_reason", pd.Series(index=atom.index, dtype=object)).eq(
+                "excluded_previous_outer_validation"
+            ),
+            "game_id",
+        ].astype(str)
+    )
+    static_atom_missing = sorted((expected - excluded_previous_ids) - static_atom_ids)
     producer_audit = {
         "current_rating": _producer_id_audit(current, expected),
         "scaling": _producer_id_audit(scaling, expected),
-        # The strict-prior form artifact is a source-wide ledger.  Its rows
-        # outside this fold are valid and remain available for later folds.
-        # Fold-native future artifacts must still match this fold exactly.
-        "future_player_form": _producer_id_audit(
-            future,
-            set(source["accepted_game_ids"])
-            if future_metadata.get("strict_prior")
-            else expected,
-        ),
+        "future_player_form": _producer_id_audit(future, expected),
     }
     joined_ids = set(base["game_id"])
     missing = sorted(expected - joined_ids)
@@ -1118,6 +1349,7 @@ def _joined_fold(
         "missing_game_ids": missing[:20],
         "static_atom_missing_game_count": len(static_atom_missing),
         "static_atom_missing_game_ids": static_atom_missing[:20],
+        "excluded_previous_validation_game_count": len(excluded_previous_ids & expected),
         "train_dates_at_or_after_cutoff": prior_violations,
         "validation_dates_at_or_before_cutoff": validation_prior_violations,
         "static_atom_fit_through": atom_fit_through.isoformat().replace("+00:00", "Z")
@@ -1542,6 +1774,9 @@ def _static_descriptive_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
 def build_report(
     *,
     source_receipt_path: Path,
+    expected_source_receipt_sha256: str,
+    trust_root_path: Path,
+    expected_trust_root_sha256: str,
     source_root: Path,
     folds_root: Path,
     evaluation_root: Path,
@@ -1557,10 +1792,21 @@ def build_report(
     expected_strict_form_sha256: str | None = None,
     expected_strict_form_code_sha256: str | None = None,
     expected_future_model_sha256: str | None = None,
+    strict_fold_root: Path | None = None,
     bootstrap_seed: int = BOOTSTRAP_SEED,
     bootstrap_draws: int = BOOTSTRAP_DRAWS,
 ) -> dict[str, Any]:
-    source = _load_source(source_receipt_path.resolve())
+    source_receipt_path = source_receipt_path.resolve()
+    source = _load_source(
+        source_receipt_path,
+        expected_file_sha256=expected_source_receipt_sha256,
+    )
+    trust_root = _load_trust_root(
+        trust_root_path.resolve(),
+        expected_sha256=expected_trust_root_sha256,
+        source_receipt_path=source_receipt_path,
+        expected_source_receipt_sha256=expected_source_receipt_sha256,
+    )
     accepted_ids = {str(value) for value in source["accepted_game_ids"]}
     source_maps = _map_source(source_root.resolve(), accepted_ids, source=source)
     source_map_ids = set(source_maps["game_id"].astype(str))
@@ -1568,7 +1814,13 @@ def build_report(
         raise FourWayDraftScoreError("source map ledger does not match accepted IDs")
     if identity_sha256(source_map_ids) != str(source["source_identity_sha256"]).lower():
         raise FourWayDraftScoreError("source map identity does not match source receipt")
-    if strict_atom_path is not None:
+    if strict_fold_root is not None:
+        atom = pd.DataFrame()
+        atom_receipt = {
+            "producer_kind": "strict_prior_composition_signal_outer_fold",
+            "authority_verified": False,
+        }
+    elif strict_atom_path is not None:
         if expected_strict_atom_sha256 is None:
             raise FourWayDraftScoreError("expected strict-prior atom hash is required")
         atom, atom_receipt = _verify_strict_prior_atom_artifact(
@@ -1627,27 +1879,85 @@ def build_report(
     joined_by_fold: dict[int, pd.DataFrame] = {}
     fold_reports: list[dict[str, Any]] = []
     blockers: set[str] = set()
-    if strict_atom_path is None and not atom_receipt["authority_verified"]:
+    if strict_atom_path is None and strict_fold_root is None and not atom_receipt["authority_verified"]:
         blockers.add("public_atom_authority_receipt_unverified")
+    prior_validation_ids: set[str] = set()
+    fold_atom_receipts: dict[str, dict[str, Any]] = {}
+    fold_form_receipts: dict[str, dict[str, Any]] = {}
     for fold in (1, 2, 3):
+        fold_trust = trust_root["folds"][str(fold)]
+        if not isinstance(fold_trust, Mapping):
+            raise FourWayDraftScoreError(f"fold {fold} trust binding is missing")
+        spec_path = folds_root.resolve() / f"fold-{fold}-spec.json"
+        _verify_pinned_file(spec_path, fold_trust.get("spec"), label=f"fold {fold} specification")
+        fold_train_ids, fold_validation_ids, fold_cutoff = _fold_spec(folds_root.resolve(), fold)
+        fold_atom = atom
+        fold_atom_receipt = atom_receipt
+        fold_form = strict_form
+        fold_form_receipt = strict_form_receipt
+        fold_form_path: Path | None = strict_form_path.resolve() if strict_form_path is not None else None
+        if strict_fold_root is not None:
+            fold_root = strict_fold_root.resolve() / f"fold-{fold}"
+            fold_atom_path = fold_root / "strict-prior-composition-atoms.json"
+            fold_form_path = fold_root / "strict-prior-player-form.json"
+            atom_binding = fold_trust.get("strict_atom")
+            form_binding = fold_trust.get("strict_form")
+            if not isinstance(atom_binding, Mapping) or not isinstance(form_binding, Mapping):
+                raise FourWayDraftScoreError(f"fold {fold} strict feature trust binding is missing")
+            _verify_pinned_file(fold_atom_path, atom_binding, label=f"fold {fold} strict atom")
+            _verify_pinned_file(fold_form_path, form_binding, label=f"fold {fold} strict form")
+            fold_atom, fold_atom_receipt = _verify_strict_prior_atom_artifact(
+                fold_atom_path,
+                source,
+                source_maps,
+                expected_sha256=str(atom_binding["sha256"]),
+                expected_code_sha256=expected_strict_atom_code_sha256,
+                fold=fold,
+                train_ids=fold_train_ids,
+                validation_ids=fold_validation_ids,
+                prior_validation_ids=tuple(prior_validation_ids),
+                cutoff_text=fold_cutoff,
+            )
+            fold_form, fold_form_receipt = _verify_strict_prior_form_artifact(
+                fold_form_path,
+                source,
+                source_maps,
+                expected_sha256=str(form_binding["sha256"]),
+                expected_code_sha256=expected_strict_form_code_sha256,
+                fold=fold,
+                train_ids=fold_train_ids,
+                validation_ids=fold_validation_ids,
+                prior_validation_ids=tuple(prior_validation_ids),
+                cutoff_text=fold_cutoff,
+            )
+            fold_atom_receipt["static_components_sha256"] = _sha_bytes(
+                _canonical_bytes(
+                    fold_atom.loc[fold_atom["atom_available"].astype(bool), ["game_id", *STATIC_FEATURES, "static_total_logit"]]
+                    .sort_values("game_id", kind="stable")
+                    .to_dict("records")
+                )
+            )
+            fold_atom_receipts[str(fold)] = fold_atom_receipt
+            fold_form_receipts[str(fold)] = fold_form_receipt
         joined, fold_report = _joined_fold(
             fold=fold,
             folds_root=folds_root.resolve(),
             evaluation_root=evaluation_root.resolve(),
-            atom=atom,
+            atom=fold_atom,
             atom_fit_through=atom_fit_through,
             source_maps=source_maps,
             source=source,
-            strict_form=strict_form,
-            strict_form_metadata=strict_form_receipt,
-            strict_form_path=strict_form_path.resolve() if strict_form_path is not None else None,
+            fold_trust=fold_trust,
+            strict_form=fold_form,
+            strict_form_metadata=fold_form_receipt,
+            strict_form_path=fold_form_path,
             require_producer_receipts=require_producer_receipts,
             expected_future_model_sha256=expected_future_model_sha256,
         )
         joined_by_fold[fold] = joined
         fold_reports.append(fold_report)
         if fold_report["static_atom_missing_game_count"]:
-            blockers.add(f"fold_{fold}_static_atom_coverage_missing")
+            blockers.add(f"fold_{fold}_static_atom_partial_coverage")
         if fold_report["train_dates_at_or_after_cutoff"]:
             blockers.add(f"fold_{fold}_training_chronology_invalid")
         if fold_report["validation_dates_at_or_before_cutoff"]:
@@ -1656,9 +1966,9 @@ def build_report(
             blockers.add(f"fold_{fold}_static_atom_chronology_invalid")
         if fold_report["future_player_form_prior_violations"]:
             blockers.add(f"fold_{fold}_future_player_form_prior_chronology_invalid")
-        if atom_fit_through is None and strict_atom_path is None:
+        if atom_fit_through is None and strict_atom_path is None and strict_fold_root is None:
             blockers.add("public_atom_fit_watermark_missing")
-        elif strict_atom_path is None and fold_report["static_atom_fit_through_at_or_after_cutoff"]:
+        elif strict_atom_path is None and strict_fold_root is None and fold_report["static_atom_fit_through_at_or_after_cutoff"]:
             blockers.add(f"public_atom_fit_watermark_not_prior_to_fold_{fold}")
         if fold_report["joined_train_count"] == 0 and fold_report["joined_validation_count"]:
             blockers.add(f"fold_{fold}_static_atom_rows_validation_only")
@@ -1671,7 +1981,7 @@ def build_report(
                 blockers.add(f"fold_{fold}_current_rating_contract_unverified")
             if not fold_report["scaling_contract"].get("verified"):
                 blockers.add(f"fold_{fold}_scaling_contract_unverified")
-            if strict_form_path is None and not fold_report["future_contract"].get("artifact_verified"):
+            if strict_form_path is None and strict_fold_root is None and not fold_report["future_contract"].get("artifact_verified"):
                 blockers.add(f"fold_{fold}_future_player_form_contract_unverified")
         for producer, audit in fold_report["producer_coverage"].items():
             if audit["missing_game_count"]:
@@ -1682,6 +1992,7 @@ def build_report(
             blockers.add(f"fold_{fold}_series_overlap")
         if fold_report["scaling_contract"].get("receipt_present") and not fold_report["scaling_contract"].get("verified"):
             blockers.add(f"fold_{fold}_scaling_contract_unverified")
+        prior_validation_ids.update(fold_validation_ids)
     descriptive_frame = pd.concat(list(joined_by_fold.values()), ignore_index=True)
     # Each public atom row is retained once.  A later fold may contain a row
     # that was a validation row in an earlier fold, so deduplicate by ID.
@@ -1715,14 +2026,14 @@ def build_report(
                     fold_chronology_blockers.append("future_player_form_chronology_invalid")
                 if fold_report["future_player_form_chronology_missing"]:
                     fold_chronology_blockers.append("future_player_form_chronology_missing")
-                if strict_atom_path is None and fold_report["static_atom_fit_through_at_or_after_cutoff"]:
+                if strict_atom_path is None and strict_fold_root is None and fold_report["static_atom_fit_through_at_or_after_cutoff"]:
                     fold_chronology_blockers.append("static_atom_fit_watermark_invalid")
                 if require_producer_receipts:
                     if not fold_report["current_contract"].get("verified"):
                         fold_chronology_blockers.append("current_rating_contract_unverified")
                     if not fold_report["scaling_contract"].get("verified"):
                         fold_chronology_blockers.append("scaling_contract_unverified")
-                    if strict_form_path is None and not fold_report["future_contract"].get("artifact_verified"):
+                    if strict_form_path is None and strict_fold_root is None and not fold_report["future_contract"].get("artifact_verified"):
                         fold_chronology_blockers.append("future_player_form_contract_unverified")
             if fold_chronology_blockers:
                 blockers.update(
@@ -1736,7 +2047,10 @@ def build_report(
                     }
                 )
                 continue
-            if any(fold_report["fold"] == fold and fold_report["missing_game_count"] for fold_report in fold_reports):
+            if any(
+                fold_report["fold"] == fold and fold_report["missing_game_count"]
+                for fold_report in fold_reports
+            ):
                 fold_results.append({"fold": fold, "status": "blocked", "blockers": ["static_atom_coverage_missing"]})
                 continue
             def valid_rows(candidate: pd.DataFrame) -> pd.Series:
@@ -1830,11 +2144,22 @@ def build_report(
             "feature_names": list(feature_names),
             "producer_requirements": [
                 "strict_prior_composition_atoms"
-                if strict_atom_path is not None and requirement == "public_static_atoms"
+                if (strict_atom_path is not None or strict_fold_root is not None) and requirement == "public_static_atoms"
                 else requirement
                 for requirement in _producer_requirements(variant)
             ],
-            "static_components_sha256": atom_receipt["static_components_sha256"],
+            "static_components_sha256": _sha_bytes(
+                _canonical_bytes(
+                    {
+                        str(fold): (
+                            fold_atom_receipts[str(fold)]["static_components_sha256"]
+                            if strict_fold_root is not None
+                            else atom_receipt["static_components_sha256"]
+                        )
+                        for fold in (1, 2, 3)
+                    }
+                )
+            ),
             "folds": fold_results,
             "valid_fold_count": len(evaluated),
         }
@@ -1855,18 +2180,18 @@ def build_report(
             "source_identity_sha256": source["source_identity_sha256"],
             "source_receipt_sha256": source["receipt_sha256"],
         },
-        "static_atom": atom_receipt,
-        "future_player_form": strict_form_receipt,
+        "static_atom": fold_atom_receipts if strict_fold_root is not None else atom_receipt,
+        "future_player_form": fold_form_receipts if strict_fold_root is not None else strict_form_receipt,
         "coverage": {
             "accepted_game_count": int(source["source_game_count"]),
-            "public_atom_game_count": int(len(atom)),
+            "public_atom_game_count": int(len(atom)) if strict_fold_root is None else 0,
             "static_atom_available_game_count": int(
                 atom["atom_available"].astype(bool).sum()
-                if "atom_available" in atom.columns
-                else len(atom)
+                if strict_fold_root is None and "atom_available" in atom.columns
+                else (len(atom) if strict_fold_root is None else 0)
             ),
-            "strict_prior_atom": strict_atom_path is not None,
-            "strict_prior_form": strict_form_path is not None,
+            "strict_prior_atom": strict_atom_path is not None or strict_fold_root is not None,
+            "strict_prior_form": strict_form_path is not None or strict_fold_root is not None,
             "descriptive_subset_game_count": int(len(descriptive_rows)),
             "folds": fold_reports,
         },
@@ -1914,6 +2239,9 @@ def write_report(report: Mapping[str, Any], output_dir: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument("--expected-source-receipt-sha256", required=True)
+    parser.add_argument("--trust-root", required=True, type=Path)
+    parser.add_argument("--expected-trust-root-sha256", required=True)
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--folds-root", required=True, type=Path)
     parser.add_argument("--evaluation-root", required=True, type=Path)
@@ -1929,12 +2257,16 @@ def main() -> int:
     parser.add_argument("--expected-strict-form-sha256")
     parser.add_argument("--expected-strict-form-code-sha256")
     parser.add_argument("--expected-future-model-sha256")
+    parser.add_argument("--strict-fold-root", type=Path)
     parser.add_argument("--bootstrap-seed", type=int, default=BOOTSTRAP_SEED)
     parser.add_argument("--bootstrap-draws", type=int, default=BOOTSTRAP_DRAWS)
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args()
     report = build_report(
         source_receipt_path=args.source_receipt,
+        expected_source_receipt_sha256=args.expected_source_receipt_sha256,
+        trust_root_path=args.trust_root,
+        expected_trust_root_sha256=args.expected_trust_root_sha256,
         source_root=args.source_root,
         folds_root=args.folds_root,
         evaluation_root=args.evaluation_root,
@@ -1950,6 +2282,7 @@ def main() -> int:
         expected_strict_form_sha256=args.expected_strict_form_sha256,
         expected_strict_form_code_sha256=args.expected_strict_form_code_sha256,
         expected_future_model_sha256=args.expected_future_model_sha256,
+        strict_fold_root=args.strict_fold_root,
         bootstrap_seed=args.bootstrap_seed,
         bootstrap_draws=args.bootstrap_draws,
     )
