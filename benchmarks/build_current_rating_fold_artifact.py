@@ -11,6 +11,7 @@ import time
 import pandas as pd
 
 from lol_kills.research.future_value_rating import (
+    _frame_game_ids,
     _map_model_frame,
     bind_verified_leaguepedia_series_crosswalk,
     build_rating_feature_producer_manifest,
@@ -48,6 +49,23 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _accepted_map_frame(
+    maps: pd.DataFrame,
+    *,
+    source_receipt: dict[str, object],
+) -> pd.DataFrame:
+    """Select the exact accepted map census before series assignment."""
+
+    accepted_ids = tuple(str(value) for value in source_receipt["accepted_game_ids"])
+    accepted_set = set(accepted_ids)
+    game_ids = _frame_game_ids(maps, "maps").astype(str)
+    selected = maps.loc[game_ids.isin(accepted_set)].copy()
+    selected_ids = _frame_game_ids(selected, "maps").astype(str)
+    if selected_ids.duplicated().any() or set(selected_ids) != accepted_set:
+        raise RuntimeError("maps do not match the accepted census for series binding")
+    return selected
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", required=True, type=Path)
@@ -81,8 +99,9 @@ def main() -> int:
     series_source = "conservative_series_superset"
     series_receipt_file_sha256 = None
     if args.crosswalk is not None and args.crosswalk_receipt is not None:
+        accepted_maps = _accepted_map_frame(maps, source_receipt=source_receipt)
         bound_maps = bind_verified_leaguepedia_series_crosswalk(
-            maps,
+            accepted_maps,
             crosswalk_path=args.crosswalk.resolve(),
             receipt_path=args.crosswalk_receipt.resolve(),
             source_receipt=source_receipt,
@@ -98,13 +117,38 @@ def main() -> int:
                 args.crosswalk_receipt_file_sha256
             ),
         )
+        eligible_ids = {
+            str(value) for value in source_receipt["model_eligible_game_ids"]
+        }
+        model_frame = model_frame[
+            model_frame["game_id"].astype(str).isin(eligible_ids)
+        ].copy()
+        if set(model_frame["game_id"].astype(str)) != eligible_ids:
+            raise RuntimeError("series frame does not match the eligible census")
+        mapped = model_frame.get("_series_crosswalk_mapped")
+        assignments = model_frame.get("_series_crosswalk_assignment")
+        series = model_frame["series_id"].astype("string").str.strip()
+        if (
+            mapped is None
+            or assignments is None
+            or not pd.api.types.is_bool_dtype(mapped.dtype)
+            or mapped.isna().any()
+            or not bool(mapped.all())
+            or assignments.astype("string").str.strip().isna().any()
+            or assignments.astype("string").str.strip().eq("").any()
+            or series.isna().any()
+            or not bool(series.str.startswith("leaguepedia:").all())
+        ):
+            raise RuntimeError(
+                "model-eligible census lacks exact Leaguepedia series coverage"
+            )
         series_by_game = dict(
             zip(
                 model_frame["game_id"].astype(str),
                 model_frame["series_id"].astype(str),
             )
         )
-        series_source = str(model_frame.attrs["series_cluster_source"])
+        series_source = "verified_leaguepedia_series_crosswalk"
         series_receipt_file_sha256 = str(
             args.crosswalk_receipt_file_sha256
         )

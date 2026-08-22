@@ -645,6 +645,16 @@ def build_bundle(
             base_audit=dict(model_frame.attrs.get("series_cluster_audit") or {}),
             assignments=crosswalk_assignments,
         )
+        eligible_series = model_frame["series_id"].astype("string").str.strip()
+        if eligible_series.isna().any() or not bool(
+            eligible_series.str.startswith("leaguepedia:").all()
+        ):
+            raise FourVariantBundleError(
+                "eligible series partition contains a conservative proxy"
+            )
+        model_frame.attrs[
+            "series_cluster_source"
+        ] = "verified_leaguepedia_series_crosswalk"
     identity = model_frame[["game_id", "date", "series_id"]].copy()
     nested_root = _prepare_inner_output_root(
         folds_root / "nested-inner-v1"

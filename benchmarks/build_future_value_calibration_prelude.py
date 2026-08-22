@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from benchmarks.future_value_four_variant_bundle import (
+    _accepted_map_frame,
     _build_inner_fold_artifacts,
     _derive_inner_fold_spec,
 )
@@ -430,8 +431,9 @@ def build_prelude(
     maps = pd.read_parquet(source_root / "maps.parquet")
     players = pd.read_parquet(source_root / "oe_player_games.parquet")
     teams = pd.read_parquet(source_root / "oe_team_games.parquet")
+    accepted_maps = _accepted_map_frame(maps, source_receipt=source_receipt)
     bound_maps = bind_verified_leaguepedia_series_crosswalk(
-        maps,
+        accepted_maps,
         crosswalk_path=crosswalk_path,
         receipt_path=crosswalk_receipt_path,
         source_receipt=source_receipt,
@@ -464,11 +466,13 @@ def build_prelude(
         zip(identity["game_id"].astype(str), identity["series_id"].astype(str))
     )
     series_source = str(
-        model_frame.attrs.get("series_cluster_source")
-        or "mixed:leaguepedia_crosswalk+conservative_series_superset"
+        "verified_leaguepedia_series_crosswalk"
     )
-    if series_source != "mixed:leaguepedia_crosswalk+conservative_series_superset":
-        raise PreludeError("prelude series partition source changed")
+    eligible_series = model_frame["series_id"].astype("string").str.strip()
+    if eligible_series.isna().any() or not bool(
+        eligible_series.str.startswith("leaguepedia:").all()
+    ):
+        raise PreludeError("prelude series partition contains a conservative proxy")
     producer_root = _empty_root(producer_root)
     outer_root = _empty_root(producer_root / "outer")
     inner_root = _empty_root(producer_root / "inner")
@@ -478,7 +482,7 @@ def build_prelude(
     outer_records, outer_receipt = _build_producer_records(
         source_receipt_path=source_receipt_path,
         source_receipt=source_receipt,
-        maps=bound_maps,
+        maps=accepted_maps,
         players=players,
         teams=teams,
         identity=identity,
@@ -500,7 +504,7 @@ def build_prelude(
     inner_records, inner_receipt = _build_producer_records(
         source_receipt_path=source_receipt_path,
         source_receipt=source_receipt,
-        maps=bound_maps,
+        maps=accepted_maps,
         players=players,
         teams=teams,
         identity=identity,

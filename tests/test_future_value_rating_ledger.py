@@ -16,6 +16,10 @@ from lol_kills.research.future_value_rating_ledger import (
     build_fold_current_rating_feature_ledger,
     validate_fold_current_rating_feature_ledger,
 )
+from benchmarks.build_current_rating_fold_artifact import _accepted_map_frame
+from benchmarks.build_scaling_fold_artifact import (
+    _accepted_map_frame as _accepted_scaling_map_frame,
+)
 import hashlib
 import json
 
@@ -153,6 +157,68 @@ def test_fold_replay_batches_equal_timestamp_rows_and_emits_four_features() -> N
     assert partition["accepted_census_game_count"] == receipt["source_game_count"]
     assert partition["accepted_census_identity_sha256"] == receipt["source_identity_sha256"]
     assert partition["source_receipt_sha256"] == receipt["receipt_sha256"]
+
+
+def test_verified_leaguepedia_partition_is_authoritative() -> None:
+    maps, players, teams, receipt = _source()
+    series_by_game = {
+        game_id: f"leaguepedia:series-{game_id}" for game_id in GAME_IDS
+    }
+    ledger, artifact = build_fold_current_rating_feature_ledger(
+        maps,
+        players,
+        teams,
+        source_receipt=receipt,
+        train_game_ids=("g1", "g2"),
+        validation_game_ids=("g3", "g4"),
+        fit_window_end="2026-01-02T00:00:00Z",
+        series_by_game=series_by_game,
+        series_partition_source="verified_leaguepedia_series_crosswalk",
+        series_partition_receipt_file_sha256="a" * 64,
+    )
+    assert set(ledger["series_id"]) == set(series_by_game.values())
+    partition = artifact["series_partition_receipt"]
+    assert partition["source_type"] == "verified_leaguepedia_series_crosswalk"
+    assert partition["conservative"] is False
+    assert partition["authoritative"] is True
+
+
+def test_verified_leaguepedia_partition_rejects_proxy_row() -> None:
+    maps, players, teams, receipt = _source()
+    series_by_game = {
+        game_id: f"leaguepedia:series-{game_id}" for game_id in GAME_IDS
+    }
+    series_by_game["g4"] = "proxy:lck|fixture|blue|red"
+    with pytest.raises(CurrentRatingLedgerError, match="contains a proxy row"):
+        build_fold_current_rating_feature_ledger(
+            maps,
+            players,
+            teams,
+            source_receipt=receipt,
+            train_game_ids=("g1", "g2"),
+            validation_game_ids=("g3", "g4"),
+            fit_window_end="2026-01-02T00:00:00Z",
+            series_by_game=series_by_game,
+            series_partition_source="verified_leaguepedia_series_crosswalk",
+            series_partition_receipt_file_sha256="a" * 64,
+        )
+
+
+def test_current_producer_series_scope_excludes_raw_source_extras() -> None:
+    maps, _players, _teams, receipt = _source()
+    extra = maps.iloc[[0]].copy()
+    extra["game_uid"] = "raw-extra"
+    scoped = _accepted_map_frame(
+        pd.concat([maps, extra], ignore_index=True),
+        source_receipt=receipt,
+    )
+    assert set(scoped["game_uid"].astype(str)) == set(GAME_IDS)
+
+    scaling_scoped = _accepted_scaling_map_frame(
+        pd.concat([maps, extra], ignore_index=True),
+        source_receipt=receipt,
+    )
+    assert set(scaling_scoped["game_uid"].astype(str)) == set(GAME_IDS)
 
 
 def test_large_source_attrs_do_not_change_replay_values() -> None:

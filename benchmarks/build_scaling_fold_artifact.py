@@ -13,6 +13,7 @@ import pandas as pd
 from lol_kills.research.atomized_rf_composite import build_scaling_feature_ledger
 from lol_kills.research.future_value_rating import (
     SCALING_CURVE_SIGNED_MAP_FEATURES,
+    _frame_game_ids,
     _map_model_frame,
     bind_verified_leaguepedia_series_crosswalk,
     build_rating_feature_producer_manifest,
@@ -65,6 +66,21 @@ def _series_assignment_sha256(frame: pd.DataFrame) -> str:
     return hashlib.sha256(_canonical_bytes(rows)).hexdigest()
 
 
+def _accepted_map_frame(
+    maps: pd.DataFrame,
+    *,
+    source_receipt: dict[str, object],
+) -> pd.DataFrame:
+    accepted_ids = tuple(str(value) for value in source_receipt["accepted_game_ids"])
+    accepted_set = set(accepted_ids)
+    game_ids = _frame_game_ids(maps, "maps").astype(str)
+    selected = maps.loc[game_ids.isin(accepted_set)].copy()
+    selected_ids = _frame_game_ids(selected, "maps").astype(str)
+    if selected_ids.duplicated().any() or set(selected_ids) != accepted_set:
+        raise RuntimeError("maps do not match the accepted census for series binding")
+    return selected
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", required=True, type=Path)
@@ -90,8 +106,9 @@ def main() -> int:
     train_ids = tuple(str(value) for value in fold["train_game_ids"])
     validation_ids = tuple(str(value) for value in fold["validation_game_ids"])
     output_ids = tuple(sorted((*train_ids, *validation_ids)))
+    accepted_maps = _accepted_map_frame(maps, source_receipt=source_receipt)
     bound_maps = bind_verified_leaguepedia_series_crosswalk(
-        maps,
+        accepted_maps,
         crosswalk_path=args.crosswalk.resolve(),
         receipt_path=args.crosswalk_receipt.resolve(),
         source_receipt=source_receipt,
@@ -113,6 +130,19 @@ def main() -> int:
     ].copy()
     if tuple(sorted(eligible_frame["game_id"].astype(str))) != eligible_ids:
         raise RuntimeError("series assignment does not cover the eligible census")
+    eligible_series = eligible_frame["series_id"].astype("string").str.strip()
+    eligible_mapped = eligible_frame.get("_series_crosswalk_mapped")
+    if (
+        eligible_mapped is None
+        or not pd.api.types.is_bool_dtype(eligible_mapped.dtype)
+        or eligible_mapped.isna().any()
+        or not bool(eligible_mapped.all())
+        or eligible_series.isna().any()
+        or not bool(eligible_series.str.startswith("leaguepedia:").all())
+    ):
+        raise RuntimeError(
+            "model-eligible census lacks exact Leaguepedia series coverage"
+        )
     fold_frame = eligible_frame[
         eligible_frame["game_id"].astype(str).isin(output_ids)
     ].copy()

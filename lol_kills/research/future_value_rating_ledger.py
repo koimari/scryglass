@@ -122,6 +122,7 @@ _RECEIPT_STATE_KEY_POLICY = {
 _SERIES_PARTITION_SOURCE_STATUS = {
     "conservative_series_superset": (True, False),
     "mixed:leaguepedia_crosswalk+conservative_series_superset": (True, False),
+    "verified_leaguepedia_series_crosswalk": (False, True),
     "verified_grid_series": (False, True),
 }
 
@@ -876,8 +877,12 @@ def build_fold_current_rating_feature_ledger(
         if series_partition_receipt_file_sha256 is not None:
             raise CurrentRatingLedgerError("conservative series has an external receipt")
     else:
-        if series_partition_source != "mixed:leaguepedia_crosswalk+conservative_series_superset":
-            raise CurrentRatingLedgerError("verified mixed series source is invalid")
+        verified_series_sources = {
+            "mixed:leaguepedia_crosswalk+conservative_series_superset",
+            "verified_leaguepedia_series_crosswalk",
+        }
+        if series_partition_source not in verified_series_sources:
+            raise CurrentRatingLedgerError("verified series source is invalid")
         if not isinstance(series_partition_receipt_file_sha256, str) or re.fullmatch(
             r"[0-9a-f]{64}", series_partition_receipt_file_sha256, re.I
         ) is None:
@@ -889,7 +894,14 @@ def build_fold_current_rating_feature_ledger(
         if not eligible_set.issubset(normalized_series) or any(
             not normalized_series[game_id] for game_id in eligible_set
         ):
-            raise CurrentRatingLedgerError("verified mixed series mapping is incomplete")
+            raise CurrentRatingLedgerError("verified series mapping is incomplete")
+        if series_partition_source == "verified_leaguepedia_series_crosswalk" and any(
+            not normalized_series[game_id].startswith("leaguepedia:")
+            for game_id in eligible_set
+        ):
+            raise CurrentRatingLedgerError(
+                "verified Leaguepedia series mapping contains a proxy row"
+            )
         full_series_by_id = pd.Series(
             [
                 normalized_series.get(
@@ -1138,7 +1150,10 @@ def validate_fold_current_rating_feature_ledger(
     else:
         valid_series_binding = (
             series_source
-            == "mixed:leaguepedia_crosswalk+conservative_series_superset"
+            in {
+                "mixed:leaguepedia_crosswalk+conservative_series_superset",
+                "verified_leaguepedia_series_crosswalk",
+            }
             and isinstance(series_receipt_file_sha256, str)
             and re.fullmatch(r"[0-9a-f]{64}", series_receipt_file_sha256, re.I)
             is not None
