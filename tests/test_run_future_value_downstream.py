@@ -222,6 +222,31 @@ def test_plan_only_commands_are_canonical_json(tmp_path: Path) -> None:
     assert all(isinstance(token, str) for stage in stages for job in stage.jobs for token in job.command)
 
 
+def test_run_config_can_resume_after_plan_or_interrupted_run(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    inputs = _inputs(tmp_path)
+    config.output_root.mkdir(parents=True)
+    written = downstream._write_or_validate_config(
+        config,
+        inputs,
+        resume=False,
+    )
+
+    resumed = downstream._write_or_validate_config(
+        config,
+        inputs,
+        resume=True,
+    )
+
+    assert resumed == written
+    path = config.output_root / "run-config.json"
+    mutated = json.loads(path.read_text(encoding="utf-8"))
+    mutated["selected_variant"] = "both"
+    path.write_bytes(_canonical(mutated) + b"\n")
+    with pytest.raises(downstream.DownstreamRunError, match="configuration (hash )?changed"):
+        downstream._write_or_validate_config(config, inputs, resume=True)
+
+
 def test_missing_tier_and_draft_inputs_are_blockers(tmp_path: Path) -> None:
     config = _config(tmp_path)
     stages = downstream._optional_stage_plan(config, _inputs(tmp_path))

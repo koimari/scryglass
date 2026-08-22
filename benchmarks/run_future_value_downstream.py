@@ -3084,9 +3084,13 @@ def _write_or_validate_config(config: RunConfig, inputs: ResolvedInputs, *, resu
     expected_hash = _sha256_bytes(_canonical(expected))
     expected["config_sha256"] = expected_hash
     if resume:
-        actual = _receipt_hash(path, "downstream run config")
+        actual = _load_json(path, "downstream run config")
         if actual.get("schema_version") != RUN_CONFIG_SCHEMA_VERSION or actual.get("config_sha256") != expected_hash:
             raise DownstreamRunError("downstream run configuration changed")
+        actual_body = dict(actual)
+        actual_body.pop("config_sha256", None)
+        if _sha256_bytes(_canonical(actual_body)) != expected_hash:
+            raise DownstreamRunError("downstream run configuration hash changed")
         return actual
     if path.exists() or path.is_symlink():
         raise DownstreamRunError("downstream run configuration already exists")
