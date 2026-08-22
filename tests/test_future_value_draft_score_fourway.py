@@ -557,6 +557,7 @@ def test_regularized_log_loss_fit_is_deterministic_and_zero_intercept() -> None:
     assert fit_a["objective"] == "mean_log_loss_plus_l2"
     assert fit_a["intercept"] == 0.0
     assert fit_a["l2_penalty"] == 0.01
+    assert fit_a["max_iterations"] == 400
     assert fit_a["converged"] is True
     assert fit_a["gradient_inf_norm"] <= 1e-10
 

@@ -66,7 +66,7 @@ BOOTSTRAP_COMPARISONS = {
 # outer validation window.  The penalty applies to coefficients in the
 # training-derived feature units after per-column max-absolute scaling.
 LOGIT_L2_PENALTY = 0.01
-LOGIT_MAX_ITERATIONS = 100
+LOGIT_MAX_ITERATIONS = 400
 LOGIT_GRADIENT_TOLERANCE = 1e-10
 STATIC_COMPONENTS = (
     "base",
