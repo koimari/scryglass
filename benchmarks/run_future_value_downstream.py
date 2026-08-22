@@ -187,6 +187,13 @@ class Job:
     output_roots: tuple[Path, ...]
     expected_files: tuple[Path, ...]
     input_paths: tuple[Path, ...] = ()
+    output_dir_policy: str = "empty"
+
+    def __post_init__(self) -> None:
+        if self.output_dir_policy not in {"empty", "absent"}:
+            raise DownstreamRunError(
+                "job output directory policy must be 'empty' or 'absent'"
+            )
 
 
 @dataclass(frozen=True)
@@ -314,7 +321,7 @@ def _stage_outputs(root: Path, stage_name: str) -> tuple[dict[str, Any], Path]:
             raise DownstreamRunError(
                 f"fourway stage {stage_name} output escapes fourway root"
             ) from error
-        if int(raw.get("bytes") or -1) != path.stat().st_size or str(raw.get("sha256")) != _sha256_path(path):
+        if int(raw.get("bytes", -1)) != path.stat().st_size or str(raw.get("sha256")) != _sha256_path(path):
             raise DownstreamRunError(f"fourway stage {stage_name} output hash changed")
     return receipt, receipt_path
 
@@ -364,7 +371,7 @@ def _source_paths_from_receipt(
         path = (source_root / name).resolve()
         if bound != path or path.is_symlink() or not path.is_file():
             raise DownstreamRunError(f"source {label} file does not match source root")
-        if int(record.get("bytes") or -1) != path.stat().st_size or str(record.get("sha256") or "").lower() != _sha256_path(path):
+        if int(record.get("bytes", -1)) != path.stat().st_size or str(record.get("sha256") or "").lower() != _sha256_path(path):
             raise DownstreamRunError(f"source {label} file hash changed")
 
 
@@ -413,7 +420,7 @@ def _source_binding(
         raise DownstreamRunError("fourway run config source receipt binding is missing")
     if (
         config_receipt.get("path") != str(source_receipt_path)
-        or int(config_receipt.get("bytes") or -1) != source_receipt_path.stat().st_size
+        or int(config_receipt.get("bytes", -1)) != source_receipt_path.stat().st_size
         or str(config_receipt.get("sha256") or "").lower() != source_file_sha
     ):
         raise DownstreamRunError("fourway run config source receipt file binding changed")
@@ -470,7 +477,7 @@ def _source_binding(
             raise DownstreamRunError(f"fourway evaluation outputs are incomplete: {variant}")
         for candidate in (path, runtime):
             record = eval_outputs.get(str(candidate))
-            if record is None or int(record.get("bytes") or -1) != candidate.stat().st_size or str(record.get("sha256") or "").lower() != _sha256_path(candidate):
+            if record is None or int(record.get("bytes", -1)) != candidate.stat().st_size or str(record.get("sha256") or "").lower() != _sha256_path(candidate):
                 raise DownstreamRunError(f"fourway evaluation output hash changed: {variant}")
         model = _load_json(path, f"fourway {variant} evaluation")
         runtime_value = _load_json(runtime, f"fourway {variant} runtime receipt")
@@ -538,13 +545,13 @@ def _source_binding(
     uncertainty_csv = fourway_root / "stages" / "paired-uncertainty" / "paired-uncertainty.csv"
     uncertainty_outputs = {str(record.get("path")): record for record in uncertainty_stage.get("outputs", []) if isinstance(record, Mapping)}
     record = uncertainty_outputs.get(str(uncertainty_path))
-    if record is None or int(record.get("bytes") or -1) != uncertainty_path.stat().st_size or str(record.get("sha256") or "").lower() != _sha256_path(uncertainty_path):
+    if record is None or int(record.get("bytes", -1)) != uncertainty_path.stat().st_size or str(record.get("sha256") or "").lower() != _sha256_path(uncertainty_path):
         raise DownstreamRunError("paired uncertainty output hash changed")
     uncertainty_csv_path: Path | None = None
     csv_record = uncertainty_outputs.get(str(uncertainty_csv))
     if csv_record is None or not uncertainty_csv.is_file() or uncertainty_csv.is_symlink():
         raise DownstreamRunError("paired uncertainty CSV output is missing")
-    if int(csv_record.get("bytes") or -1) != uncertainty_csv.stat().st_size or str(csv_record.get("sha256") or "").lower() != _sha256_path(uncertainty_csv):
+    if int(csv_record.get("bytes", -1)) != uncertainty_csv.stat().st_size or str(csv_record.get("sha256") or "").lower() != _sha256_path(uncertainty_csv):
         raise DownstreamRunError("paired uncertainty CSV output hash changed")
     uncertainty_csv_path = uncertainty_csv
     uncertainty = _load_json(uncertainty_path, "paired uncertainty")
@@ -716,6 +723,73 @@ def _selection_stage(config: RunConfig, inputs: ResolvedInputs, source: Mapping[
     )
 
 
+def _snapshot_comparison_worker(argv: Sequence[str]) -> int:
+    """Build a comparison from the current run's accepted-census artifacts."""
+
+    parser = argparse.ArgumentParser(description="Build a source-bound snapshot comparison")
+    parser.add_argument("--snapshot-comparison-worker", action="store_true")
+    parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument("--source-receipt-file-sha256", required=True)
+    parser.add_argument("--current-receipt", required=True, type=Path)
+    parser.add_argument("--future-receipt", required=True, type=Path)
+    parser.add_argument("--player-rank-diffs", required=True, type=Path)
+    parser.add_argument("--team-rank-diffs", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args(list(argv))
+    try:
+        from benchmarks.build_future_value_snapshot_comparison import (
+            _verify_current_snapshot_trust_root,
+        )
+        from lol_kills.research.future_value_snapshot_comparison import (
+            build_snapshot_comparison_report,
+        )
+
+        source_receipt_path = args.source_receipt.resolve()
+        source_receipt = _load_json(source_receipt_path, "source receipt")
+        validate_future_value_source_receipt_payload(source_receipt)
+        _authority_is_closed(source_receipt.get("authority"), "snapshot comparison source receipt")
+        if _sha256_path(source_receipt_path) != str(args.source_receipt_file_sha256).lower():
+            raise DownstreamRunError("snapshot comparison source receipt file hash changed")
+        current_receipt = _load_json(args.current_receipt.resolve(), "current snapshot receipt")
+        future_receipt = _load_json(args.future_receipt.resolve(), "future snapshot receipt")
+        player = _load_json(args.player_rank_diffs.resolve(), "player rank diffs")
+        team = _load_json(args.team_rank_diffs.resolve(), "team rank diffs")
+        future_source = future_receipt.get("source")
+        if not isinstance(future_source, Mapping):
+            raise DownstreamRunError("future snapshot source binding is missing")
+        for field in ("source_receipt_sha256", "source_identity_sha256", "source_game_count"):
+            if future_source.get(field) != source_receipt.get(
+                "receipt_sha256" if field == "source_receipt_sha256" else field
+            ):
+                raise DownstreamRunError(
+                    f"snapshot comparison future source binding changed: {field}"
+                )
+        trust_root = _verify_current_snapshot_trust_root(
+            current_receipt_path=args.current_receipt.resolve(),
+            current_receipt=current_receipt,
+            current_receipt_file_sha256=_sha256_path(args.current_receipt.resolve()),
+            source=dict(future_source),
+        )
+        report = build_snapshot_comparison_report(
+            current_receipt=current_receipt,
+            future_receipt=future_receipt,
+            player_rank_diff_artifact=player,
+            team_rank_diff_artifact=team,
+            current_receipt_file_sha256=_sha256_path(args.current_receipt.resolve()),
+            future_receipt_file_sha256=_sha256_path(args.future_receipt.resolve()),
+            player_rank_diff_file_sha256=_sha256_path(args.player_rank_diffs.resolve()),
+            team_rank_diff_file_sha256=_sha256_path(args.team_rank_diffs.resolve()),
+            expected_source_receipt_sha256=str(future_source.get("source_receipt_sha256") or ""),
+            current_snapshot_trust_root=trust_root,
+        )
+        _write_json(args.output.resolve(), report)
+        print(json.dumps({"status": report.get("status"), "blockers": report.get("blockers", [])}, sort_keys=True))
+        return 0
+    except (DownstreamRunError, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as error:
+        print(f"snapshot comparison worker failed: {error}", file=sys.stderr)
+        return 1
+
+
 def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, ...]:
     source = inputs.source_root
     receipt = inputs.source_receipt
@@ -778,6 +852,7 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
         output_roots=(final,),
         expected_files=(model, model_receipt, final / "final-fit-run.json"),
         input_paths=(source / "maps.parquet", source / "oe_player_games.parquet", source / "oe_team_games.parquet", receipt, current_artifact, current_receipt, inputs.evaluation_paths[config.selected_variant], *( (nested,) if nested is not None else () )),
+        output_dir_policy="absent",
     )
     final_stage = Stage(
         name="final_fit",
@@ -796,7 +871,7 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
                 "--source-root", source,
                 "--source-receipt", receipt,
                 "--source-receipt-sha256", inputs.source_receipt_file_sha256,
-                "--model-receipt", model,
+                "--model-receipt", model_receipt,
                 "--model-receipt-sha256", _digest_or_placeholder(model_receipt, "model-receipt-file"),
                 "--model-artifact", model,
                 "--model-artifact-sha256", _digest_or_placeholder(model, "model-artifact"),
@@ -829,38 +904,23 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
             output_roots=(snapshots,),
             expected_files=(snapshots / "future-value-snapshot-receipt.json", snapshots / "future-player-rank-diffs.json", snapshots / "future-team-rank-diffs.json", snapshots / "manifest.json"),
             input_paths=(source / "maps.parquet", source / "oe_player_games.parquet", source / "oe_team_games.parquet", receipt, current_snapshot_receipt, current / "player/player_ratings_snapshot.parquet", current / "team/ratings_snapshot.parquet", model, model_receipt),
+            output_dir_policy="absent",
         ),),
         output_roots=(snapshots,),
         expected_files=(snapshots / "future-value-snapshot-receipt.json", snapshots / "future-player-rank-diffs.json", snapshots / "future-team-rank-diffs.json", snapshots / "manifest.json"),
         blockers=dependent_blockers,
     )
-    comparison_blockers: tuple[str, ...] = ()
-    try:
-        from benchmarks.build_future_value_snapshot_comparison import (
-            TRUSTED_V15_INPUT_HASHES,
-            TRUSTED_V15_SOURCE_RECEIPT_SHA256,
-        )
-
-        comparison_inputs = {
-            "current_receipt": current_snapshot_receipt,
-            "future_receipt": snapshots / "future-value-snapshot-receipt.json",
-            "player_rank_diffs": snapshots / "future-player-rank-diffs.json",
-            "team_rank_diffs": snapshots / "future-team-rank-diffs.json",
-        }
-        if not all(path.is_file() and not path.is_symlink() for path in comparison_inputs.values()):
-            comparison_blockers = ("snapshot_comparison_inputs_not_available",)
-        elif any(_sha256_path(path) != TRUSTED_V15_INPUT_HASHES[key] for key, path in comparison_inputs.items()):
-            comparison_blockers = ("snapshot_comparison_cli_pinned_v15_inputs",)
-        elif inputs.source_receipt_sha256 != TRUSTED_V15_SOURCE_RECEIPT_SHA256:
-            comparison_blockers = ("snapshot_comparison_cli_pinned_v15_source",)
-    except Exception:
-        comparison_blockers = ("snapshot_comparison_builder_contract_unavailable",)
     comparison_stage = Stage(
         name="snapshot_comparison",
         jobs=(Job(
             name="snapshot_comparison",
-            command=_python_module(
-                "benchmarks.build_future_value_snapshot_comparison",
+            command=(
+                *_python_module(
+                    "benchmarks.run_future_value_downstream",
+                    "--snapshot-comparison-worker",
+                ),
+                "--source-receipt", receipt,
+                "--source-receipt-file-sha256", inputs.source_receipt_file_sha256,
                 "--current-receipt", current_snapshot_receipt,
                 "--future-receipt", snapshots / "future-value-snapshot-receipt.json",
                 "--player-rank-diffs", snapshots / "future-player-rank-diffs.json",
@@ -869,11 +929,11 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
             ),
             output_roots=(comparison,),
             expected_files=(comparison / "snapshot-comparison.json",),
-            input_paths=(current_snapshot_receipt, snapshots / "future-value-snapshot-receipt.json", snapshots / "future-player-rank-diffs.json", snapshots / "future-team-rank-diffs.json"),
+            input_paths=(receipt, current_snapshot_receipt, snapshots / "future-value-snapshot-receipt.json", snapshots / "future-player-rank-diffs.json", snapshots / "future-team-rank-diffs.json"),
         ),),
         output_roots=(comparison,),
         expected_files=(comparison / "snapshot-comparison.json",),
-        blockers=comparison_blockers,
+        blockers=(),
     )
     return (current_stage, final_stage, team_stage, snapshot_stage, comparison_stage)
 
@@ -925,6 +985,7 @@ def _plan_digest(stage: Stage) -> str:
                 "output_roots": [str(path) for path in job.output_roots],
                 "expected_files": [str(path) for path in job.expected_files],
                 "input_paths": [str(path) for path in job.input_paths],
+                "output_dir_policy": job.output_dir_policy,
             }
             for job in stage.jobs
         ],
@@ -966,6 +1027,32 @@ def _collect_outputs(roots: Iterable[Path]) -> list[dict[str, Any]]:
     return [_file_record(path) for path in sorted(paths, key=str)]
 
 
+def _semantic_blockers(stage: Stage) -> list[str]:
+    """Read producer status fields after a successful child exit."""
+
+    blocked_statuses = {"blocked", "research_only_blocked", "invalid", "failed", "error"}
+    blockers: list[str] = []
+    for path in stage.expected_files:
+        if path.suffix.lower() != ".json" or not path.is_file() or path.is_symlink():
+            continue
+        try:
+            value = _load_json(path, f"{stage.name} semantic output")
+        except DownstreamRunError as error:
+            blockers.append(f"{stage.name}:semantic_output_invalid:{path.name}")
+            continue
+        status = value.get("status")
+        if isinstance(status, str) and status in blocked_statuses:
+            blockers.append(f"{stage.name}:semantic_status:{path.name}:{status}")
+        raw = value.get("blockers")
+        if isinstance(raw, list):
+            blockers.extend(
+                f"{stage.name}:semantic_blocker:{path.name}:{item}"
+                for item in raw
+                if str(item).strip()
+            )
+    return sorted(set(blockers))
+
+
 def _input_records(stage: Stage) -> dict[str, dict[str, Any]]:
     records: dict[str, dict[str, Any]] = {}
     for path in sorted({path.resolve() for job in stage.jobs for path in job.input_paths}, key=str):
@@ -983,7 +1070,13 @@ def _log_record(path: Path, value: bytes, limit: int) -> dict[str, Any]:
 
 def _run_job(job: Job, config: RunConfig, stage_name: str) -> dict[str, Any]:
     for root in job.output_roots:
-        _ensure_empty(root)
+        if job.output_dir_policy == "absent":
+            if root.exists() or root.is_symlink():
+                raise DownstreamRunError(
+                    f"job output root must not exist: {root}"
+                )
+        else:
+            _ensure_empty(root)
     log_root = config.output_root / "logs" / stage_name
     started = time.perf_counter()
     started_at = _utc_now()
@@ -1078,7 +1171,7 @@ def _validate_stage_receipt(config: RunConfig, stage: Stage) -> dict[str, Any]:
                 f"downstream stage {stage.name} output escapes stage root"
             )
         output_paths.add(str(path))
-        if int(raw.get("bytes") or -1) != path.stat().st_size or str(raw.get("sha256") or "").lower() != _sha256_path(path):
+        if int(raw.get("bytes", -1)) != path.stat().st_size or str(raw.get("sha256") or "").lower() != _sha256_path(path):
             raise DownstreamRunError(f"downstream stage {stage.name} output hash changed")
     if receipt.get("status") == "completed":
         for expected in stage.expected_files:
@@ -1121,7 +1214,7 @@ def _validate_stage_receipt(config: RunConfig, stage: Stage) -> dict[str, Any]:
         path = _safe_path(str(raw.get("path") or ""), f"downstream stage {stage.name} input")
         if str(key) != str(path):
             raise DownstreamRunError(f"downstream stage {stage.name} input path binding changed")
-        if int(raw.get("bytes") or -1) != path.stat().st_size or str(raw.get("sha256") or "").lower() != _sha256_path(path):
+        if int(raw.get("bytes", -1)) != path.stat().st_size or str(raw.get("sha256") or "").lower() != _sha256_path(path):
             raise DownstreamRunError(f"downstream stage {stage.name} input hash changed")
     for job in jobs:
         if not isinstance(job, Mapping):
@@ -1137,7 +1230,7 @@ def _validate_stage_receipt(config: RunConfig, stage: Stage) -> dict[str, Any]:
                 raise DownstreamRunError(
                     f"downstream stage {stage.name} log escapes log root"
                 ) from error
-            if int(raw.get("bytes") or -1) != path.stat().st_size or str(raw.get("sha256") or "").lower() != _sha256_path(path):
+            if int(raw.get("bytes", -1)) != path.stat().st_size or str(raw.get("sha256") or "").lower() != _sha256_path(path):
                 raise DownstreamRunError(f"downstream stage {stage.name} log changed")
     return receipt
 
@@ -1171,6 +1264,8 @@ def _execute_stage(config: RunConfig, stage: Stage, *, resume: bool) -> dict[str
     outputs = _collect_outputs(stage.output_roots) if all(int(job["exit_code"]) == 0 for job in results) and all(root.is_dir() for root in stage.output_roots) else []
     missing = [str(path) for path in stage.expected_files if not path.is_file() or path.is_symlink()]
     blockers = ["child_command_failed"] if any(int(job["exit_code"]) != 0 for job in results) else []
+    if not blockers:
+        blockers.extend(_semantic_blockers(stage))
     if input_changed:
         blockers.append("input_changed_during_execution")
     if missing:
@@ -1182,9 +1277,14 @@ def _execute_stage(config: RunConfig, stage: Stage, *, resume: bool) -> dict[str
 def _write_selection(config: RunConfig, inputs: ResolvedInputs, source: Mapping[str, Any]) -> dict[str, Any]:
     root = _root(config, "selection")
     _ensure_empty(root)
+    selected_blockers = (
+        ["final_fit_builder_supports_future_player_form_only"]
+        if config.selected_variant != "future_player_form"
+        else []
+    )
     selected_payload = {
         "schema_version": SELECTION_SCHEMA_VERSION,
-        "status": "caller_selected_research_only",
+        "status": "caller_selected_blocked" if selected_blockers else "caller_selected_research_only",
         "selected_variant": config.selected_variant,
         "selection_method": "explicit_caller_choice",
         "auto_promotion": False,
@@ -1209,6 +1309,7 @@ def _write_selection(config: RunConfig, inputs: ResolvedInputs, source: Mapping[
         },
         "evaluation_stage_receipt": _file_record(inputs.evaluation_stage_receipt),
         "paired_uncertainty": {**_file_record(inputs.paired_uncertainty), "rows": inputs.paired_rows, "game_identity_sha256": inputs.paired_identity_sha256},
+        "blockers": selected_blockers,
         "authority": dict(AUTHORITY),
     }
     if inputs.paired_uncertainty_csv is not None:
@@ -1220,15 +1321,21 @@ def _write_selection(config: RunConfig, inputs: ResolvedInputs, source: Mapping[
     receipt_paths: dict[str, Path] = {}
     for variant, artifact in sorted(inputs.evaluation_paths.items()):
         model = _load_json(artifact, f"{variant} evaluation")
+        variant_blockers = (
+            ["final_fit_builder_supports_future_player_form_only"]
+            if variant != "future_player_form"
+            else []
+        )
         payload = {
             "schema_version": EVALUATION_RECEIPT_SCHEMA_VERSION,
-            "status": "research_only",
+            "status": "blocked" if variant_blockers else "research_only",
             "variant": variant,
             "source": selected_payload["source"],
             "artifact": _file_record(artifact),
             "runtime": _file_record(inputs.evaluation_runtime_paths[variant]),
             "authority": dict(AUTHORITY),
             "model_status": model.get("variants", {}).get(variant, {}).get("status") if isinstance(model.get("variants"), Mapping) else None,
+            "blockers": variant_blockers,
         }
         payload["receipt_sha256"] = _sha256_bytes(_canonical(payload))
         path = root / "evaluation-receipts" / f"{variant}.json"
@@ -1249,6 +1356,17 @@ def _validate_selection_payload(
         raise DownstreamRunError("selected variant choice changed")
     if value.get("selection_method") != "explicit_caller_choice" or value.get("auto_promotion") is not False:
         raise DownstreamRunError("selected variant was not caller-selected")
+    expected_selection_blockers = (
+        ["final_fit_builder_supports_future_player_form_only"]
+        if config.selected_variant != "future_player_form"
+        else []
+    )
+    if value.get("status") != (
+        "caller_selected_blocked" if expected_selection_blockers else "caller_selected_research_only"
+    ):
+        raise DownstreamRunError("selected variant status changed")
+    if value.get("blockers") != expected_selection_blockers:
+        raise DownstreamRunError("selected variant blockers changed")
     source = value.get("source")
     if not isinstance(source, Mapping):
         raise DownstreamRunError("selected variant source binding is missing")
@@ -1302,6 +1420,17 @@ def _validate_selection_payload(
         runtime = _file_record(inputs.evaluation_runtime_paths[variant])
         if receipt.get("artifact") != artifact or receipt.get("runtime") != runtime:
             raise DownstreamRunError(f"selected {variant} evaluation receipt artifacts changed")
+        expected_variant_blockers = (
+            ["final_fit_builder_supports_future_player_form_only"]
+            if variant != "future_player_form"
+            else []
+        )
+        if receipt.get("status") != (
+            "blocked" if expected_variant_blockers else "research_only"
+        ):
+            raise DownstreamRunError(f"selected {variant} evaluation receipt status changed")
+        if receipt.get("blockers") != expected_variant_blockers:
+            raise DownstreamRunError(f"selected {variant} evaluation receipt blockers changed")
     if value.get("authority") != AUTHORITY:
         raise DownstreamRunError("selected variant authority changed")
     return value
@@ -1383,7 +1512,12 @@ def _downstream_stage(config: RunConfig, inputs: ResolvedInputs, selection: Mapp
     return Stage(name="downstream_impact", jobs=() if blockers else (Job(name="downstream_impact", command=command, output_roots=(root,), expected_files=(output,), input_paths=tuple(required)),), output_roots=(root,), expected_files=(output,), blockers=tuple(sorted(set(blockers))))
 
 
-def _optional_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, ...]:
+def _optional_stage_plan(
+    config: RunConfig,
+    inputs: ResolvedInputs,
+    *,
+    tier_candidate_sha256: str | None = None,
+) -> tuple[Stage, ...]:
     final = _root(config, "final-fit")
     model = final / "final-v2-model.json"
     model_receipt = final / "final-v2-model-receipt.json"
@@ -1472,7 +1606,9 @@ def _optional_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Sta
         "--expected-trust-manifest-sha256", config.tier_trust_manifest_sha256 or "",
         "--source-root", config.tier_source_root or inputs.freeze_root,
         "--v2-candidate", tier_root / "v2-tier-candidate.json",
-        "--expected-v2-candidate-sha256", _digest_or_placeholder(tier_root / "v2-tier-candidate.json", "v2-tier-candidate"),
+        "--expected-v2-candidate-sha256",
+        tier_candidate_sha256
+        or _digest_or_placeholder(tier_root / "v2-tier-candidate.json", "v2-tier-candidate"),
         "--output-root", diff_root,
     )
     diff_job = Job(
@@ -1589,6 +1725,7 @@ def _optional_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Sta
                         draft_root / "descriptive-subset.json",
                     ),
                     input_paths=tuple(draft_inputs),
+                    output_dir_policy="absent",
                 ),
             ),
             output_roots=(draft_root,),
@@ -1684,6 +1821,15 @@ def _write_or_validate_config(config: RunConfig, inputs: ResolvedInputs, *, resu
 
 def _write_final(config: RunConfig, inputs: ResolvedInputs, receipts: Sequence[Mapping[str, Any]], blockers: Sequence[str]) -> dict[str, Any]:
     path = config.output_root / "run-receipt.json"
+    effective_blockers = list(blockers)
+    for receipt in receipts:
+        if receipt.get("status") != "completed":
+            effective_blockers.append(
+                f"stage_not_completed:{receipt.get('stage') or 'unknown'}"
+            )
+    effective_blockers = sorted(
+        {str(value) for value in effective_blockers if str(value).strip()}
+    )
     if path.exists():
         existing = _receipt_hash(path, "downstream final receipt")
         if existing.get("schema_version") != SCHEMA_VERSION:
@@ -1696,7 +1842,7 @@ def _write_final(config: RunConfig, inputs: ResolvedInputs, receipts: Sequence[M
             raise DownstreamRunError("downstream final selection binding changed")
         if existing.get("authority") != AUTHORITY:
             raise DownstreamRunError("downstream final receipt authority changed")
-        expected_status = "research_only_complete" if not blockers else "research_only_blocked"
+        expected_status = "research_only_complete" if not effective_blockers else "research_only_blocked"
         if existing.get("status") != expected_status:
             raise DownstreamRunError("downstream final receipt status changed")
         expected_source = {
@@ -1745,13 +1891,12 @@ def _write_final(config: RunConfig, inputs: ResolvedInputs, receipts: Sequence[M
             for item in existing_stages
         ] != current_stages:
             raise DownstreamRunError("downstream final stage bindings changed")
-        expected_blockers = sorted({str(value) for value in blockers if str(value).strip()})
-        if existing.get("blockers") != expected_blockers:
+        if existing.get("blockers") != effective_blockers:
             raise DownstreamRunError("downstream final blocker list changed")
         return existing
     payload = {
         "schema_version": SCHEMA_VERSION,
-        "status": "research_only_complete" if not blockers else "research_only_blocked",
+        "status": "research_only_complete" if not effective_blockers else "research_only_blocked",
         "completed_at": _utc_now(),
         "selected_variant": config.selected_variant,
         "selection_method": "explicit_caller_choice",
@@ -1784,7 +1929,7 @@ def _write_final(config: RunConfig, inputs: ResolvedInputs, receipts: Sequence[M
             {"stage": receipt.get("stage"), "status": receipt.get("status"), "receipt_sha256": receipt.get("receipt_sha256"), "outputs": receipt.get("outputs", []), "blockers": receipt.get("blockers", [])}
             for receipt in receipts
         ],
-        "blockers": sorted({str(value) for value in blockers if str(value).strip()}),
+        "blockers": effective_blockers,
         "authority": dict(AUTHORITY),
     }
     payload["receipt_sha256"] = _sha256_bytes(_canonical(payload))
@@ -1849,6 +1994,16 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
         selection = _write_selection(config, inputs, source)
     receipts: list[dict[str, Any]] = []
     blockers: list[str] = []
+    for variant, receipt_path in sorted(selection["receipt_paths"].items()):
+        variant_receipt = _receipt_hash(
+            receipt_path,
+            f"selected {variant} evaluation receipt",
+        )
+        blockers.extend(
+            f"selection:{variant}:{value}"
+            for value in variant_receipt.get("blockers", [])
+            if str(value).strip()
+        )
     selection_stage = _selection_stage(config, inputs, source)
     if resume and _stage_receipt_path(config, selection_stage).exists():
         receipts.append(_validate_stage_receipt(config, selection_stage))
@@ -1865,7 +2020,19 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
                 *( (inputs.paired_uncertainty_csv,) if inputs.paired_uncertainty_csv is not None else () ),
             )
         }
-        receipts.append(_write_stage_receipt(config, selection_stage, status="completed", outputs=outputs, inputs=selection_inputs))
+        selection_receipt_blockers = list(
+            value for value in blockers if str(value).startswith("selection:")
+        )
+        receipts.append(
+            _write_stage_receipt(
+                config,
+                selection_stage,
+                status="blocked" if selection_receipt_blockers else "completed",
+                blockers=selection_receipt_blockers,
+                outputs=outputs,
+                inputs=selection_inputs,
+            )
+        )
     # Rebuild the plan after each dependency.  Child CLIs receive the raw
     # hashes of receipts produced by the preceding stage.
     failed_core_stages: set[str] = set()
@@ -1892,14 +2059,33 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
         if receipt.get("status") != "completed":
             failed_core_stages.add(stage_name)
 
-    for stage in _optional_stage_plan(config, inputs):
+    failed_optional_stages: set[str] = set()
+    optional_dependencies = {"tier_diff": {"tier_shadow"}}
+    for optional_name in ("tier_shadow", "tier_diff", "draft_score"):
+        tier_candidate_sha256 = None
+        tier_candidate_path = _root(config, "tier-shadow") / "v2-tier-candidate.json"
+        if optional_name == "tier_diff" and tier_candidate_path.is_file() and not tier_candidate_path.is_symlink():
+            tier_candidate_sha256 = _sha256_path(tier_candidate_path)
+        stage = next(
+            item
+            for item in _optional_stage_plan(
+                config,
+                inputs,
+                tier_candidate_sha256=tier_candidate_sha256,
+            )
+            if item.name == optional_name
+        )
         if stage.name in {"tier_shadow", "tier_diff"}:
             stage = _blocked_stage(
                 stage,
                 [
                     f"dependency_{name}_blocked"
-                    for name in ("current_rating_trust", "final_fit")
-                    if name in failed_core_stages
+                    for name in (
+                        "current_rating_trust",
+                        "final_fit",
+                        *sorted(optional_dependencies.get(optional_name, set())),
+                    )
+                    if name in failed_core_stages or name in failed_optional_stages
                 ],
             )
         try:
@@ -1909,6 +2095,8 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
             receipt = _write_stage_receipt(config, stage, status="blocked", blockers=(str(error),)) if not _stage_receipt_path(config, stage).exists() else _validate_stage_receipt(config, stage)
         receipts.append(receipt)
         blockers.extend(str(value) for value in receipt.get("blockers", []))
+        if receipt.get("status") != "completed":
+            failed_optional_stages.add(optional_name)
 
     impact_stage = _downstream_stage(config, inputs, selection, blockers)
     if impact_stage.blockers:
@@ -2004,6 +2192,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> tuple[RunConfig, bool, boo
 
 def main(argv: Sequence[str] | None = None) -> int:
     try:
+        raw_argv = list(sys.argv[1:] if argv is None else argv)
+        if "--snapshot-comparison-worker" in raw_argv:
+            return _snapshot_comparison_worker(raw_argv)
         config, resume, plan_only = _parse_args(argv)
         result = run(config, resume=resume, plan_only=plan_only)
     except DownstreamRunError as error:

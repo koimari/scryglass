@@ -70,7 +70,7 @@ def test_variant_choice_is_explicit_and_closed() -> None:
         )
 
 
-def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Path) -> None:
+def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = _config(tmp_path)
     stages = downstream.build_stage_plan(config, _inputs(tmp_path))
 
@@ -90,6 +90,25 @@ def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Pa
         "-m",
         "benchmarks.build_full_current_rating_trust",
     )
+    # The synthetic input has no nested evidence, so inspect output policies
+    # through a small plan with that preflight patched open.
+    config_with_nested = replace(
+        config,
+        nested_selection=_inputs(tmp_path).evaluation_paths["future_player_form"],
+        nested_selection_sha256="a" * 64,
+    )
+    monkeypatch.setattr(downstream, "_nested_selection_blockers", lambda path, inputs: ())
+    stages = downstream._core_stage_plan(config_with_nested, _inputs(tmp_path))
+    final = stages[1].jobs[0]
+    assert final.output_dir_policy == "absent"
+    team = stages[2].jobs[0]
+    assert team.command[team.command.index("--model-receipt") + 1] == str(
+        config.output_root / "stages" / "final-fit" / "final-v2-model-receipt.json"
+    )
+    assert team.command[team.command.index("--model-artifact") + 1] == str(
+        config.output_root / "stages" / "final-fit" / "final-v2-model.json"
+    )
+    assert "--snapshot-comparison-worker" in stages[4].jobs[0].command
 
 
 def test_missing_tier_and_draft_inputs_are_blockers(tmp_path: Path) -> None:
@@ -138,6 +157,11 @@ def test_selection_sidecars_bind_exact_artifact_bytes(tmp_path: Path) -> None:
         receipt = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
         assert receipt["variant"] == variant
         assert receipt["artifact"]["sha256"] == hashlib.sha256(inputs.evaluation_paths[variant].read_bytes()).hexdigest()
+        if variant == "future_player_form":
+            assert receipt["status"] == "research_only"
+        else:
+            assert receipt["status"] == "blocked"
+            assert receipt["blockers"] == ["final_fit_builder_supports_future_player_form_only"]
         body = dict(receipt)
         claimed = body.pop("receipt_sha256")
         assert hashlib.sha256(_canonical(body)).hexdigest() == claimed
@@ -165,3 +189,86 @@ def test_resume_receipt_detects_output_mutation(tmp_path: Path) -> None:
     output.write_text("changed", encoding="utf-8")
     with pytest.raises(downstream.DownstreamRunError, match="output hash changed"):
         downstream._validate_stage_receipt(config, stage)
+
+
+def test_stub_builder_chain_honors_output_policy_and_semantic_blockers(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    writer = (
+        "from pathlib import Path; import sys; "
+        "root=Path(sys.argv[1]); mode=sys.argv[2]; "
+        "assert root.exists() == (mode == 'empty'); "
+        "root.mkdir(parents=True, exist_ok=True); "
+        "(root/'result.json').write_text(sys.argv[3], encoding='utf-8')"
+    )
+    absent_root = config.output_root / "stages" / "absent"
+    absent_output = absent_root / "result.json"
+    absent = downstream.Stage(
+        name="absent",
+        jobs=(downstream.Job(
+            name="stub_absent",
+            command=(downstream.sys.executable, "-c", writer, str(absent_root), "absent", '{"status":"research_only","blockers":[]}'),
+            output_roots=(absent_root,),
+            expected_files=(absent_output,),
+            output_dir_policy="absent",
+        ),),
+        output_roots=(absent_root,),
+        expected_files=(absent_output,),
+    )
+    absent_receipt = downstream._execute_stage(config, absent, resume=False)
+    assert absent_receipt["status"] == "completed"
+    assert downstream._validate_stage_receipt(config, absent)["status"] == "completed"
+
+    blocked_root = config.output_root / "stages" / "semantic-blocked"
+    blocked_output = blocked_root / "result.json"
+    blocked = downstream.Stage(
+        name="semantic-blocked",
+        jobs=(downstream.Job(
+            name="stub_blocked",
+            command=(downstream.sys.executable, "-c", writer, str(blocked_root), "empty", '{"status":"blocked","blockers":["stub_missing_input"]}'),
+            output_roots=(blocked_root,),
+            expected_files=(blocked_output,),
+        ),),
+        output_roots=(blocked_root,),
+        expected_files=(blocked_output,),
+    )
+    blocked_receipt = downstream._execute_stage(config, blocked, resume=False)
+    assert blocked_receipt["status"] == "blocked"
+    assert any("semantic_status" in value for value in blocked_receipt["blockers"])
+    assert any("stub_missing_input" in value for value in blocked_receipt["blockers"])
+
+
+def test_tier_diff_binds_candidate_hash_after_shadow(tmp_path: Path) -> None:
+    config = replace(
+        _config(tmp_path),
+        tier_source_root=tmp_path / "tier-source",
+        tier_repository_root=tmp_path / "tier-repo",
+        tier_trust_manifest=tmp_path / "tier-trust.json",
+        tier_trust_manifest_sha256="a" * 64,
+        tier_build_pooled_candidate=True,
+    )
+    config.tier_source_root.mkdir()
+    config.tier_repository_root.mkdir()
+    (config.tier_source_root / "source").mkdir()
+    (config.tier_source_root / "source" / "oe_player_games.parquet").write_bytes(b"")
+    (config.tier_source_root / "source" / "meta.json").write_bytes(b"{}")
+    _write(config.tier_source_root / "future-value-source-receipt.json", {})
+    candidate = config.output_root / "stages" / "tier-shadow" / "v2-tier-candidate.json"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_text("candidate", encoding="utf-8")
+    expected = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    stages = {stage.name: stage for stage in downstream._optional_stage_plan(config, _inputs(tmp_path), tier_candidate_sha256=expected)}
+    command = list(stages["tier_diff"].jobs[0].command)
+    assert command[command.index("--expected-v2-candidate-sha256") + 1] == expected
+
+
+def test_final_receipt_stays_blocked_when_stage_status_is_blocked(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    inputs = _inputs(tmp_path)
+    result = downstream._write_final(
+        config,
+        inputs,
+        [{"stage": "stub", "status": "blocked", "receipt_sha256": "f" * 64}],
+        (),
+    )
+    assert result["status"] == "research_only_blocked"
+    assert "stage_not_completed:stub" in result["blockers"]
