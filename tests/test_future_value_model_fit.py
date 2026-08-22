@@ -697,7 +697,12 @@ def test_proxy_series_prefers_stable_team_ids_over_alias_keys() -> None:
     assert audit["team_identity_columns"] == ["blue_teamid", "red_teamid"]
 
 
-def _phase_partition_fixture(tmp_path, game_ids: list[str]):
+def _phase_partition_fixture(
+    tmp_path,
+    game_ids: list[str],
+    *,
+    proxy_authority_blocker: bool = True,
+):
     maps, _players = _manual_form(len(game_ids))
     maps["game_uid"] = game_ids
     frame = _map_model_frame(maps)
@@ -708,14 +713,18 @@ def _phase_partition_fixture(tmp_path, game_ids: list[str]):
         "receipt_sha256": "d" * 64,
         "receipt_file_sha256": "e" * 64,
     }
+    if not proxy_authority_blocker:
+        frame["series_id"] = [f"leaguepedia:series-{game_id}" for game_id in game_ids]
     frame.attrs["series_cluster_audit"] = {
         "crosswalk_assignment_sha256": hashes["mapping_sha256"],
         "crosswalk_sha256": hashes["crosswalk_sha256"],
         "crosswalk_artifact_sha256": hashes["artifact_sha256"],
         "crosswalk_receipt_sha256": hashes["receipt_sha256"],
-        "partial_series_blocker": True,
-        "retained_proxy_game_count": 1,
-        "retained_proxy_cluster_count": 1,
+        "mapped_series_authoritative": True,
+        "mapped_game_count": len(game_ids),
+        "partial_series_blocker": proxy_authority_blocker,
+        "retained_proxy_game_count": int(proxy_authority_blocker),
+        "retained_proxy_cluster_count": int(proxy_authority_blocker),
     }
     frame.attrs["crosswalk_receipt_file_sha256"] = hashes["receipt_file_sha256"]
     source = _source_receipt(game_ids)
@@ -743,7 +752,7 @@ def _phase_partition_fixture(tmp_path, game_ids: list[str]):
         "reference_identity_sha256": identity_sha256(game_ids),
         "reference_assignment_sha256": assignment_sha256,
         "reference_assignment_match": True,
-        "proxy_authority_blocker": True,
+        "proxy_authority_blocker": proxy_authority_blocker,
     }
     artifact_path = tmp_path / "phase-candidate.json"
     artifact_path.write_text(
@@ -754,7 +763,7 @@ def _phase_partition_fixture(tmp_path, game_ids: list[str]):
                 "series_partition_reference_game_count": len(game_ids),
                 "series_partition_reference_identity_sha256": identity_sha256(game_ids),
                 "series_partition_reference_assignment_sha256": assignment_sha256,
-                "series_partition_proxy_authority_blocker": True,
+                "series_partition_proxy_authority_blocker": proxy_authority_blocker,
             },
             sort_keys=True,
         ),
@@ -831,6 +840,38 @@ def test_phase_partition_binding_requires_byte_bound_receipt_and_matches_rating_
     assert verified["status"] == "verified"
     assert verified["cross_model_partition_status"] == "comparable"
     assert verified["proxy_authority_blocker"] is True
+
+
+def test_phase_partition_binding_accepts_exact_direct_series_without_proxy_blocker(
+    tmp_path,
+) -> None:
+    game_ids = ["1", "2", "3", "4"]
+    (
+        frame,
+        source,
+        binding,
+        artifact_hash,
+        receipt_hash,
+        source_path,
+        source_file_hash,
+    ) = _phase_partition_fixture(
+        tmp_path,
+        game_ids,
+        proxy_authority_blocker=False,
+    )
+
+    verified = verify_phase_series_partition_binding(
+        frame,
+        source,
+        binding,
+        expected_phase_artifact_sha256=artifact_hash,
+        expected_phase_receipt_file_sha256=receipt_hash,
+        source_receipt_path=source_path,
+        source_receipt_file_sha256=source_file_hash,
+    )
+
+    assert verified["status"] == "verified"
+    assert verified["proxy_authority_blocker"] is False
 
 
 def test_phase_partition_binding_fails_closed_on_artifact_mutation(tmp_path) -> None:

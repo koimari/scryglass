@@ -2327,7 +2327,7 @@ def _phase_partition_is_evidence_copy(
     path: str,
     container: Mapping[str, Any],
 ) -> bool:
-    """Identify a partition copy that must carry the proxy blocker."""
+    """Identify a partition copy that must carry the proxy-status field."""
 
     if path in {"source", "source.series_partition_reference"} or path.endswith(".audit"):
         return False
@@ -2402,10 +2402,6 @@ def _phase_partition_evidence(
             )
             for alias in present
         ]
-        if any(value is not True for value in values):
-            raise FutureValueSourceError(
-                f"{label} {path} proxy_authority_blocker is not true"
-            )
 
     required = (
         "source_receipt_sha256",
@@ -2433,10 +2429,6 @@ def _phase_partition_evidence(
         raise FutureValueSourceError(f"{label} partition is not comparable")
     if result["reference_assignment_match"] is not True:
         raise FutureValueSourceError(f"{label} reference assignment is not verified")
-    if result["proxy_authority_blocker"] is not True:
-        raise FutureValueSourceError(
-            f"{label} mixed partition proxy_authority_blocker is not true"
-        )
     return result
 
 
@@ -2791,10 +2783,27 @@ def verify_phase_series_partition_binding(
         or retained_proxy_game_count > 0
         or retained_proxy_cluster_count > 0
     )
-    if not rating_proxy_blocker:
+    phase_proxy_blocker = artifact_evidence["proxy_authority_blocker"]
+    if phase_proxy_blocker != receipt_evidence["proxy_authority_blocker"]:
         raise FutureValueSourceError(
-            "rating crosswalk audit does not show retained proxy coverage"
+            "phase partition artifact and receipt proxy status differs"
         )
+    if phase_proxy_blocker != rating_proxy_blocker:
+        raise FutureValueSourceError(
+            "phase and rating proxy authority status differs"
+        )
+    if not rating_proxy_blocker:
+        mapped_game_count = rating_audit.get("mapped_game_count")
+        if (
+            rating_audit.get("mapped_series_authoritative") is not True
+            or isinstance(mapped_game_count, bool)
+            or not isinstance(mapped_game_count, int)
+            or mapped_game_count != len(eligible_ids)
+            or not bool(series_ids.astype(str).str.startswith("leaguepedia:").all())
+        ):
+            raise FutureValueSourceError(
+                "rating direct series authority is incomplete"
+            )
     for field, value in rating_crosswalk.items():
         if re.fullmatch(r"[0-9a-f]{64}", value) is None:
             raise FutureValueSourceError(f"rating phase partition {field} is missing")
@@ -2802,12 +2811,6 @@ def verify_phase_series_partition_binding(
             raise FutureValueSourceError(f"phase partition {field} differs")
     if artifact_evidence["reference_assignment_sha256"] != binding_reference_assignment:
         raise FutureValueSourceError("phase partition reference assignment differs")
-    if not artifact_evidence["proxy_authority_blocker"] or not receipt_evidence[
-        "proxy_authority_blocker"
-    ]:
-        raise FutureValueSourceError(
-            "phase partition proxy_authority_blocker is not true"
-        )
     if (
         len(reference_ids) != len(eligible_ids)
         and artifact_evidence["reference_assignment_sha256"]
@@ -2834,7 +2837,7 @@ def verify_phase_series_partition_binding(
         "crosswalk_artifact_sha256": artifact_evidence["artifact_sha256"],
         "crosswalk_receipt_sha256": artifact_evidence["receipt_sha256"],
         "crosswalk_receipt_file_sha256": artifact_evidence["receipt_file_sha256"],
-        "proxy_authority_blocker": True,
+        "proxy_authority_blocker": phase_proxy_blocker,
         "blockers": [],
     }
 
