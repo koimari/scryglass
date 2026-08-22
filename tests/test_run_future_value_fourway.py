@@ -49,6 +49,10 @@ def test_plan_has_sequential_stages_and_parallel_jobs(tmp_path: Path) -> None:
     )
     assert "--crosswalk-receipt-file-sha256" in stages[2].jobs[0].command
     assert "--crosswalk-receipt-file-sha256" in stages[2].jobs[1].command
+    bundle_command = stages[3].jobs[0].command
+    assert bundle_command[bundle_command.index("--fold-specs-root") + 1] == str(
+        config.output_root / "stages/fold-specs"
+    )
     assert "__PHASE_ARTIFACT_SHA256__" in stages[5].jobs[0].command
     assert "--rating-variant" in stages[5].jobs[-1].command
     assert stages[5].jobs[-1].command[stages[5].jobs[-1].command.index("--rating-variant") + 1] == "both"

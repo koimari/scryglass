@@ -588,6 +588,7 @@ def build_bundle(
     source_root: Path,
     source_receipt_path: Path,
     folds_root: Path,
+    fold_specs_root: Path | None = None,
     inner_output_root: Path | None = None,
     crosswalk_path: Path | None = None,
     crosswalk_receipt_path: Path | None = None,
@@ -667,8 +668,9 @@ def build_bundle(
     }
     fold_receipts: list[dict[str, Any]] = []
     inner_fold_receipts: list[dict[str, Any]] = []
+    spec_root = folds_root if fold_specs_root is None else fold_specs_root
     for fold_number in (1, 2, 3):
-        fold_spec = _load_json(folds_root / f"fold-{fold_number}-spec.json", "fold spec")
+        fold_spec = _load_json(spec_root / f"fold-{fold_number}-spec.json", "fold spec")
         if int(fold_spec.get("fold") or -1) != fold_number:
             raise FourVariantBundleError("fold number changed")
         train_ids = tuple(sorted(str(value) for value in fold_spec["train_game_ids"]))
@@ -905,6 +907,7 @@ def main() -> int:
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--source-receipt", required=True, type=Path)
     parser.add_argument("--folds-root", required=True, type=Path)
+    parser.add_argument("--fold-specs-root", type=Path, default=None)
     parser.add_argument("--crosswalk", type=Path, default=None)
     parser.add_argument("--crosswalk-receipt", type=Path, default=None)
     parser.add_argument("--crosswalk-receipt-file-sha256", default=None)
@@ -925,6 +928,11 @@ def main() -> int:
         source_root=args.source_root.resolve(),
         source_receipt_path=args.source_receipt.resolve(),
         folds_root=args.folds_root.resolve(),
+        fold_specs_root=(
+            None
+            if args.fold_specs_root is None
+            else args.fold_specs_root.resolve()
+        ),
         inner_output_root=(
             None if args.inner_output_root is None else args.inner_output_root.resolve()
         ),
