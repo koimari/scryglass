@@ -9,10 +9,12 @@ import pytest
 
 from benchmarks.rebuild_future_phase import (
     PhaseRebuildError,
+    _build_rating_reference_partition_frame,
     build_phase_frame,
     select_accepted_rows,
     verify_source_bundle,
 )
+import lol_kills.research.future_value_rating as future_value_rating
 from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
 
 
@@ -126,6 +128,111 @@ def test_select_accepted_rows_allows_only_declared_source_extras() -> None:
             declared_extra_ids=["extra"],
             label="maps",
         )
+
+
+def test_rating_reference_excludes_declared_raw_extra_ids(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt_path, _freeze_root, _source_root = _write_source_bundle(tmp_path)
+    receipt = json.loads(receipt_path.read_text())
+    extra_ids = ["excluded-duplicate", "excluded-invalid"]
+    receipt["source_extra_game_ids"] = {"maps": extra_ids, "teams": []}
+    receipt_payload = dict(receipt)
+    receipt_payload.pop("receipt_sha256", None)
+    receipt["receipt_sha256"] = hashlib.sha256(_canonical(receipt_payload)).hexdigest()
+    accepted_ids = list(receipt["accepted_game_ids"])
+    maps = pd.DataFrame(
+        [
+            {
+                "game_uid": accepted_ids[0],
+                "date": "2026-01-01T00:00:00Z",
+                "blue_team_key": "blue",
+                "red_team_key": "red",
+            },
+            {
+                "game_uid": accepted_ids[1],
+                "date": "2026-01-02T00:00:00Z",
+                "blue_team_key": "blue",
+                "red_team_key": "red",
+            },
+            {
+                "game_uid": extra_ids[0],
+                "date": "2026-01-03T00:00:00Z",
+                "blue_team_key": "blue",
+                "red_team_key": "red",
+            },
+            {
+                "game_uid": extra_ids[0],
+                "date": "2026-01-03T00:00:00Z",
+                "blue_team_key": "blue",
+                "red_team_key": "red",
+            },
+            {
+                "game_uid": extra_ids[1],
+                "date": "2026-01-04T00:00:00Z",
+                "blue_team_key": "blue",
+                "red_team_key": "red",
+            },
+        ]
+    )
+    crosswalk_path = tmp_path / "crosswalk.json"
+    crosswalk_receipt_path = tmp_path / "crosswalk.receipt.json"
+    crosswalk_path.write_bytes(b"crosswalk")
+    crosswalk_receipt_path.write_bytes(b"crosswalk-receipt")
+    crosswalk_artifact_sha256 = hashlib.sha256(crosswalk_path.read_bytes()).hexdigest()
+    crosswalk_receipt_file_sha256 = hashlib.sha256(
+        crosswalk_receipt_path.read_bytes()
+    ).hexdigest()
+
+    def bind(frame: pd.DataFrame, **_kwargs: object) -> pd.DataFrame:
+        result = frame.copy()
+        result.attrs["verified_leaguepedia_series_crosswalk"] = {
+            "mapped_game_ids": result["game_id"].astype(str).tolist(),
+        }
+        return result
+
+    def model_frame(frame: pd.DataFrame, **kwargs: object) -> pd.DataFrame:
+        result = frame.copy()
+        result["series_id"] = "leaguepedia:fixture-series"
+        result["_series_crosswalk_mapped"] = True
+        result.attrs["series_cluster_source"] = (
+            "mixed:leaguepedia_crosswalk+conservative_series_superset"
+        )
+        result.attrs["series_cluster_audit"] = {
+            "source_receipt_sha256": str(
+                kwargs["verified_source_receipt"]["receipt_sha256"]
+            ),
+            "key_fields": ["league", "tournament", "unordered_team_pair"],
+            "crosswalk_assignment_sha256": "a" * 64,
+            "crosswalk_sha256": "b" * 64,
+            "crosswalk_artifact_sha256": crosswalk_artifact_sha256,
+            "crosswalk_receipt_sha256": "d" * 64,
+            "partial_series_blocker": False,
+        }
+        return result
+
+    monkeypatch.setattr(
+        future_value_rating,
+        "bind_verified_leaguepedia_series_crosswalk",
+        bind,
+    )
+    monkeypatch.setattr(future_value_rating, "_map_model_frame", model_frame)
+    reference, eligible_assignment, stats = _build_rating_reference_partition_frame(
+        maps,
+        source_receipt=receipt,
+        crosswalk_path=crosswalk_path,
+        crosswalk_receipt_path=crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+    )
+    assert reference.reference_game_count == len(accepted_ids)
+    assert reference.reference_identity_sha256 == identity_sha256(accepted_ids)
+    assert set(reference.frame["game_id"].astype(str)) == set(accepted_ids)
+    assert not set(extra_ids).intersection(reference.frame["game_id"].astype(str))
+    assert stats["reference_game_count"] == len(accepted_ids)
+    assert stats["reference_promoted_game_count"] == len(accepted_ids)
+    assert stats["reference_audit"]["partial_series_blocker"] is False
+    assert eligible_assignment == reference.eligible_assignment_sha256
 
 
 def test_build_phase_frame_keeps_incomplete_team_identity_missing(tmp_path: Path) -> None:

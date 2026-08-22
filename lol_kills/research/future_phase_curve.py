@@ -831,13 +831,9 @@ def _make_verified_phase_series_reference(
     verified_receipt = _validate_source_receipt(source_receipt)
     source_receipt_sha256 = str(verified_receipt["receipt_sha256"]).lower()
     source_ids = tuple(canonical_game_ids(verified_receipt["accepted_game_ids"]))
-    extras = verified_receipt.get("source_extra_game_ids")
-    extra_ids = tuple(
-        canonical_game_ids(
-            extras.get("maps", ()) if isinstance(extras, Mapping) else ()
-        )
-    )
-    expected_ids = tuple(canonical_game_ids((*source_ids, *extra_ids)))
+    # Source extras are rejected rows.  They remain bound in the source
+    # receipt, but they never enter a phase or series reference partition.
+    expected_ids = source_ids
     frame_ids = frame["game_id"].astype("string").str.strip()
     if frame_ids.isna().any() or frame_ids.eq("").any() or frame_ids.duplicated().any():
         raise FuturePhaseCurveError("verified series reference IDs are invalid")
@@ -1297,6 +1293,59 @@ def bind_phase_series_partition(
     else:
         raise FuturePhaseCurveError("verified phase series crosswalk binding is missing")
     mapped_ids &= eligible_set
+    # Folds may contain a subset of the eligible census.  The authority gate
+    # must use the rows in this phase frame, while a full evaluation uses the
+    # complete eligible census.
+    scope_ids = eligible_set if require_full_eligible else phase_id_set
+    scoped_series = series_by_game.reindex(sorted(scope_ids)).astype("string")
+    if scoped_series.isna().any() or scoped_series.eq("").any():
+        raise FuturePhaseCurveError(
+            "verified phase series crosswalk is missing scoped series assignments"
+        )
+    scoped_promoted = scoped_series.str.startswith("leaguepedia:")
+    scoped_mapped = scoped_series.index.to_series().isin(mapped_ids).to_numpy()
+    scoped_exact = scoped_promoted.to_numpy() & scoped_mapped
+    scoped_proxy_ids = set(
+        scoped_series.loc[~scoped_exact].astype(str)
+    )
+    eligible_audit = dict(base_audit)
+    eligible_audit.update(
+        {
+            "scope": (
+                "model_eligible_census"
+                if require_full_eligible
+                else "phase_frame"
+            ),
+            "map_count": int(len(scoped_series)),
+            "mapped_game_count": int(len(mapped_ids & scope_ids)),
+            "unmatched_game_count": int(len(scope_ids - mapped_ids)),
+            "mapped_series_count": int(
+                scoped_series.loc[scoped_promoted].nunique()
+            ),
+            "promoted_game_count": int(scoped_promoted.sum()),
+            "promoted_series_count": int(
+                scoped_series.loc[scoped_promoted].nunique()
+            ),
+            "retained_proxy_game_count": int((~scoped_exact).sum()),
+            "retained_proxy_cluster_count": int(len(scoped_proxy_ids)),
+            "partial_series_blocker": bool((~scoped_exact).any()),
+            "cluster_count": int(scoped_series.nunique()),
+            "colliding_cluster_count": int(
+                scoped_series.value_counts(sort=False).gt(1).sum()
+            ),
+            "collision_extra_map_count": int(
+                scoped_series.value_counts(sort=False)
+                .loc[lambda values: values.gt(1)]
+                .sub(1)
+                .sum()
+            ),
+            "max_cluster_size": int(
+                scoped_series.value_counts(sort=False).max()
+            ),
+            "full_source_map_count": int(base_audit.get("map_count") or len(model_frame)),
+        }
+    )
+    eligible_proxy_authority_blocker = bool((~scoped_exact).any())
     # Recompute the audit on the exact phase rows.  The shared loader's audit
     # is scoped to its input frame, which is a fold subset during fitting.
     partition = {
@@ -1322,12 +1371,10 @@ def bind_phase_series_partition(
             or reference_assignment_sha256
             == _verified_reference.reference_assignment_sha256
         ),
-        "authoritative": False,
-        "proxy_authority_blocker": bool(
-            len(mapped_ids & eligible_set) < len(eligible_set)
-            or base_audit.get("partial_series_blocker")
-        ),
-        "audit": base_audit,
+        "authoritative": not eligible_proxy_authority_blocker,
+        "proxy_authority_blocker": eligible_proxy_authority_blocker,
+        "audit": eligible_audit,
+        "reference_audit": base_audit,
     }
     if not partition["mapping_sha256"] or not partition["crosswalk_sha256"]:
         raise FuturePhaseCurveError("verified phase series mapping hash is missing")
@@ -1352,7 +1399,7 @@ def bind_phase_series_partition(
     result.attrs["series_partition"] = partition
     result.attrs["series_partition_source"] = MIXED_SERIES_PARTITION_SOURCE
     result.attrs["series_partition_key_fields"] = tuple(partition["key_fields"])
-    result.attrs["series_partition_authoritative"] = False
+    result.attrs["series_partition_authoritative"] = partition["authoritative"]
     result.attrs["series_partition_proxy_authority_blocker"] = partition[
         "proxy_authority_blocker"
     ]

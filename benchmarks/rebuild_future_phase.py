@@ -317,10 +317,6 @@ def _partition_payload(artifact: Mapping[str, Any]) -> dict[str, Any]:
         raise PhaseRebuildError(
             "phase artifact cross-model proxy blocker differs from partition evidence"
         )
-    if partition["proxy_authority_blocker"] is not True:
-        raise PhaseRebuildError(
-            "phase artifact lost the retained proxy authority blocker"
-        )
     return dict(partition)
 
 
@@ -332,11 +328,12 @@ def _build_rating_reference_partition_frame(
     crosswalk_receipt_path: Path,
     crosswalk_receipt_file_sha256: str,
 ) -> tuple[_VerifiedPhaseSeriesReference, str, dict[str, Any]]:
-    """Build the shared partition on the complete source map frame.
+    """Build the shared partition on the accepted source map frame.
 
     The rating mapper is the reference implementation.  The phase model
-    receives its verified full-frame assignments and only selects eligible
-    rows by game ID.
+    receives its verified accepted-census assignments and only selects
+    model-eligible rows by game ID.  Source extras remain source evidence;
+    they are not series-partition inputs.
     """
 
     from lol_kills.research.future_value_rating import (
@@ -344,7 +341,23 @@ def _build_rating_reference_partition_frame(
         bind_verified_leaguepedia_series_crosswalk,
     )
 
-    raw_maps = _phase_partition_map_frame(maps)
+    accepted_ids = tuple(str(value) for value in source_receipt["accepted_game_ids"])
+    extras = source_receipt.get("source_extra_game_ids")
+    declared_extra_ids = (
+        extras.get("maps", ()) if isinstance(extras, Mapping) else ()
+    )
+    accepted_maps = select_accepted_rows(
+        maps,
+        accepted_ids=accepted_ids,
+        declared_extra_ids=declared_extra_ids,
+        label="maps",
+    )
+    accepted_map_ids = _frame_game_ids(accepted_maps, "maps")
+    if accepted_map_ids.duplicated().any():
+        raise PhaseRebuildError(
+            "maps contain duplicate accepted game IDs for the series reference"
+        )
+    raw_maps = _phase_partition_map_frame(accepted_maps)
     bound_maps = bind_verified_leaguepedia_series_crosswalk(
         raw_maps,
         crosswalk_path=crosswalk_path,
@@ -591,11 +604,15 @@ def rebuild_phase_artifacts(
     }
     candidate_blockers = [
         "fold-internal fitted weights have no independent promotion receipt",
-        "authoritative whole-series identity is unavailable for retained proxy clusters",
         "current output is not wired into public ratings or public phase forecasts",
     ]
     if fit_partition["proxy_authority_blocker"]:
-        candidate_blockers.append("authoritative_series_id_missing_proxy_cluster_used")
+        candidate_blockers.extend(
+            [
+                "authoritative whole-series identity is unavailable for retained proxy clusters",
+                "authoritative_series_id_missing_proxy_cluster_used",
+            ]
+        )
     validation_folds_valid = int(evaluation.get("validation_folds_valid") or 0)
     if validation_folds_valid < REQUIRED_VALIDATION_FOLDS:
         candidate_blockers.extend(

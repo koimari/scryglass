@@ -145,27 +145,76 @@ def _crosswalk_receipt(ids: list[str]) -> dict[str, object]:
     return receipt
 
 
-def _fake_crosswalk_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+def _rehash_receipt(receipt: dict[str, object]) -> dict[str, object]:
+    payload = dict(receipt)
+    payload.pop("receipt_sha256", None)
+    receipt["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return receipt
+
+
+def _fake_crosswalk_loader(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    unmatched_ids: set[str] | None = None,
+) -> None:
+    unmatched = {str(value) for value in (unmatched_ids or set())}
+
     def bind(maps: pd.DataFrame, **_kwargs: object) -> pd.DataFrame:
         result = maps.copy()
+        game_ids = result["game_id"].astype(str)
         result.attrs["verified_leaguepedia_series_crosswalk"] = {
-            "mapped_game_ids": result["game_id"].astype(str).tolist(),
+            "mapped_game_ids": [
+                value for value in game_ids if value not in unmatched
+            ],
         }
+        crosswalk_path = _kwargs.get("crosswalk_path")
+        if crosswalk_path is not None and Path(crosswalk_path).is_file():
+            result.attrs["crosswalk_artifact_sha256"] = hashlib.sha256(
+                Path(crosswalk_path).read_bytes()
+            ).hexdigest()
+        receipt_path = _kwargs.get("receipt_path")
+        if receipt_path is not None and Path(receipt_path).is_file():
+            result.attrs["crosswalk_receipt_file_sha256"] = hashlib.sha256(
+                Path(receipt_path).read_bytes()
+            ).hexdigest()
         return result
 
     def model_frame(maps: pd.DataFrame, **_kwargs: object) -> pd.DataFrame:
         result = maps.copy()
+        game_ids = result["game_id"].astype(str)
+        result["_series_crosswalk_mapped"] = ~game_ids.isin(unmatched)
         result["series_id"] = [
-            f"leaguepedia:series-{int(index) // 2}"
-            for index in range(len(result))
+            (
+                f"team-tournament:proxy-{game_id}"
+                if game_id in unmatched
+                else f"leaguepedia:series-{int(index) // 2}"
+            )
+            for index, game_id in enumerate(game_ids)
         ]
+        source_receipt = _kwargs.get("verified_source_receipt")
+        source_receipt_sha256 = (
+            str(source_receipt.get("receipt_sha256"))
+            if isinstance(source_receipt, dict)
+            else ""
+        )
         result.attrs["series_cluster_audit"] = {
+            "source_receipt_sha256": source_receipt_sha256,
             "key_fields": ["league", "tournament", "unordered_team_pair"],
             "crosswalk_assignment_sha256": "a" * 64,
             "crosswalk_sha256": "b" * 64,
-            "crosswalk_artifact_sha256": "c" * 64,
+            "crosswalk_artifact_sha256": str(
+                result.attrs.get("crosswalk_artifact_sha256") or "c" * 64
+            ),
             "crosswalk_receipt_sha256": "d" * 64,
-            "partial_series_blocker": True,
+            "partial_series_blocker": bool(unmatched),
         }
         return result
 
@@ -669,7 +718,7 @@ def test_evaluation_blocks_non_authoritative_team_tournament_series_proxies() ->
     assert report["series_identity"]["blockers"]
 
 
-def test_verified_mixed_partition_binds_hashes_and_keeps_proxy_blocker(
+def test_verified_mixed_partition_binds_hashes_and_scopes_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     frame = _phase_frame(8)
@@ -692,11 +741,53 @@ def test_verified_mixed_partition_binds_hashes_and_keeps_proxy_blocker(
         "model_eligible_game_ids"
     ]
     assert artifact["cross_model_series_partition"]["status"] == "non_comparable"
-    assert artifact["cross_model_series_partition"]["proxy_authority_blocker"] is True
-    assert artifact["series_partition"]["proxy_authority_blocker"] is True
-    assert artifact["series_partition_proxy_authority_blocker"] is True
-    assert artifact["series_identity"]["authoritative"] is False
-    assert artifact["series_identity"]["blockers"]
+    assert artifact["cross_model_series_partition"]["proxy_authority_blocker"] is False
+    assert artifact["series_partition"]["proxy_authority_blocker"] is False
+    assert artifact["series_partition_proxy_authority_blocker"] is False
+    assert artifact["series_identity"]["authoritative"] is True
+    assert artifact["series_identity"]["blockers"] == []
+
+
+def test_accepted_unmatched_reference_row_outside_eligible_scope_is_not_a_blocker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference_frame = _phase_frame(9)
+    phase_frame = reference_frame.iloc[:8].copy()
+    accepted_ids = list(reference_frame["game_uid"].astype(str))
+    eligible_ids = list(canonical_game_ids(accepted_ids[:8]))
+    receipt = _crosswalk_receipt(accepted_ids)
+    receipt["model_eligible_game_count"] = len(eligible_ids)
+    receipt["model_eligible_game_ids"] = eligible_ids
+    receipt["model_eligible_identity_sha256"] = identity_sha256(eligible_ids)
+    _rehash_receipt(receipt)
+    _fake_crosswalk_loader(monkeypatch, unmatched_ids={accepted_ids[-1]})
+    reference = future_value_rating._map_model_frame(
+        _phase_partition_map_frame(reference_frame)
+    )
+    expected_eligible = phase_series_assignment_sha256(
+        reference.loc[reference["game_id"].astype(str).isin(set(eligible_ids))],
+        game_column="game_id",
+    )
+    artifact = fit_phase_curve(
+        phase_frame,
+        source_receipt=receipt,
+        feature_columns=["prior_form_gold_diff"],
+        crosswalk_path="fixture/crosswalk.json",
+        crosswalk_receipt_path="fixture/crosswalk.receipt.json",
+        crosswalk_receipt_file_sha256="e" * 64,
+        series_partition_reference_frame=reference_frame,
+        series_partition_assignment_sha256=expected_eligible,
+    )
+    partition = artifact["series_partition"]
+    assert partition["reference_game_count"] == len(accepted_ids)
+    assert partition["reference_identity_sha256"] == identity_sha256(accepted_ids)
+    assert partition["audit"]["full_source_map_count"] == len(accepted_ids)
+    assert partition["audit"]["retained_proxy_game_count"] == 0
+    assert partition["reference_audit"]["partial_series_blocker"] is True
+    assert partition["proxy_authority_blocker"] is False
+    assert partition["authoritative"] is True
+    assert artifact["cross_model_series_partition"]["status"] == "comparable"
+    assert artifact["series_identity"]["authoritative"] is True
 
 
 def test_verified_mixed_partition_evaluation_uses_shared_series_clusters(
@@ -717,12 +808,12 @@ def test_verified_mixed_partition_evaluation_uses_shared_series_clusters(
     )
     assert report["cluster_column"] == "series_id"
     assert report["cross_model_series_partition"]["status"] == "non_comparable"
-    assert report["cross_model_series_partition"]["proxy_authority_blocker"] is True
-    assert report["series_partition"]["proxy_authority_blocker"] is True
+    assert report["cross_model_series_partition"]["proxy_authority_blocker"] is False
+    assert report["series_partition"]["proxy_authority_blocker"] is False
     assert report["series_partition_mapping_sha256"] == "a" * 64
     assert report["series_partition_eligible_game_count"] == len(frame)
-    assert report["series_identity"]["authoritative"] is False
-    assert report["cluster_safe"] is False
+    assert report["series_identity"]["authoritative"] is True
+    assert report["cluster_safe"] is True
 
 
 def test_verified_mixed_partition_requires_full_reference_digest(
@@ -776,9 +867,9 @@ def test_verified_mixed_partition_requires_full_reference_digest(
         series_partition_assignment_sha256=expected_eligible,
     )
     assert artifact["cross_model_series_partition"]["status"] == "comparable"
-    assert artifact["cross_model_series_partition"]["proxy_authority_blocker"] is True
-    assert artifact["series_partition"]["proxy_authority_blocker"] is True
-    assert _partition_payload(artifact)["proxy_authority_blocker"] is True
+    assert artifact["cross_model_series_partition"]["proxy_authority_blocker"] is False
+    assert artifact["series_partition"]["proxy_authority_blocker"] is False
+    assert _partition_payload(artifact)["proxy_authority_blocker"] is False
     assert artifact["series_partition_reference_game_count"] == len(reference_frame)
     assert artifact["series_partition_reference_identity_sha256"] == identity_sha256(
         reference_frame["game_uid"].tolist()
