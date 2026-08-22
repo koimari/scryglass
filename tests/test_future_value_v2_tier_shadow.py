@@ -27,6 +27,7 @@ from lol_kills.research.future_value_tier_shadow import (
     FINAL_MODEL_AUTHORITY,
     TierShadowError,
     _verify_authority,
+    _verify_current_feature_binding,
     load_tier_offset_ledger,
     score_variant_design,
     verify_final_model,
@@ -111,6 +112,39 @@ def test_tier_authority_is_closed_and_explicitly_non_authoritative() -> None:
         _verify_authority(
             {key: value for key, value in AUTHORITY.items() if key != "odds"},
             "Tier authority",
+        )
+
+
+def test_current_feature_binding_uses_its_closed_receipt_schema() -> None:
+    ids = ["g1", "g2"]
+    source = _source_receipt(ids)
+    binding = {
+        "schema_version": "scryglass:future-value-final-current-rating-binding:v1",
+        "source_receipt_sha256": source["receipt_sha256"],
+        "source_identity_sha256": source["source_identity_sha256"],
+        "artifact": {"sha256": "c" * 64},
+        "fit_game_ids": ids,
+        "fit_game_identity_sha256": identity_sha256(ids),
+        "game_identity_sha256": identity_sha256(ids),
+        "rows": len(ids),
+        "feature_names": list(CURRENT_RATING_SIGNED_MAP_FEATURES),
+    }
+
+    _verify_current_feature_binding(
+        binding,
+        source,
+        expected_ledger_sha256="c" * 64,
+        expected_game_ids=ids,
+    )
+
+    mutated = dict(binding)
+    mutated["fit_game_ids"] = ["g1"]
+    with pytest.raises(TierShadowError, match="game census"):
+        _verify_current_feature_binding(
+            mutated,
+            source,
+            expected_ledger_sha256="c" * 64,
+            expected_game_ids=ids,
         )
 
 

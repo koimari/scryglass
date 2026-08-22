@@ -551,6 +551,44 @@ def verify_variant_model_receipt(*args: Any, **kwargs: Any) -> tuple[dict[str, A
 verify_variant_model = verify_final_model
 
 
+def _verify_current_feature_binding(
+    binding: Mapping[str, Any],
+    source_receipt: Mapping[str, Any],
+    *,
+    expected_ledger_sha256: str,
+    expected_game_ids: Sequence[str],
+) -> None:
+    """Verify the closed final-fit binding for current rating features."""
+
+    expected_ids = tuple(sorted(str(value) for value in expected_game_ids))
+    artifact = binding.get("artifact")
+    fit_ids = binding.get("fit_game_ids")
+    if (
+        binding.get("schema_version")
+        != "scryglass:future-value-final-current-rating-binding:v1"
+        or binding.get("source_receipt_sha256") != source_receipt.get("receipt_sha256")
+        or binding.get("source_identity_sha256")
+        != source_receipt.get("source_identity_sha256")
+        or not isinstance(artifact, Mapping)
+        or artifact.get("sha256") != expected_ledger_sha256
+        or not isinstance(fit_ids, (list, tuple))
+    ):
+        raise TierShadowError("current-rating model source binding is incomplete")
+    actual_ids = tuple(sorted(str(value) for value in fit_ids))
+    if (
+        len(actual_ids) != len(set(actual_ids))
+        or actual_ids != expected_ids
+        or binding.get("rows") != len(expected_ids)
+        or binding.get("fit_game_identity_sha256") != identity_sha256(expected_ids)
+        or binding.get("game_identity_sha256") != identity_sha256(expected_ids)
+    ):
+        raise TierShadowError("current-rating model game census changed")
+    if tuple(binding.get("feature_names") or ()) != tuple(
+        CURRENT_RATING_SIGNED_MAP_FEATURES
+    ):
+        raise TierShadowError("current-rating model feature schema changed")
+
+
 def verify_current_rating_ledger(
     ledger_path: Path | str,
     receipt_path: Path | str,
@@ -575,9 +613,12 @@ def verify_current_rating_ledger(
     if final_model_receipt is not None:
         binding = final_model_receipt.get("current_rating_feature_binding")
         if isinstance(binding, Mapping):
-            if binding.get("artifact", {}).get("sha256") not in {None, expected_ledger_sha256}:
-                raise TierShadowError("current-rating model artifact binding changed")
-            _source_binding_check(binding, source_receipt, label="current-rating model")
+            _verify_current_feature_binding(
+                binding,
+                source_receipt,
+                expected_ledger_sha256=expected_ledger_sha256,
+                expected_game_ids=(expected_game_ids or _source_ids(source_receipt)),
+            )
     try:
         frame = pd.read_parquet(ledger_file)
     except (OSError, ValueError) as error:
