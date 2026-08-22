@@ -401,6 +401,24 @@ def _validate_source_stable_ids(
         raise FinalFitError("source teams contain an invalid stable team ID")
 
 
+def _eligible_source_identity_frames(
+    players: pd.DataFrame,
+    teams: pd.DataFrame,
+    eligible_ids: tuple[str, ...],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Validate stable identities inside the exact model-eligible census."""
+
+    eligible = set(eligible_ids)
+    eligible_players = players.loc[
+        _frame_game_ids(players, "players").astype(str).isin(eligible)
+    ].copy()
+    eligible_teams = teams.loc[
+        _frame_game_ids(teams, "teams").astype(str).isin(eligible)
+    ].copy()
+    _validate_source_stable_ids(eligible_players, eligible_teams)
+    return eligible_players, eligible_teams
+
+
 def _evaluation_blockers(
     path: Path,
     source_receipt: Mapping[str, Any],
@@ -1195,7 +1213,7 @@ def fit_final_variant(
     maps = pd.read_parquet(source_maps_path)
     players = pd.read_parquet(source_players_path)
     teams = pd.read_parquet(source_teams_path)
-    _validate_source_stable_ids(players, teams)
+    players, teams = _eligible_source_identity_frames(players, teams, eligible_ids)
     model_frame = _map_model_frame(maps)
     model_frame = model_frame[
         model_frame["game_id"].astype(str).isin(eligible_ids)

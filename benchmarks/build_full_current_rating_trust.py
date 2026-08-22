@@ -141,33 +141,12 @@ def _safe_output_root(path: Path) -> Path:
     return path.resolve()
 
 
-def _source_paths(source_root: Path) -> dict[str, Path]:
-    if source_root.is_symlink() or not source_root.is_dir():
-        raise FullCurrentRatingTrustError("source root is missing or unsafe")
-    candidates = {
-        "maps": ("maps.parquet",),
-        "players": ("oe_player_games.parquet", "players.parquet"),
-        "teams": ("oe_team_games.parquet", "teams.parquet"),
-    }
-    result: dict[str, Path] = {}
-    for label, names in candidates.items():
-        for name in names:
-            path = source_root / name
-            if path.is_file() and not path.is_symlink():
-                result[label] = path
-                break
-        if label not in result:
-            raise FullCurrentRatingTrustError(f"source {label} parquet is missing")
-    return result
-
-
-def _read_source(source_root: Path) -> tuple[dict[str, pd.DataFrame], dict[str, Path]]:
-    paths = _source_paths(source_root)
+def _read_source(paths: Mapping[str, Path]) -> dict[str, pd.DataFrame]:
     try:
         frames = {label: pd.read_parquet(path) for label, path in paths.items()}
     except Exception as error:
         raise FullCurrentRatingTrustError("source parquet cannot be read") from error
-    return frames, paths
+    return frames
 
 
 def _source_file_path(
@@ -237,7 +216,7 @@ def _verify_source_receipt(
     source_root: Path,
     expected_file_sha256: str,
     expected_receipt_sha256: str | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Path]]:
     expected_file_sha256 = str(expected_file_sha256 or "").lower()
     if re.fullmatch(r"[0-9a-f]{64}", expected_file_sha256) is None:
         raise FullCurrentRatingTrustError("source receipt file SHA-256 is required")
@@ -260,38 +239,207 @@ def _verify_source_receipt(
     source_files = receipt.get("source_files")
     if not isinstance(source_files, Mapping):
         raise FullCurrentRatingTrustError("source file bindings are missing")
+    verified_paths: dict[str, Path] = {}
     for label, record in source_files.items():
         if not isinstance(label, str) or not isinstance(record, Mapping):
             raise FullCurrentRatingTrustError("source file binding is invalid")
-        _source_file_path(path, source_root, label, record)
-    return receipt
+        verified_paths[label] = _source_file_path(path, source_root, label, record)
+    if not {"maps", "players", "teams"}.issubset(verified_paths):
+        raise FullCurrentRatingTrustError("required source file bindings are missing")
+    return receipt, verified_paths
 
 
-def _validate_global_identities(players: pd.DataFrame, teams: pd.DataFrame) -> None:
-    """Reject stable IDs that change identity within the frozen source."""
+def _normalized_alias(value: Any) -> str:
+    """Return one deterministic display alias for fallback identity keys."""
 
-    if not {"playerid", "playername", "teamid", "teamname"}.issubset(players.columns):
+    return " ".join(_identity_text(value).casefold().split())
+
+
+def _fallback_identity(kind: str, *parts: str) -> str:
+    normalized = [str(value).strip() for value in parts]
+    if not normalized or any(not value for value in normalized):
+        raise FullCurrentRatingTrustError(f"{kind} fallback identity is incomplete")
+    digest = _sha256_bytes(_canonical_json_bytes(normalized))
+    return f"fallback:{kind}:{digest}"
+
+
+def _valid_stable_identity(value: Any, prefix: str) -> str:
+    text = _identity_text(value)
+    if text and not text.startswith(prefix):
+        raise FullCurrentRatingTrustError("source contains an invalid stable identity")
+    return text
+
+
+def _prepare_replay_identities(
+    players: pd.DataFrame,
+    teams: pd.DataFrame,
+    eligible_ids: tuple[str, ...],
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Fill missing replay keys with game-scoped, non-authoritative IDs."""
+
+    player_required = {"side", "position", "playerid", "playername", "teamid", "teamname"}
+    team_required = {"side", "teamid", "teamname"}
+    if not player_required.issubset(players.columns):
         raise FullCurrentRatingTrustError("stable player and team identity columns are required")
-    player_names: dict[str, set[str]] = defaultdict(set)
-    team_names: dict[str, set[str]] = defaultdict(set)
-    for row in players[["playerid", "playername", "teamid", "teamname"]].itertuples(
+    if not team_required.issubset(teams.columns):
+        raise FullCurrentRatingTrustError("stable team identity columns are required")
+
+    player_work = players.copy()
+    team_work = teams.copy()
+    player_work["__gid"] = _game_ids(player_work, "players").astype(str).to_numpy()
+    team_work["__gid"] = _game_ids(team_work, "teams").astype(str).to_numpy()
+    eligible = set(eligible_ids)
+    player_work = player_work.loc[player_work["__gid"].isin(eligible)].copy()
+    team_work = team_work.loc[team_work["__gid"].isin(eligible)].copy()
+    player_work["__side"] = player_work["side"].astype("string").str.strip().str.title()
+    team_work["__side"] = team_work["side"].astype("string").str.strip().str.title()
+
+    player_names = player_work["playername"].map(_normalized_alias)
+    team_names = pd.concat(
+        [player_work["teamname"], team_work["teamname"]], ignore_index=True
+    ).map(_normalized_alias)
+    if player_names.eq("").any() or team_names.eq("").any():
+        raise FullCurrentRatingTrustError("display identity is incomplete")
+
+    audit: dict[str, Any] = {
+        "policy": "stable_id_or_game_scoped_deterministic_fallback",
+        "resolved_scope": "exact_model_eligible_census_only",
+        "player_rows_total": int(len(player_work)),
+        "team_identity_rows_total": int(len(player_work) + len(team_work)),
+        "player_rows_source_stable": 0,
+        "player_rows_fallback": 0,
+        "team_rows_source_stable": 0,
+        "team_rows_resolved_stable": 0,
+        "team_rows_fallback": 0,
+    }
+
+    resolved_team_by_slot: dict[tuple[str, str], str] = {}
+    for (gid, side), player_group in player_work.groupby(["__gid", "__side"], sort=False):
+        if side not in {"Blue", "Red"}:
+            raise FullCurrentRatingTrustError(f"team side is invalid for {gid}")
+        team_group = team_work.loc[
+            team_work["__gid"].eq(str(gid)) & team_work["__side"].eq(str(side))
+        ]
+        if len(team_group) != 1:
+            raise FullCurrentRatingTrustError(f"team row identity is incomplete for {gid} {side}")
+        source_ids = {
+            stable
+            for stable in (
+                _valid_stable_identity(value, "oe:team:")
+                for value in [*player_group["teamid"].tolist(), *team_group["teamid"].tolist()]
+            )
+            if stable
+        }
+        if len(source_ids) > 1:
+            raise FullCurrentRatingTrustError(f"team stable identities conflict for {gid} {side}")
+        aliases = {
+            _normalized_alias(value)
+            for value in [*player_group["teamname"].tolist(), *team_group["teamname"].tolist()]
+        }
+        if len(aliases) != 1:
+            raise FullCurrentRatingTrustError(f"team display identities conflict for {gid} {side}")
+        alias = next(iter(aliases))
+        if source_ids:
+            resolved = next(iter(source_ids))
+        else:
+            resolved = _fallback_identity("team", str(gid), str(side), alias)
+        resolved_team_by_slot[(str(gid), str(side))] = resolved
+        original_values = [
+            *player_group["teamid"].tolist(),
+            *team_group["teamid"].tolist(),
+        ]
+        player_work.loc[player_group.index, "teamid"] = resolved
+        team_work.loc[team_group.index, "teamid"] = resolved
+        source_count = sum(
+            bool(_identity_text(value).startswith("oe:team:"))
+            for value in original_values
+        )
+        missing_count = len(original_values) - source_count
+        audit["team_rows_source_stable"] += source_count
+        audit["team_rows_resolved_stable"] += len(original_values) if source_ids else 0
+        audit["team_rows_fallback"] += len(original_values) if not source_ids else 0
+
+    resolved_player_ids: list[str] = []
+    for values in player_work.to_dict(orient="records"):
+        source_id = _valid_stable_identity(values.get("playerid"), "oe:player:")
+        alias = _normalized_alias(values.get("playername"))
+        if source_id:
+            resolved = source_id
+            audit["player_rows_source_stable"] += 1
+        else:
+            gid = str(values.get("__gid"))
+            side = str(values.get("__side"))
+            team_id = resolved_team_by_slot.get((gid, side))
+            role = str(_norm_role(values.get("position")))
+            resolved = _fallback_identity(
+                "player", gid, side, role, alias, str(team_id or "")
+            )
+            audit["player_rows_fallback"] += 1
+        resolved_player_ids.append(resolved)
+    player_work["playerid"] = resolved_player_ids
+
+    digest_rows = []
+    for row in player_work[["__gid", "__side", "position", "playerid", "teamid"]].itertuples(
         index=False, name=None
     ):
-        player_id, player_name, team_id, team_name = row
-        player_key = _identity_text(player_id)
-        team_key = _identity_text(team_id)
-        name = _identity_text(player_name)
-        team = _identity_text(team_name)
-        if not player_key.startswith("oe:player:") or not name:
-            raise FullCurrentRatingTrustError("player stable identity is incomplete")
-        if not team_key.startswith("oe:team:") or not team:
-            raise FullCurrentRatingTrustError("team stable identity is incomplete")
-        player_names[player_key].add(name)
-        team_names[team_key].add(team)
-    if any(len(values) > 1 for values in player_names.values()):
-        raise FullCurrentRatingTrustError("one player ID maps to multiple display identities")
-    if any(len(values) > 1 for values in team_names.values()):
-        raise FullCurrentRatingTrustError("one team ID maps to multiple display identities")
+        digest_rows.append(
+            {
+                "game_id": str(row[0]),
+                "side": str(row[1]),
+                "role": str(_norm_role(row[2])),
+                "player_id": str(row[3]),
+                "team_id": str(row[4]),
+            }
+        )
+    digest_rows.sort(key=lambda value: (value["game_id"], value["side"], value["role"]))
+    audit["resolution_sha256"] = _sha256_bytes(_canonical_json_bytes(digest_rows))
+    return (
+        player_work.drop(columns=["__gid", "__side"]),
+        team_work.drop(columns=["__gid", "__side"]),
+        audit,
+    )
+
+
+def _validate_replay_source_frames(
+    maps: pd.DataFrame,
+    players: pd.DataFrame,
+    teams: pd.DataFrame,
+    eligible_ids: tuple[str, ...],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Apply the shared grain checks while retaining labeled fallback keys."""
+
+    validation_players = players.copy()
+    validation_teams = teams.copy()
+    validation_players["playerid"] = validation_players["playerid"].map(
+        lambda value: (
+            "oe:player:" + _identity_text(value).removeprefix("fallback:player:")
+            if _identity_text(value).startswith("fallback:player:")
+            else value
+        )
+    )
+    for frame in (validation_players, validation_teams):
+        frame["teamid"] = frame["teamid"].map(
+            lambda value: (
+                "oe:team:" + _identity_text(value).removeprefix("fallback:team:")
+                if _identity_text(value).startswith("fallback:team:")
+                else value
+            )
+        )
+    map_frame, _validated_players, _validated_teams = _validate_source_frames(
+        maps,
+        validation_players,
+        validation_teams,
+        eligible_ids,
+        eligible_ids,
+    )
+    eligible = set(eligible_ids)
+    player_frame = players.copy()
+    player_frame["__game_id"] = _game_ids(player_frame, "players").astype(str).to_numpy()
+    player_frame = player_frame.loc[player_frame["__game_id"].isin(eligible)].copy()
+    team_frame = teams.copy()
+    team_frame["__game_id"] = _game_ids(team_frame, "teams").astype(str).to_numpy()
+    team_frame = team_frame.loc[team_frame["__game_id"].isin(eligible)].copy()
+    return map_frame, player_frame, team_frame
 
 
 def _series_for_eligible(maps: pd.DataFrame, eligible_ids: tuple[str, ...]) -> pd.Series:
@@ -497,6 +645,7 @@ def _team_snapshot_replay(
     lineups = _stable_lineup_hashes(players)
     states: dict[str, TeamState] = defaultdict(lambda: TeamState(sigma=cfg.sigma0))
     map_counts: dict[str, int] = defaultdict(int)
+    home_leagues: dict[str, str] = {}
     rows: list[dict[str, Any]] = []
     for stamp, batch in frame.groupby("date", sort=False, dropna=False):
         seen_teams: set[str] = set()
@@ -568,8 +717,8 @@ def _team_snapshot_replay(
             map_counts[red] += 1
             league = str(raw.get("league") or "")
             if is_team_affiliation_league(league):
-                sb.home_league = league
-                sr.home_league = league
+                home_leagues[blue] = league
+                home_leagues[red] = league
     snapshot_rows = []
     for team_id, state in states.items():
         residual = _team_momentum_residual(state, cfg)
@@ -588,7 +737,7 @@ def _team_snapshot_replay(
             "n_series": map_counts[team_id],
             "n_maps": map_counts[team_id],
             "international_series": 0,
-            "home_league": state.home_league,
+            "home_league": home_leagues.get(team_id, "UNKNOWN"),
             "last_game_date": state.last_date.isoformat() if state.last_date is not None else None,
             "model": "sequential_timestamp_batch",
         })
@@ -618,10 +767,21 @@ def _snapshot_value_digest(frame: pd.DataFrame, identity_column: str) -> str:
 
 def _snapshot_record(root: Path, frame: pd.DataFrame, relative: str, kind: str) -> dict[str, Any]:
     path = root / relative
+    if frame.empty:
+        raise FullCurrentRatingTrustError(f"{kind} stable snapshot is empty")
     identity = "player_id" if kind == "player" else "team_id"
     ids = frame[identity].astype("string")
     if ids.isna().any() or ids.str.strip().eq("").any() or ids.duplicated().any():
         raise FullCurrentRatingTrustError(f"{kind} snapshot stable identity is incomplete")
+    expected_prefix = "oe:player:" if kind == "player" else "oe:team:"
+    if not ids.str.startswith(expected_prefix, na=False).all():
+        raise FullCurrentRatingTrustError(f"{kind} snapshot contains fallback identities")
+    if kind == "player":
+        team_ids = frame["team_id"].astype("string")
+        if not team_ids.str.startswith("oe:team:", na=False).all():
+            raise FullCurrentRatingTrustError(
+                "player snapshot contains fallback team identities"
+            )
     values = pd.to_numeric(frame["mu_effective"], errors="coerce")
     if not np.isfinite(values.to_numpy(dtype=float)).all():
         raise FullCurrentRatingTrustError(f"{kind} snapshot values are non-finite")
@@ -651,6 +811,7 @@ def _build_receipts(
     elapsed_seconds: float,
     player_snapshot: pd.DataFrame,
     team_snapshot: pd.DataFrame,
+    identity_audit: Mapping[str, Any],
 ) -> dict[str, Any]:
     ledger_path = output_root / "current-rating-ledger.parquet"
     ids = tuple(sorted(ledger["game_id"].astype(str)))
@@ -707,7 +868,15 @@ def _build_receipts(
         "complete_exact_five": len(source_ids),
         "elapsed_seconds": elapsed_seconds,
         "fit_window_end": str(source_receipt["source_as_of"]),
-        "state_key_policy": {"team": "stable_oe_team_id", "player": "stable_oe_player_id", "display_names": "metadata_only", "display_alias_reuse": "allowed_with_stable_keys"},
+        "state_key_policy": {
+            "team": "stable_oe_team_id_or_labeled_source_bound_fallback",
+            "player": "stable_oe_player_id_or_labeled_source_bound_fallback",
+            "fallback_continuity": "game_scoped_only",
+            "identity_resolution_scope": "exact_model_eligible_census_only",
+            "fallback_snapshot_policy": "excluded_from_player_and_team_rank_snapshots",
+            "display_names": "metadata_only",
+        },
+        "identity_resolution": dict(identity_audit),
         "authority": dict(AUTHORITY),
         "source_receipt_file": {"path": str(source_receipt_path.resolve()), "bytes": source_receipt_path.stat().st_size, "sha256": _sha256_path(source_receipt_path)},
     }
@@ -724,6 +893,8 @@ def _build_receipts(
         "source_as_of": str(source_receipt["source_as_of"]),
         "source_game_count": int(source_receipt["source_game_count"]),
         "snapshots": snapshots,
+        "identity_resolution": dict(identity_audit),
+        "snapshot_scope": "stable_verified_oe_identities_only",
         "authority": dict(AUTHORITY),
         "implementation_locator": IMPLEMENTATION_LOCATOR,
         "implementation_sha256": _sha256_path(Path(__file__).resolve()),
@@ -752,13 +923,15 @@ def build_full_current_rating_trust(
     source_receipt_path = Path(source_receipt_path)
     if source_receipt_path.is_symlink():
         raise FullCurrentRatingTrustError("source receipt is missing or unsafe")
-    source_receipt = _verify_source_receipt(
+    source_receipt, source_paths = _verify_source_receipt(
         source_receipt_path,
         source_root=source_root,
         expected_file_sha256=source_receipt_file_sha256,
         expected_receipt_sha256=expected_source_receipt_sha256,
     )
-    frames, source_paths = _read_source(source_root)
+    frames = _read_source(
+        {label: source_paths[label] for label in ("maps", "players", "teams")}
+    )
     eligible_ids = tuple(str(value) for value in source_receipt["model_eligible_game_ids"])
     if tuple(sorted(eligible_ids)) != eligible_ids:
         raise FullCurrentRatingTrustError("model-eligible IDs are not canonically ordered")
@@ -767,9 +940,11 @@ def build_full_current_rating_trust(
         map_ids = _game_ids(maps, "maps").astype(str)
         if not set(eligible_ids).issubset(set(map_ids)) or map_ids.duplicated().any():
             raise FullCurrentRatingTrustError("maps do not contain the eligible census exactly")
-        _validate_global_identities(players, teams)
-        map_frame, player_frame, team_frame = _validate_source_frames(
-            maps, players, teams, eligible_ids, eligible_ids
+        replay_players, replay_teams, identity_audit = _prepare_replay_identities(
+            players, teams, eligible_ids
+        )
+        map_frame, player_frame, team_frame = _validate_replay_source_frames(
+            maps, replay_players, replay_teams, eligible_ids
         )
     except CurrentRatingLedgerError as error:
         raise FullCurrentRatingTrustError(str(error)) from error
@@ -782,8 +957,39 @@ def build_full_current_rating_trust(
         )
     map_frame["series_id"] = series_by_game.reindex(map_frame["__game_id"].astype(str)).to_numpy()
     source_hashes = {label: _frame_digest(frames[label], label) for label in ("maps", "players", "teams")}
-    team_features, team_snapshot = _team_snapshot_replay(map_frame, player_frame, cfg=DualEloConfig())
-    player_features, player_snapshot = _player_snapshot_replay(map_frame, player_frame, cfg=PlayerEloConfig())
+    team_features, team_snapshot_all = _team_snapshot_replay(
+        map_frame, player_frame, cfg=DualEloConfig()
+    )
+    player_features, player_snapshot_all = _player_snapshot_replay(
+        map_frame, player_frame, cfg=PlayerEloConfig()
+    )
+    player_snapshot = player_snapshot_all.loc[
+        player_snapshot_all["player_id"].astype("string").str.startswith(
+            "oe:player:", na=False
+        )
+        & player_snapshot_all["team_id"].astype("string").str.startswith(
+            "oe:team:", na=False
+        )
+    ].copy()
+    team_snapshot = team_snapshot_all.loc[
+        team_snapshot_all["team_id"].astype("string").str.startswith(
+            "oe:team:", na=False
+        )
+    ].copy()
+    identity_audit.update(
+        {
+            "player_states_total": int(len(player_snapshot_all)),
+            "player_states_stable_verified": int(len(player_snapshot)),
+            "player_states_fallback_excluded": int(
+                len(player_snapshot_all) - len(player_snapshot)
+            ),
+            "team_states_total": int(len(team_snapshot_all)),
+            "team_states_stable_verified": int(len(team_snapshot)),
+            "team_states_fallback_excluded": int(
+                len(team_snapshot_all) - len(team_snapshot)
+            ),
+        }
+    )
     team_features["series_id"] = team_features["game_id"].astype(str).map(series_by_game)
     player_features["series_id"] = player_features["game_id"].astype(str).map(series_by_game)
     ledger = team_features.merge(player_features, on=["game_id", "date", "series_id"], how="inner", validate="one_to_one")
@@ -807,10 +1013,10 @@ def build_full_current_rating_trust(
     cache = {"schema_version": "scryglass:current-rating-player-cache:v1", "source_receipt_sha256": source_receipt["receipt_sha256"], "source_identity_sha256": source_receipt["source_identity_sha256"], "player_ids": sorted(player_snapshot["player_id"].astype(str)), "authority": dict(AUTHORITY)}
     _write_json(output_root / "player/player_ratings_cache.json", cache)
     elapsed = time.perf_counter() - started
-    receipts = _build_receipts(output_root=output_root, source_receipt=source_receipt, source_receipt_path=source_receipt_path, source_frame_hashes=source_hashes, ledger=ledger, series_by_game=series_by_game, elapsed_seconds=elapsed, player_snapshot=player_snapshot, team_snapshot=team_snapshot)
+    receipts = _build_receipts(output_root=output_root, source_receipt=source_receipt, source_receipt_path=source_receipt_path, source_frame_hashes=source_hashes, ledger=ledger, series_by_game=series_by_game, elapsed_seconds=elapsed, player_snapshot=player_snapshot, team_snapshot=team_snapshot, identity_audit=identity_audit)
     _write_json(output_root / "current-rating-ledger-receipt.json", receipts["ledger"])
     _write_json(output_root / "current-rating-snapshot-receipt-v1.json", receipts["snapshots"])
-    return {"status": "research_only", "output_root": str(output_root), "rows": len(ledger), "player_rows": len(player_snapshot), "team_rows": len(team_snapshot), "ledger_receipt_sha256": receipts["ledger"]["receipt_sha256"], "snapshot_receipt_sha256": receipts["snapshots"]["receipt_sha256"], "authority": dict(AUTHORITY)}
+    return {"status": "research_only", "output_root": str(output_root), "rows": len(ledger), "player_rows": len(player_snapshot), "team_rows": len(team_snapshot), "identity_resolution": dict(identity_audit), "ledger_receipt_sha256": receipts["ledger"]["receipt_sha256"], "snapshot_receipt_sha256": receipts["snapshots"]["receipt_sha256"], "authority": dict(AUTHORITY)}
 
 
 def main(argv: Iterable[str] | None = None) -> int:

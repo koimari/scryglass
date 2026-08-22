@@ -9,8 +9,10 @@ import pytest
 
 from benchmarks.build_full_current_rating_trust import (
     FullCurrentRatingTrustError,
+    _team_snapshot_replay,
     build_full_current_rating_trust,
 )
+from lol_kills.ratings.dual_elo import DualEloConfig
 from benchmarks.build_future_value_snapshots import _verify_current_rating_inputs
 from lol_kills.research.future_value_rating import (
     _canonical_json_bytes,
@@ -70,6 +72,7 @@ def _fixture(tmp_path: Path) -> dict[str, object]:
         "source_receipt": source.receipt,
         "output_root": root / "current-trust",
         "players_path": paths["players"],
+        "teams_path": paths["teams"],
     }
 
 
@@ -85,6 +88,27 @@ def _build(fixture: dict[str, object]) -> dict[str, object]:
         expected_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
         output_root=fixture["output_root"],
     )
+
+
+def _reseal_source_files(fixture: dict[str, object], *labels: str) -> None:
+    source_receipt_path = fixture["source_receipt_path"]
+    source_receipt = fixture["source_receipt"]
+    assert isinstance(source_receipt_path, Path)
+    assert isinstance(source_receipt, dict)
+    value = json.loads(json.dumps(source_receipt))
+    path_by_label = {
+        "players": fixture["players_path"],
+        "teams": fixture["teams_path"],
+    }
+    for label in labels:
+        path = path_by_label[label]
+        assert isinstance(path, Path)
+        value["source_files"][label]["bytes"] = path.stat().st_size
+        value["source_files"][label]["sha256"] = _sha256(path)
+    value.pop("receipt_sha256", None)
+    value["receipt_sha256"] = hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
+    source_receipt_path.write_bytes(_canonical_json_bytes(value))
+    fixture["source_receipt"] = value
 
 
 def test_build_binds_source_and_emits_verified_player_team_snapshots(
@@ -131,6 +155,21 @@ def test_same_timestamp_maps_share_the_same_strict_prior_features(
         assert same_timestamp[feature].nunique() == 1
 
 
+def test_team_snapshot_uses_unknown_home_league_for_international_only_team() -> None:
+    maps, players, _teams = _source_frames()
+    maps = maps.copy()
+    maps["league"] = "MSI"
+    maps["tournament"] = "Mid-Season Invitational"
+
+    _features, snapshot = _team_snapshot_replay(
+        maps,
+        players,
+        cfg=DualEloConfig(),
+    )
+
+    assert set(snapshot["home_league"]) == {"UNKNOWN"}
+
+
 def test_source_file_mutation_fails_before_replay(tmp_path: Path) -> None:
     fixture = _fixture(tmp_path)
     players_path = fixture["players_path"]
@@ -140,6 +179,130 @@ def test_source_file_mutation_fails_before_replay(tmp_path: Path) -> None:
     players.to_parquet(players_path, index=False)
     with pytest.raises(
         FullCurrentRatingTrustError, match="source file (bytes|hash) changed: players"
+    ):
+        _build(fixture)
+
+
+def test_missing_source_ids_use_labeled_fallback_and_stable_only_snapshots(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(tmp_path)
+    players_path = fixture["players_path"]
+    teams_path = fixture["teams_path"]
+    assert isinstance(players_path, Path)
+    assert isinstance(teams_path, Path)
+    players = pd.read_parquet(players_path)
+    teams = pd.read_parquet(teams_path)
+    player_mask = (
+        players["game_uid"].eq("g1")
+        & players["side"].eq("Blue")
+        & players["position"].eq("top")
+    )
+    team_mask = players["game_uid"].eq("g1") & players["side"].eq("Red")
+    players.loc[player_mask, "playerid"] = None
+    players.loc[team_mask, "teamid"] = None
+    teams.loc[teams["game_uid"].eq("g1") & teams["side"].eq("Red"), "teamid"] = None
+    players.to_parquet(players_path, index=False)
+    teams.to_parquet(teams_path, index=False)
+    _reseal_source_files(fixture, "players", "teams")
+
+    result = _build(fixture)
+    assert result["rows"] == len(GAME_IDS)
+    audit = result["identity_resolution"]
+    assert audit["player_rows_fallback"] == 1
+    assert audit["team_rows_fallback"] == 6
+    assert audit["player_states_fallback_excluded"] == 6
+    assert audit["team_states_fallback_excluded"] == 1
+    root = fixture["output_root"]
+    assert isinstance(root, Path)
+    player_snapshot = pd.read_parquet(root / "player/player_ratings_snapshot.parquet")
+    team_snapshot = pd.read_parquet(root / "team/ratings_snapshot.parquet")
+    assert player_snapshot["player_id"].str.startswith("oe:player:").all()
+    assert team_snapshot["team_id"].str.startswith("oe:team:").all()
+    ledger = pd.read_parquet(root / "current-rating-ledger.parquet")
+    assert len(ledger) == len(GAME_IDS)
+    assert ledger["game_id"].is_unique
+
+
+def test_reused_name_does_not_infer_one_missing_stable_player_id(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    players_path = fixture["players_path"]
+    assert isinstance(players_path, Path)
+    players = pd.read_parquet(players_path)
+    source_row = players.index[
+        players["game_uid"].eq("g1")
+        & players["side"].eq("Blue")
+        & players["position"].eq("top")
+    ][0]
+    stable_id = players.loc[source_row, "playerid"]
+    target_row = players.index[
+        players["game_uid"].eq("g3")
+        & players["side"].eq("Blue")
+        & players["position"].eq("top")
+    ][0]
+    players.loc[target_row, "playername"] = players.loc[source_row, "playername"]
+    players.loc[target_row, "playerid"] = None
+    players.to_parquet(players_path, index=False)
+    _reseal_source_files(fixture, "players")
+
+    result = _build(fixture)
+    audit = result["identity_resolution"]
+    assert audit["player_rows_fallback"] == 1
+    root = fixture["output_root"]
+    assert isinstance(root, Path)
+    snapshot = pd.read_parquet(root / "player/player_ratings_snapshot.parquet")
+    assert stable_id in set(snapshot["player_id"])
+    assert int(snapshot.loc[snapshot["player_id"].eq(stable_id), "n_maps"].iloc[0]) == 1
+
+
+def test_reader_uses_the_exact_receipt_bound_source_path(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    root = fixture["root"]
+    players_path = fixture["players_path"]
+    source_receipt_path = fixture["source_receipt_path"]
+    source_receipt = fixture["source_receipt"]
+    assert isinstance(root, Path)
+    assert isinstance(players_path, Path)
+    assert isinstance(source_receipt_path, Path)
+    assert isinstance(source_receipt, dict)
+    bound_path = players_path.with_name("players.parquet")
+    bound_path.write_bytes(players_path.read_bytes())
+    players_path.write_bytes(b"unbound file must not be read")
+    value = json.loads(json.dumps(source_receipt))
+    value["source_files"]["players"] = {
+        "locator": bound_path.relative_to(root).as_posix(),
+        "bytes": bound_path.stat().st_size,
+        "sha256": _sha256(bound_path),
+    }
+    value.pop("receipt_sha256", None)
+    value["receipt_sha256"] = hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
+    source_receipt_path.write_bytes(_canonical_json_bytes(value))
+    fixture["source_receipt"] = value
+
+    result = _build(fixture)
+
+    assert result["rows"] == len(GAME_IDS)
+
+
+def test_all_fallback_identities_fail_closed_on_empty_stable_snapshots(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(tmp_path)
+    players_path = fixture["players_path"]
+    teams_path = fixture["teams_path"]
+    assert isinstance(players_path, Path)
+    assert isinstance(teams_path, Path)
+    players = pd.read_parquet(players_path)
+    teams = pd.read_parquet(teams_path)
+    players["playerid"] = None
+    players["teamid"] = None
+    teams["teamid"] = None
+    players.to_parquet(players_path, index=False)
+    teams.to_parquet(teams_path, index=False)
+    _reseal_source_files(fixture, "players", "teams")
+
+    with pytest.raises(
+        FullCurrentRatingTrustError, match="(player|team) stable snapshot is empty"
     ):
         _build(fixture)
 

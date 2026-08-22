@@ -16,6 +16,7 @@ from benchmarks.build_future_value_final_fit import (
     _bind_current_rating_features,
     _canonical_sha,
     _design_digest,
+    _eligible_source_identity_frames,
     _evaluation_blockers,
     _validate_source_stable_ids,
     _verify_source_receipt,
@@ -453,6 +454,31 @@ def test_final_fit_rejects_prefix_only_source_ids() -> None:
     teams = pd.DataFrame({"teamid": ["oe:team:valid"]})
     with pytest.raises(FinalFitError, match="invalid stable player ID"):
         _validate_source_stable_ids(players, teams)
+
+
+def test_final_fit_validates_stable_ids_only_inside_eligible_census() -> None:
+    players = pd.DataFrame(
+        {
+            "game_uid": ["eligible", "excluded"],
+            "playerid": ["oe:player:valid", None],
+            "teamid": ["oe:team:valid", None],
+        }
+    )
+    teams = pd.DataFrame(
+        {
+            "game_uid": ["eligible", "excluded"],
+            "teamid": ["oe:team:valid", None],
+        }
+    )
+
+    eligible_players, eligible_teams = _eligible_source_identity_frames(
+        players,
+        teams,
+        ("eligible",),
+    )
+
+    assert eligible_players["game_uid"].tolist() == ["eligible"]
+    assert eligible_teams["game_uid"].tolist() == ["eligible"]
 
 
 @pytest.mark.parametrize(
