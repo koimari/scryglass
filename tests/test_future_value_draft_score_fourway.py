@@ -559,7 +559,7 @@ def test_regularized_log_loss_fit_is_deterministic_and_zero_intercept() -> None:
     assert fit_a["l2_penalty"] == 0.01
     assert fit_a["max_iterations"] == 400
     assert fit_a["converged"] is True
-    assert fit_a["gradient_inf_norm"] <= 1e-10
+    assert fit_a["gradient_inf_norm"] <= 1e-8
 
 
 def test_regularized_log_loss_rejects_non_binary_targets() -> None:

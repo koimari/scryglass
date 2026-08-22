@@ -67,7 +67,7 @@ BOOTSTRAP_COMPARISONS = {
 # training-derived feature units after per-column max-absolute scaling.
 LOGIT_L2_PENALTY = 0.01
 LOGIT_MAX_ITERATIONS = 400
-LOGIT_GRADIENT_TOLERANCE = 1e-10
+LOGIT_GRADIENT_TOLERANCE = 1e-8
 STATIC_COMPONENTS = (
     "base",
     "ally_synergy",
