@@ -31,6 +31,7 @@ from lol_kills.research.future_value_snapshots import (
     SNAPSHOT_RECEIPT_SCHEMA_VERSION,
     TEAM_CONTEXT_BINDING_SCHEMA_VERSION,
     FutureValueSnapshotError,
+    _current_rating_feature_binding,
     _validated_team_context_binding,
     _latest_player_form,
     _player_contributions,
@@ -275,6 +276,38 @@ def test_final_fit_gate_rejects_fold_receipt_without_current_ledger() -> None:
     assert "final_fit_not_bound_to_complete_model_eligible_census" in auth.blockers
     assert "current_rating_feature_ledger_binding_missing" in auth.blockers
     assert "nested_inner_feature_ledger_missing_fixed_c_used" in auth.blockers
+
+
+def test_current_rating_binding_prefers_exact_producer_over_aggregate_design() -> None:
+    exact = {
+        "artifact": {"path": "/tmp/current-rating-ledger.parquet"},
+        "producer_receipt_file": {"path": "/tmp/current-rating-ledger-receipt.json"},
+        "feature_names": ["base_team_logit"],
+    }
+    aggregate = {
+        "feature_names": ["base_team_logit", "player_form_gold_per_min"],
+        "producer_names": ["current_sequential_rating", "strict_prior_player_form"],
+    }
+    assert _current_rating_feature_binding(
+        {
+            "current_rating_feature_binding": exact,
+            "feature_ledger_binding": aggregate,
+        }
+    ) is exact
+
+
+def test_malformed_explicit_current_rating_binding_does_not_use_legacy_fallback() -> None:
+    legacy = {
+        "artifact": {"path": "/tmp/current-rating-ledger.parquet"},
+        "producer_receipt_file": {"path": "/tmp/current-rating-ledger-receipt.json"},
+        "feature_names": ["base_team_logit"],
+    }
+    assert _current_rating_feature_binding(
+        {
+            "current_rating_feature_binding": "forged",
+            "feature_ledger_binding": legacy,
+        }
+    ) is None
 
 
 class _Atoms:

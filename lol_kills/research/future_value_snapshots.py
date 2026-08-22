@@ -563,6 +563,25 @@ def _validate_model_object_binding(
         )
 
 
+def _current_rating_feature_binding(
+    model_receipt: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Return the exact current-rating producer binding from a fit receipt.
+
+    New final-fit receipts keep the producer artifact binding separate from
+    the aggregate feature-ledger design binding.  Older research fixtures
+    stored the producer binding under ``feature_ledger_binding``.  An
+    explicitly present malformed current binding fails closed and does not
+    fall back to the legacy field.
+    """
+
+    if "current_rating_feature_binding" in model_receipt:
+        value = model_receipt.get("current_rating_feature_binding")
+        return value if isinstance(value, Mapping) else None
+    value = model_receipt.get("feature_ledger_binding")
+    return value if isinstance(value, Mapping) else None
+
+
 def load_final_fit_model(
     model_artifact_path: Path,
     model_receipt_path: Path,
@@ -628,7 +647,7 @@ def load_final_fit_model(
         raise FutureValueSnapshotError("final-fit model parameter hash changed")
     if claimed_parameter_hash != receipt.get("parameter_sha256"):
         raise FutureValueSnapshotError("final-fit parameter receipt binding changed")
-    feature_binding = receipt.get("feature_ledger_binding")
+    feature_binding = _current_rating_feature_binding(receipt)
     if not isinstance(feature_binding, Mapping):
         raise FutureValueSnapshotError("final-fit current-rating feature binding is missing")
     artifact_record = feature_binding.get("artifact")
@@ -876,7 +895,7 @@ def authorize_final_fit(
     except FutureValueSourceError:
         blockers.add("final_fit_window_end_invalid")
 
-    feature_binding = model_receipt.get("feature_ledger_binding")
+    feature_binding = _current_rating_feature_binding(model_receipt)
     if not isinstance(feature_binding, Mapping):
         blockers.add("current_rating_feature_ledger_binding_missing")
     else:
