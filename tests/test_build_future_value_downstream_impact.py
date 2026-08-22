@@ -9,6 +9,8 @@ import pytest
 from benchmarks.build_future_value_downstream_impact import (
     BOOTSTRAP_COMPARISONS,
     DownstreamImpactError,
+    _load_source,
+    _verify_evaluation,
     VARIANTS,
     _verify_snapshot_variant,
     build_downstream_impact_report,
@@ -532,6 +534,93 @@ def test_all_variant_snapshot_verifier_blocks_source_mismatch(tmp_path: Path) ->
     )
 
     assert any("current_only_snapshot_source_game_count_mismatch" in blocker for blocker in blockers)
+
+
+def test_current_snapshot_rank_deltas_must_be_zero(tmp_path: Path) -> None:
+    _source_path, source, sf = _source(tmp_path)
+    receipt_path, manifest_path = _all_variant_snapshot_bundles(tmp_path / "snapshots", source, sf)["current_only"]
+    manifest = json.loads(manifest_path.read_text())
+    rank_path = Path(manifest["files"]["player_rank_diffs"]["path"])
+    rank = json.loads(rank_path.read_text())
+    rank["rows"][0]["rank_delta"] = 1
+    rank_path.write_bytes(_canonical(rank) + b"\n")
+    manifest["files"]["player_rank_diffs"] = {
+        "path": str(rank_path),
+        "bytes": rank_path.stat().st_size,
+        "sha256": hashlib.sha256(rank_path.read_bytes()).hexdigest(),
+    }
+    unsigned = dict(manifest)
+    unsigned.pop("manifest_sha256", None)
+    manifest["manifest_sha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
+    manifest_path.write_bytes(_canonical(manifest) + b"\n")
+
+    _, blockers = _verify_snapshot_variant(
+        receipt_path,
+        manifest_path,
+        variant="current_only",
+        source={
+            **sf,
+            "model_eligible_game_count": source["model_eligible_game_count"],
+            "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+        },
+    )
+
+    assert "current_only_player_snapshot_rank_self_diff_nonzero" in blockers
+
+
+def test_form_snapshot_value_field_is_verified(tmp_path: Path) -> None:
+    _source_path, source, sf = _source(tmp_path)
+    receipt_path, manifest_path = _all_variant_snapshot_bundles(tmp_path / "snapshots", source, sf)["future_player_form"]
+    receipt = json.loads(receipt_path.read_text())
+    receipt["capability"]["player"]["value_field"] = "future_composite_logit"
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_sha256", None)
+    receipt["receipt_sha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
+    receipt_path.write_bytes(_canonical(receipt) + b"\n")
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"]["receipt"] = {
+        "path": str(receipt_path),
+        "bytes": receipt_path.stat().st_size,
+        "sha256": hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+    }
+    unsigned = dict(manifest)
+    unsigned.pop("manifest_sha256", None)
+    manifest["manifest_sha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
+    manifest_path.write_bytes(_canonical(manifest) + b"\n")
+
+    _, blockers = _verify_snapshot_variant(
+        receipt_path,
+        manifest_path,
+        variant="future_player_form",
+        source={
+            **sf,
+            "model_eligible_game_count": source["model_eligible_game_count"],
+            "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+        },
+    )
+
+    assert "future_player_form_player_snapshot_component_scope_invalid" in blockers
+
+
+def test_real_stage_receipt_hash_only_source_binding_is_supported(tmp_path: Path) -> None:
+    fixture = _build_fixture(tmp_path)
+    receipt_path = fixture["receipts"]["current_only"]
+    receipt = json.loads(receipt_path.read_text())
+    receipt["source"] = {"source_receipt_sha256": fixture["source"]["receipt_sha256"]}
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_sha256", None)
+    receipt["receipt_sha256"] = hashlib.sha256(_canonical(unsigned)).hexdigest()
+    receipt_path.write_bytes(_canonical(receipt) + b"\n")
+    _, _, source = _load_source(fixture["source_path"])
+
+    _, _summary, blockers = _verify_evaluation(
+        fixture["evaluations"]["current_only"],
+        variant="current_only",
+        source=source,
+        receipt_path=receipt_path,
+    )
+
+    assert blockers == []
 
 
 def test_model_bytes_mutation_is_rejected_by_external_receipt(tmp_path: Path) -> None:
