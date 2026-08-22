@@ -9,6 +9,7 @@ import pytest
 
 from benchmarks.future_value_tierlist_full_census_diff import (
     FullCensusTierDiffError,
+    _load_json,
     _load_baseline_bundle_inputs,
     audit_final_v2_full_census_scoreability,
     build_full_census_fourway_diff,
@@ -331,6 +332,7 @@ def _fourway_fixture(tmp_path: Path) -> dict[str, object]:
     source = _source_receipt()
     paths: dict[str, Path] = {}
     hashes: dict[str, str] = {}
+    offset_records: dict[str, dict[str, object]] = {}
     for variant in VARIANTS:
         candidate = _candidate(
             game_count=len(ELIGIBLE),
@@ -353,8 +355,119 @@ def _fourway_fixture(tmp_path: Path) -> dict[str, object]:
         path = tmp_path / f"{variant}.json"
         hashes[variant] = _write_json(path, candidate)
         paths[variant] = path
+        ledger_path = tmp_path / f"{variant}-offsets.json"
+        ledger = {
+            "game_count": len(ELIGIBLE),
+            "game_identity_sha256": identity_sha256(ELIGIBLE),
+            "offsets_sha256": provenance["offsets_sha256"],
+            "variant": variant,
+        }
+        ledger_sha = _write_json(ledger_path, ledger)
+        receipt = _seal(
+            {
+                "artifact_bytes": ledger_path.stat().st_size,
+                "artifact_locator": ledger_path.name,
+                "artifact_sha256": ledger_sha,
+                "game_count": len(ELIGIBLE),
+                "game_identity_sha256": identity_sha256(ELIGIBLE),
+                "offsets_sha256": provenance["offsets_sha256"],
+                "source_receipt_sha256": source["receipt_sha256"],
+                "variant": variant,
+            },
+            "receipt_sha256",
+        )
+        receipt_path = tmp_path / f"{variant}-offsets-receipt.json"
+        receipt_sha = _write_json(receipt_path, receipt)
+        offset_records[variant] = {
+            "ledger": {
+                "path": str(ledger_path),
+                "bytes": ledger_path.stat().st_size,
+                "sha256": ledger_sha,
+            },
+            "receipt": {
+                "path": str(receipt_path),
+                "bytes": receipt_path.stat().st_size,
+                "sha256": receipt_sha,
+            },
+            "offsets_sha256": provenance["offsets_sha256"],
+            "receipt_sha256": receipt["receipt_sha256"],
+            "game_count": len(ELIGIBLE),
+            "game_identity_sha256": identity_sha256(ELIGIBLE),
+        }
+    manifest = {
+        "authority": {
+            "research_only": True,
+            "public_player_rating": False,
+            "public_team_rating": False,
+            "public_tierlist": False,
+            "public_draft_score": False,
+            "public_probability": False,
+            "promotion": False,
+            "deployment": False,
+            "merge": False,
+            "odds": False,
+            "expected_value": False,
+            "recommendation": False,
+            "betting": False,
+        },
+        "baseline": {
+            "candidate": {
+                "path": str(Path(inputs["baseline_candidate_path"])),
+                "bytes": Path(inputs["baseline_candidate_path"]).stat().st_size,
+                "raw_sha256": inputs["expected_baseline_candidate_sha256"],
+                "artifact_sha256": _load_json(
+                    Path(inputs["baseline_candidate_path"]), "baseline"
+                )["artifact_sha256"],
+            }
+        },
+        "offsets": offset_records,
+        "schema_version": "scryglass:future-value-fourway-tier-candidates:v1",
+        "source": {
+            "source_as_of": SOURCE_AS_OF,
+            "source_game_count": len(ACCEPTED),
+            "source_identity_sha256": identity_sha256(ACCEPTED),
+            "source_receipt_sha256": source["receipt_sha256"],
+            "source_receipt_file_sha256": inputs["expected_source_receipt_file_sha256"],
+            "model_eligible_game_count": len(ELIGIBLE),
+            "model_eligible_identity_sha256": identity_sha256(ELIGIBLE),
+        },
+        "status": "research_only",
+        "variants": {
+            variant: {
+                "variant": variant,
+                "candidate": {
+                    "locator": paths[variant].name,
+                    "bytes": paths[variant].stat().st_size,
+                    "raw_sha256": hashes[variant],
+                    "artifact_sha256": _load_json(paths[variant], variant)[
+                        "artifact_sha256"
+                    ],
+                },
+                "validation": {
+                    "variant": variant,
+                    "artifact_sha256": _load_json(paths[variant], variant)[
+                        "artifact_sha256"
+                    ],
+                    "source_identity_sha256": identity_sha256(ELIGIBLE),
+                    "game_count": len(ELIGIBLE),
+                    "offsets_sha256": offset_records[variant]["offsets_sha256"],
+                    "producer": f"future_value_rating:{variant}",
+                },
+                "offsets_sha256": offset_records[variant]["offsets_sha256"],
+                "offset_receipt_sha256": offset_records[variant]["receipt_sha256"],
+                "game_count": len(ELIGIBLE),
+                "game_identity_sha256": identity_sha256(ELIGIBLE),
+            }
+            for variant in VARIANTS
+        },
+    }
+    manifest = _seal(manifest, "manifest_sha256")
+    manifest_path = tmp_path / "fourway-tier-candidates-manifest.json"
+    manifest_hash = _write_json(manifest_path, manifest)
     inputs["variant_candidate_paths"] = paths
     inputs["expected_variant_candidate_sha256"] = hashes
+    inputs["fourway_candidate_manifest_path"] = manifest_path
+    inputs["expected_fourway_candidate_manifest_sha256"] = manifest_hash
     return inputs
 
 
@@ -450,6 +563,32 @@ def test_fourway_full_census_uses_identical_universe_and_keeps_baseline_unchange
     ]
 
 
+def test_fourway_requires_candidate_manifest_and_independent_hash(
+    tmp_path: Path,
+) -> None:
+    inputs = _fourway_fixture(tmp_path)
+    inputs.pop("fourway_candidate_manifest_path")
+    inputs.pop("expected_fourway_candidate_manifest_sha256")
+
+    with pytest.raises(FullCensusTierDiffError, match="manifest and its independent raw hash"):
+        build_full_census_fourway_diff(**inputs)
+
+
+def test_fourway_rejects_changed_offset_receipt_bytes(
+    tmp_path: Path,
+) -> None:
+    inputs = _fourway_fixture(tmp_path)
+    receipt_path = Path(
+        json.loads(
+            Path(inputs["fourway_candidate_manifest_path"]).read_text(encoding="utf-8")
+        )["offsets"]["both"]["receipt"]["path"]
+    )
+    receipt_path.write_bytes(receipt_path.read_bytes() + b"\n")
+
+    with pytest.raises(FullCensusTierDiffError, match="offset receipt bytes changed"):
+        build_full_census_fourway_diff(**inputs)
+
+
 def test_baseline_bundle_external_hash_rejects_changed_bytes(tmp_path: Path) -> None:
     bundle_path, bundle_sha256 = _baseline_bundle_fixture(tmp_path)
     payload = json.loads(bundle_path.read_text(encoding="utf-8"))
@@ -509,5 +648,5 @@ def test_fourway_full_census_rejects_missing_or_extra_candidate_rows(
     path.write_bytes(canonical_json_bytes(payload) + b"\n")
     inputs["expected_variant_candidate_sha256"]["both"] = sha256_path(path)
 
-    with pytest.raises(FullCensusTierDiffError, match="row universes differ"):
+    with pytest.raises(FullCensusTierDiffError, match="manifest candidate bytes changed"):
         build_full_census_fourway_diff(**inputs)

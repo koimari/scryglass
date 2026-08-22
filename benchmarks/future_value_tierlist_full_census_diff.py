@@ -31,6 +31,9 @@ from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 SCHEMA_VERSION = "scryglass:future-value-tierlist-full-census-diff:v1"
 RECEIPT_SCHEMA_VERSION = "scryglass:future-value-tierlist-full-census-diff-receipt:v1"
+FOURWAY_CANDIDATE_MANIFEST_SCHEMA_VERSION = (
+    "scryglass:future-value-fourway-tier-candidates:v1"
+)
 FINAL_V2_SCOREABILITY_SCHEMA_VERSION = (
     "scryglass:future-value-final-v2-full-census-scoreability:v1"
 )
@@ -107,6 +110,248 @@ def _load_json(path: Path, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise FullCensusTierDiffError(f"{label} must be a JSON object")
     return value
+
+
+def _manifest_file(
+    manifest_path: Path,
+    record: object,
+    label: str,
+    *,
+    field: str,
+    hash_field: str = "sha256",
+) -> tuple[Path, dict[str, Any]]:
+    if not isinstance(record, Mapping):
+        raise FullCensusTierDiffError(f"{label} file binding is missing")
+    raw_locator = record.get(field)
+    if not isinstance(raw_locator, str) or not raw_locator.strip():
+        raise FullCensusTierDiffError(f"{label} {field} is missing")
+    locator = Path(raw_locator).expanduser()
+    if field == "locator" and (locator.is_absolute() or ".." in locator.parts):
+        raise FullCensusTierDiffError(f"{label} locator is unsafe")
+    if field == "path" and not locator.is_absolute():
+        raise FullCensusTierDiffError(f"{label} path is unsafe")
+    candidate = (
+        manifest_path.parent / locator if field == "locator" else locator
+    )
+    path = _safe_file(candidate, label)
+    declared_bytes = record.get("bytes")
+    if isinstance(declared_bytes, bool) or not isinstance(declared_bytes, int):
+        raise FullCensusTierDiffError(f"{label} byte count is invalid")
+    if path.stat().st_size != declared_bytes:
+        raise FullCensusTierDiffError(f"{label} bytes changed")
+    declared_sha256 = _require_hash(record.get(hash_field), f"{label} hash")
+    if sha256_path(path) != declared_sha256:
+        raise FullCensusTierDiffError(f"{label} bytes changed")
+    return path, {
+        "locator": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": declared_sha256,
+    }
+
+
+def _verify_fourway_candidate_manifest(
+    path: Path | str,
+    *,
+    expected_sha256: str,
+    source: Mapping[str, Any],
+    expected_source_receipt_file_sha256: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    manifest_path = _safe_file(path, "fourway Tier candidate manifest")
+    manifest_file = _verify_file(
+        manifest_path,
+        expected_sha256,
+        "fourway Tier candidate manifest",
+    )
+    manifest = _load_json(manifest_path, "fourway Tier candidate manifest")
+    if manifest.get("schema_version") != FOURWAY_CANDIDATE_MANIFEST_SCHEMA_VERSION:
+        raise FullCensusTierDiffError("fourway Tier candidate manifest schema changed")
+    if manifest.get("status") != "research_only":
+        raise FullCensusTierDiffError("fourway Tier candidate manifest status changed")
+    authority = manifest.get("authority")
+    if (
+        not isinstance(authority, Mapping)
+        or authority.get("research_only") is not True
+        or any(key != "research_only" and value is True for key, value in authority.items())
+    ):
+        raise FullCensusTierDiffError("fourway Tier candidate manifest authority changed")
+    claimed_manifest_sha256 = _require_hash(
+        manifest.get("manifest_sha256"),
+        "fourway Tier candidate manifest self hash",
+    )
+    unsigned_manifest = dict(manifest)
+    unsigned_manifest.pop("manifest_sha256", None)
+    if _hash_bytes(canonical_json_bytes(unsigned_manifest)) != claimed_manifest_sha256:
+        raise FullCensusTierDiffError("fourway Tier candidate manifest self hash changed")
+    manifest_source = manifest.get("source")
+    if not isinstance(manifest_source, Mapping):
+        raise FullCensusTierDiffError("fourway Tier candidate manifest source is missing")
+    expected_manifest_source = {
+        "source_as_of": source["source_as_of"],
+        "source_game_count": source["accepted_game_count"],
+        "source_identity_sha256": source["accepted_identity_sha256"],
+        "source_receipt_sha256": source["source_receipt_sha256"],
+        "model_eligible_game_count": source["model_eligible_game_count"],
+        "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+    }
+    for field, expected_value in expected_manifest_source.items():
+        if manifest_source.get(field) != expected_value:
+            raise FullCensusTierDiffError(
+                f"fourway Tier candidate manifest source changed: {field}"
+            )
+    if manifest_source.get("source_receipt_file_sha256") != _require_hash(
+        expected_source_receipt_file_sha256,
+        "expected source receipt file hash",
+    ):
+        raise FullCensusTierDiffError(
+            "fourway Tier candidate manifest source changed: source_receipt_file_sha256"
+        )
+    variants = manifest.get("variants")
+    if not isinstance(variants, Mapping) or set(variants) != set(TIER_VARIANTS):
+        raise FullCensusTierDiffError(
+            "fourway Tier candidate manifest variants are incomplete"
+        )
+    return manifest, manifest_file
+
+
+def _verify_fourway_manifest_variant(
+    *,
+    manifest_path: Path,
+    manifest: Mapping[str, Any],
+    manifest_variant: object,
+    supplied_path: Path,
+    supplied_sha256: str,
+    variant: str,
+    candidate: Mapping[str, Any],
+    artifact_sha256: str,
+    source: Mapping[str, Any],
+    source_receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(manifest_variant, Mapping) or manifest_variant.get("variant") != variant:
+        raise FullCensusTierDiffError(
+            f"{variant} candidate manifest binding changed"
+        )
+    candidate_record = manifest_variant.get("candidate")
+    manifest_candidate_path, manifest_candidate_file = _manifest_file(
+        manifest_path,
+        candidate_record,
+        f"{variant} manifest candidate",
+        field="locator",
+        hash_field="raw_sha256",
+    )
+    supplied_path = _safe_file(supplied_path, f"{variant} candidate")
+    if supplied_path != manifest_candidate_path:
+        raise FullCensusTierDiffError(
+            f"{variant} candidate path differs from its verified manifest"
+        )
+    supplied_file = _verify_file(supplied_path, supplied_sha256, f"{variant} candidate")
+    if supplied_file["sha256"] != manifest_candidate_file["sha256"]:
+        raise FullCensusTierDiffError(
+            f"{variant} candidate hash differs from its verified manifest"
+        )
+    if candidate_record.get("artifact_sha256") != artifact_sha256:
+        raise FullCensusTierDiffError(
+            f"{variant} candidate artifact hash differs from its verified manifest"
+        )
+    if manifest_variant.get("game_count") != source["model_eligible_game_count"]:
+        raise FullCensusTierDiffError(f"{variant} candidate manifest count changed")
+    if manifest_variant.get("game_identity_sha256") != source[
+        "model_eligible_identity_sha256"
+    ]:
+        raise FullCensusTierDiffError(f"{variant} candidate manifest identity changed")
+    validation = manifest_variant.get("validation")
+    if not isinstance(validation, Mapping):
+        raise FullCensusTierDiffError(f"{variant} candidate validation is missing")
+    if (
+        validation.get("variant") != variant
+        or validation.get("artifact_sha256") != artifact_sha256
+        or validation.get("game_count") != source["model_eligible_game_count"]
+        or validation.get("source_identity_sha256")
+        != source["model_eligible_identity_sha256"]
+        or validation.get("offsets_sha256") != manifest_variant.get("offsets_sha256")
+        or validation.get("producer") != f"future_value_rating:{variant}"
+    ):
+        raise FullCensusTierDiffError(f"{variant} candidate validation changed")
+
+    offsets = manifest.get("offsets")
+    if not isinstance(offsets, Mapping):
+        raise FullCensusTierDiffError("fourway Tier candidate manifest offsets are missing")
+    offset_record = offsets.get(variant)
+    if not isinstance(offset_record, Mapping):
+        raise FullCensusTierDiffError(f"{variant} offset manifest binding is missing")
+    ledger_path, ledger_file = _manifest_file(
+        manifest_path,
+        offset_record.get("ledger"),
+        f"{variant} offset ledger",
+        field="path",
+    )
+    receipt_path, receipt_file = _manifest_file(
+        manifest_path,
+        offset_record.get("receipt"),
+        f"{variant} offset receipt",
+        field="path",
+    )
+    if offset_record.get("offsets_sha256") != manifest_variant.get("offsets_sha256"):
+        raise FullCensusTierDiffError(f"{variant} offset hash differs from its manifest")
+    if offset_record.get("receipt_sha256") != manifest_variant.get(
+        "offset_receipt_sha256"
+    ):
+        raise FullCensusTierDiffError(f"{variant} offset receipt differs from its manifest")
+    offset_sha256 = _require_hash(
+        offset_record.get("offsets_sha256"), f"{variant} offset hash"
+    )
+    candidate_override = candidate.get("pre_map_offset_override")
+    if not isinstance(candidate_override, Mapping):
+        raise FullCensusTierDiffError(f"{variant} candidate offset binding is missing")
+    candidate_provenance = candidate_override.get("provenance")
+    if not isinstance(candidate_provenance, Mapping):
+        candidate_provenance = candidate.get("pre_map_offset_provenance")
+    if not isinstance(candidate_provenance, Mapping):
+        raise FullCensusTierDiffError(f"{variant} candidate offset provenance is missing")
+    if candidate_override.get("offsets_sha256") != offset_sha256 or candidate_provenance.get(
+        "offsets_sha256"
+    ) != offset_sha256:
+        raise FullCensusTierDiffError(f"{variant} candidate offset hash changed")
+
+    ledger = _load_json(ledger_path, f"{variant} offset ledger")
+    receipt = _load_json(receipt_path, f"{variant} offset receipt")
+    if ledger.get("variant") != variant or receipt.get("variant") != variant:
+        raise FullCensusTierDiffError(f"{variant} offset variant changed")
+    if ledger.get("game_count") != source["model_eligible_game_count"] or receipt.get(
+        "game_count"
+    ) != source["model_eligible_game_count"]:
+        raise FullCensusTierDiffError(f"{variant} offset count changed")
+    if ledger.get("game_identity_sha256") != source["model_eligible_identity_sha256"] or receipt.get(
+        "game_identity_sha256"
+    ) != source["model_eligible_identity_sha256"]:
+        raise FullCensusTierDiffError(f"{variant} offset identity changed")
+    if ledger.get("offsets_sha256") != offset_sha256 or receipt.get(
+        "offsets_sha256"
+    ) != offset_sha256:
+        raise FullCensusTierDiffError(f"{variant} offset values changed")
+    if receipt.get("source_receipt_sha256") != source_receipt.get("receipt_sha256"):
+        raise FullCensusTierDiffError(f"{variant} offset source receipt changed")
+    claimed_receipt_sha256 = _require_hash(
+        receipt.get("receipt_sha256"), f"{variant} offset receipt self hash"
+    )
+    unsigned_receipt = dict(receipt)
+    unsigned_receipt.pop("receipt_sha256", None)
+    if _hash_bytes(canonical_json_bytes(unsigned_receipt)) != claimed_receipt_sha256:
+        raise FullCensusTierDiffError(f"{variant} offset receipt self hash changed")
+    if claimed_receipt_sha256 != offset_record.get("receipt_sha256"):
+        raise FullCensusTierDiffError(f"{variant} offset receipt hash changed")
+    if receipt.get("artifact_locator") not in {ledger_path.name, str(ledger_path)}:
+        raise FullCensusTierDiffError(f"{variant} offset ledger locator changed")
+    if receipt.get("artifact_bytes") != ledger_path.stat().st_size:
+        raise FullCensusTierDiffError(f"{variant} offset ledger bytes changed")
+    if receipt.get("artifact_sha256") != ledger_file["sha256"]:
+        raise FullCensusTierDiffError(f"{variant} offset ledger hash changed")
+    return {
+        "candidate": manifest_candidate_file,
+        "ledger": ledger_file,
+        "receipt": receipt_file,
+        "offsets_sha256": offset_sha256,
+        "receipt_sha256": claimed_receipt_sha256,
+    }
 
 
 def _verify_candidate(
@@ -353,6 +598,8 @@ def build_full_census_fourway_diff(
     expected_candidate_sha256: Mapping[str, str] | None = None,
     v2_candidate_path: Path | str | None = None,
     expected_v2_candidate_sha256: str | None = None,
+    fourway_candidate_manifest_path: Path | str | None = None,
+    expected_fourway_candidate_manifest_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Build a retrospective four-variant diff on one exact eligible universe.
 
@@ -378,6 +625,27 @@ def build_full_census_fourway_diff(
         expected_source_receipt_file_sha256=expected_source_receipt_file_sha256,
         expected_source_receipt_sha256=expected_source_receipt_sha256,
     )
+    if (
+        fourway_candidate_manifest_path is None
+        or expected_fourway_candidate_manifest_sha256 is None
+    ):
+        raise FullCensusTierDiffError(
+            "fourway Tier candidate manifest and its independent raw hash are required"
+        )
+    manifest_path = _safe_file(
+        fourway_candidate_manifest_path,
+        "fourway Tier candidate manifest",
+    )
+    manifest, manifest_file = _verify_fourway_candidate_manifest(
+        manifest_path,
+        expected_sha256=expected_fourway_candidate_manifest_sha256,
+        source=source,
+        expected_source_receipt_file_sha256=expected_source_receipt_file_sha256,
+    )
+    source_receipt = _load_json(
+        _safe_file(source_receipt_path, "source receipt"),
+        "source receipt",
+    )
     baseline_path = _safe_file(baseline_candidate_path, "baseline candidate")
     baseline_file = _verify_file(
         baseline_path,
@@ -392,6 +660,31 @@ def build_full_census_fourway_diff(
         expected_identity=source["accepted_identity_sha256"],
         expected_source_as_of=source["source_as_of"],
     )
+    baseline_manifest = manifest.get("baseline")
+    baseline_manifest_candidate = (
+        baseline_manifest.get("candidate")
+        if isinstance(baseline_manifest, Mapping)
+        else None
+    )
+    baseline_manifest_path, baseline_manifest_file = _manifest_file(
+        manifest_path,
+        baseline_manifest_candidate,
+        "baseline manifest candidate",
+        field="path",
+        hash_field="raw_sha256",
+    )
+    if baseline_manifest_path != baseline_path:
+        raise FullCensusTierDiffError(
+            "baseline candidate path differs from its verified manifest"
+        )
+    if baseline_manifest_file["sha256"] != baseline_file["sha256"]:
+        raise FullCensusTierDiffError(
+            "baseline candidate hash differs from its verified manifest"
+        )
+    if baseline_manifest_candidate.get("artifact_sha256") != baseline_artifact_sha256:
+        raise FullCensusTierDiffError(
+            "baseline candidate artifact hash differs from its verified manifest"
+        )
     candidate_rows: dict[str, dict[tuple[str, str, str, str], dict[str, Any]]] = {}
     candidate_artifacts: dict[str, dict[str, Any]] = {}
     for variant in TIER_VARIANTS:
@@ -406,10 +699,23 @@ def build_full_census_fourway_diff(
             expected_source_as_of=source["source_as_of"],
             expected_source_receipt_sha256=source["source_receipt_sha256"],
         )
+        manifest_binding = _verify_fourway_manifest_variant(
+            manifest_path=manifest_path,
+            manifest=manifest,
+            manifest_variant=manifest["variants"].get(variant),
+            supplied_path=path,
+            supplied_sha256=hashes[variant],
+            variant=variant,
+            candidate=candidate,
+            artifact_sha256=artifact_sha256,
+            source=source,
+            source_receipt=source_receipt,
+        )
         candidate_rows[variant] = rows
         candidate_artifacts[variant] = {
             **file_binding,
             "artifact_sha256": artifact_sha256,
+            "manifest": manifest_binding,
             "source_game_count": source["model_eligible_game_count"],
             "source_identity_sha256": source["model_eligible_identity_sha256"],
         }
@@ -458,6 +764,7 @@ def build_full_census_fourway_diff(
         "inputs": {
             "source_receipt": source_file["source_receipt"],
             "baseline_candidate": baseline_file,
+            "fourway_candidate_manifest": manifest_file,
             "variant_candidates": candidate_artifacts,
         },
         "comparisons": comparisons,
@@ -657,6 +964,8 @@ def build_full_census_tier_diff(
     expected_variant_candidate_sha256: Mapping[str, str] | None = None,
     candidate_paths: Mapping[str, Path | str] | None = None,
     expected_candidate_sha256: Mapping[str, str] | None = None,
+    fourway_candidate_manifest_path: Path | str | None = None,
+    expected_fourway_candidate_manifest_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Build a verified current versus V2 common-row Tier comparison."""
 
@@ -671,6 +980,8 @@ def build_full_census_tier_diff(
             expected_variant_candidate_sha256=expected_variant_candidate_sha256,
             candidate_paths=candidate_paths,
             expected_candidate_sha256=expected_candidate_sha256,
+            fourway_candidate_manifest_path=fourway_candidate_manifest_path,
+            expected_fourway_candidate_manifest_sha256=expected_fourway_candidate_manifest_sha256,
         )
     if v2_candidate_path is None or expected_v2_candidate_sha256 is None:
         raise FullCensusTierDiffError("V2 candidate inputs are required for the legacy diff")
@@ -1003,6 +1314,8 @@ def main() -> int:
         metavar="VARIANT=SHA256",
         help="Four-way candidate hash. Repeat once per registered variant.",
     )
+    parser.add_argument("--fourway-candidate-manifest", type=Path)
+    parser.add_argument("--expected-fourway-candidate-manifest-sha256")
     parser.add_argument("--output-root", type=Path, required=True)
     args = parser.parse_args()
     if args.baseline_bundle is not None:
@@ -1034,7 +1347,18 @@ def main() -> int:
             v2_candidate_path=args.v2_candidate or Path("/dev/null"),
             expected_v2_candidate_sha256=args.expected_v2_candidate_sha256 or "0" * 64,
         )
-    if args.variant_candidate or args.expected_variant_candidate_sha256:
+    has_fourway_candidates = bool(
+        args.variant_candidate or args.expected_variant_candidate_sha256
+    )
+    has_fourway_manifest = bool(
+        args.fourway_candidate_manifest
+        or args.expected_fourway_candidate_manifest_sha256
+    )
+    if has_fourway_manifest and not has_fourway_candidates:
+        raise FullCensusTierDiffError(
+            "fourway candidate manifest requires four-way candidate arguments"
+        )
+    if has_fourway_candidates:
         candidate_paths: dict[str, Path] = {}
         candidate_hashes: dict[str, str] = {}
         for item in args.variant_candidate:
@@ -1058,6 +1382,8 @@ def main() -> int:
             {
                 "variant_candidate_paths": candidate_paths,
                 "expected_variant_candidate_sha256": candidate_hashes,
+                "fourway_candidate_manifest_path": args.fourway_candidate_manifest,
+                "expected_fourway_candidate_manifest_sha256": args.expected_fourway_candidate_manifest_sha256,
             }
         )
         report = build_full_census_fourway_diff(**inputs)
@@ -1103,6 +1429,7 @@ def main() -> int:
 __all__ = [
     "AUTHORITY",
     "FINAL_V2_SCOREABILITY_SCHEMA_VERSION",
+    "FOURWAY_CANDIDATE_MANIFEST_SCHEMA_VERSION",
     "FullCensusTierDiffError",
     "RECEIPT_SCHEMA_VERSION",
     "SCHEMA_VERSION",
