@@ -286,10 +286,23 @@ def _form_digest(frame: pd.DataFrame) -> str:
     for row in work.sort_values(list(key_columns), kind="stable").to_dict("records"):
         output = {column: str(row[column]) for column in key_columns}
         for column in metric_columns:
-            value = pd.to_numeric(pd.Series([row[column]]), errors="coerce").iloc[0]
-            if not math.isfinite(float(value)):
+            raw_value = row[column]
+            if pd.isna(raw_value):
+                if column.endswith("_support"):
+                    raise FinalFitError(
+                        f"strict-prior form digest contains a missing support value: {column}"
+                    )
+                output[column] = None
+                continue
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError) as error:
+                raise FinalFitError(
+                    f"strict-prior form digest contains a non-numeric value: {column}"
+                ) from error
+            if not math.isfinite(value):
                 raise FinalFitError(f"strict-prior form digest contains a non-finite value: {column}")
-            output[column] = float(value)
+            output[column] = value
         rows.append(output)
     return hashlib.sha256(_canonical_json_bytes(rows)).hexdigest()
 

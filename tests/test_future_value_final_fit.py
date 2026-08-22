@@ -18,6 +18,7 @@ from benchmarks.build_future_value_final_fit import (
     _design_digest,
     _eligible_source_identity_frames,
     _evaluation_blockers,
+    _form_digest,
     _validate_source_stable_ids,
     _verify_source_receipt,
     _target_digest,
@@ -209,6 +210,54 @@ def test_final_fit_requires_current_feature_value_digest(tmp_path) -> None:
             expected_current_receipt_sha256=_sha256_path(receipt_path),
             expected_current_artifact_sha256=_sha256_path(artifact_path),
         )
+
+
+def test_form_digest_preserves_expected_missing_history() -> None:
+    rows: list[dict[str, object]] = []
+    for game_id, value in (("g1", float("nan")), ("g2", 0.25)):
+        row: dict[str, object] = {
+            "game_id": game_id,
+            "side": "blue",
+            "role": "top",
+            "player_id": f"player-{game_id}",
+            "champion": "Aatrox",
+        }
+        for metric in final_fit_module.FORM_METRICS:
+            row[f"prior_form_{metric}"] = value
+            row[f"prior_form_{metric}_support"] = 0 if game_id == "g1" else 1
+            row[f"prior_form_{metric}_effective_support"] = (
+                0.0 if game_id == "g1" else 1.0
+            )
+        rows.append(row)
+    frame = pd.DataFrame(rows)
+
+    assert _form_digest(frame) == _form_digest(frame.iloc[::-1].reset_index(drop=True))
+
+
+def test_form_digest_rejects_missing_support_and_infinite_metrics() -> None:
+    row: dict[str, object] = {
+        "game_id": "g1",
+        "side": "blue",
+        "role": "top",
+        "player_id": "player-g1",
+        "champion": "Aatrox",
+    }
+    for metric in final_fit_module.FORM_METRICS:
+        row[f"prior_form_{metric}"] = 0.0
+        row[f"prior_form_{metric}_support"] = 1
+        row[f"prior_form_{metric}_effective_support"] = 1.0
+    frame = pd.DataFrame([row])
+    metric = final_fit_module.FORM_METRICS[0]
+
+    missing_support = frame.copy()
+    missing_support.loc[0, f"prior_form_{metric}_support"] = float("nan")
+    with pytest.raises(FinalFitError, match="missing support value"):
+        _form_digest(missing_support)
+
+    infinite_metric = frame.copy()
+    infinite_metric.loc[0, f"prior_form_{metric}"] = float("inf")
+    with pytest.raises(FinalFitError, match="non-finite value"):
+        _form_digest(infinite_metric)
 
 
 @pytest.mark.parametrize(
