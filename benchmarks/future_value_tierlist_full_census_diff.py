@@ -772,11 +772,30 @@ def write_full_census_tier_diff(
     unsigned_report.pop("report_sha256", None)
     if _hash_bytes(canonical_json_bytes(unsigned_report)) != claimed_report_hash:
         raise FullCensusTierDiffError("report self hash changed")
+    is_fourway = report.get("schema_version") == "scryglass:future-value-tierlist-full-census-fourway:v1"
+    comparison_binding: dict[str, Any]
+    if is_fourway:
+        comparisons = report.get("comparisons")
+        if (
+            not isinstance(comparisons, Mapping)
+            or set(comparisons) != set(TIER_VARIANTS)
+            or any(not isinstance(value, Mapping) for value in comparisons.values())
+        ):
+            raise FullCensusTierDiffError("four-way comparisons are missing")
+        comparison_binding = {
+            "comparisons": {
+                variant: dict(comparisons[variant]) for variant in TIER_VARIANTS
+            }
+        }
+    else:
+        comparison = report.get("comparison")
+        if not isinstance(comparison, Mapping):
+            raise FullCensusTierDiffError("comparison is missing")
+        comparison_binding = {"comparison": dict(comparison)}
     root = Path(output_root).expanduser().resolve()
     if root.exists() and (root.is_symlink() or any(root.iterdir())):
         raise FullCensusTierDiffError("output root must be empty and safe")
     root.mkdir(parents=True, exist_ok=True)
-    is_fourway = report.get("schema_version") == "scryglass:future-value-tierlist-full-census-fourway:v1"
     stem = "current-fourway-full-census-tier-diff" if is_fourway else "current-v2-full-census-tier-diff"
     report_path = root / f"{stem}.json"
     receipt_path = root / f"{stem}-receipt.json"
@@ -794,7 +813,7 @@ def write_full_census_tier_diff(
         },
         "source": dict(report["source"]),
         "inputs": dict(report["inputs"]),
-        "comparison": dict(report["comparison"]),
+        **comparison_binding,
         "blockers": list(report.get("blockers", [])),
     }
     receipt["receipt_sha256"] = _hash_bytes(canonical_json_bytes(receipt))
@@ -845,11 +864,129 @@ def _load_trust_manifest_inputs(
     }
 
 
+def _load_baseline_bundle_inputs(
+    *,
+    baseline_bundle_path: Path,
+    expected_baseline_bundle_sha256: str,
+) -> dict[str, Any]:
+    """Resolve an externally hashed exact baseline bundle.
+
+    This path keeps the existing code-pinned trust-manifest mode intact.  The
+    baseline rebuild loader verifies the closed bundle, every referenced file,
+    the accepted census, and the baseline candidate before these inputs reach
+    the four-way comparison.
+    """
+
+    from benchmarks.rebuild_future_value_tier_baseline import (
+        TierBaselineRebuildError,
+        load_tier_baseline_bundle,
+    )
+
+    bundle_path = _safe_file(baseline_bundle_path, "Tier baseline bundle")
+    expected_bundle_sha256 = _require_hash(
+        expected_baseline_bundle_sha256,
+        "expected Tier baseline bundle hash",
+    )
+    try:
+        bundle = load_tier_baseline_bundle(
+            bundle_path,
+            expected_raw_sha256=expected_bundle_sha256,
+        )
+    except (TierBaselineRebuildError, OSError, ValueError) as error:
+        raise FullCensusTierDiffError(
+            f"Tier baseline bundle failed validation: {error}"
+        ) from error
+
+    source = bundle.get("source")
+    candidate = bundle.get("candidate")
+    if not isinstance(source, Mapping):
+        raise FullCensusTierDiffError("Tier baseline bundle source binding is missing")
+    if not isinstance(candidate, Mapping):
+        raise FullCensusTierDiffError(
+            "Tier baseline bundle candidate binding is missing"
+        )
+    receipt_record = source.get("source_receipt")
+    if not isinstance(receipt_record, Mapping):
+        raise FullCensusTierDiffError(
+            "Tier baseline bundle source receipt binding is missing"
+        )
+
+    def resolve_locator(record: Mapping[str, Any], label: str) -> Path:
+        locator = record.get("locator")
+        if (
+            not isinstance(locator, str)
+            or not locator.strip()
+            or Path(locator).is_absolute()
+            or ".." in Path(locator).parts
+        ):
+            raise FullCensusTierDiffError(f"{label} locator is unsafe")
+        return _safe_file(bundle_path.parent / locator, label)
+
+    receipt_path = resolve_locator(receipt_record, "Tier baseline source receipt")
+    candidate_path = resolve_locator(candidate, "Tier baseline candidate")
+    receipt_source, source_file = _load_source(
+        receipt_path,
+        expected_source_receipt_file_sha256=_require_hash(
+            receipt_record.get("sha256"),
+            "Tier baseline source receipt file hash",
+        ),
+        expected_source_receipt_sha256=_require_hash(
+            source.get("source_receipt_sha256"),
+            "Tier baseline source receipt hash",
+        ),
+    )
+    receipt_payload = _load_json(receipt_path, "Tier baseline source receipt")
+    expected_source = {
+        "source_as_of": receipt_source["source_as_of"],
+        "source_game_count": receipt_source["accepted_game_count"],
+        "source_identity_sha256": receipt_source["accepted_identity_sha256"],
+        "source_receipt_sha256": receipt_source["source_receipt_sha256"],
+        "source_receipt_file_sha256": source_file["source_receipt"]["sha256"],
+        "model_eligible_game_count": receipt_source["model_eligible_game_count"],
+        "model_eligible_identity_sha256": receipt_source[
+            "model_eligible_identity_sha256"
+        ],
+    }
+    for field, expected in expected_source.items():
+        if source.get(field) != expected:
+            raise FullCensusTierDiffError(
+                f"Tier baseline bundle source binding changed: {field}"
+            )
+    if tuple(source.get("accepted_game_ids") or ()) != tuple(
+        receipt_payload.get("accepted_game_ids") or ()
+    ):
+        raise FullCensusTierDiffError(
+            "Tier baseline bundle accepted census changed"
+        )
+    if tuple(source.get("model_eligible_game_ids") or ()) != tuple(
+        receipt_payload.get("model_eligible_game_ids") or ()
+    ):
+        raise FullCensusTierDiffError(
+            "Tier baseline bundle model-eligible census changed"
+        )
+
+    return {
+        "source_receipt_path": receipt_path,
+        "expected_source_receipt_file_sha256": source_file["source_receipt"][
+            "sha256"
+        ],
+        "expected_source_receipt_sha256": receipt_source["source_receipt_sha256"],
+        "baseline_candidate_path": candidate_path,
+        "expected_baseline_candidate_sha256": _require_hash(
+            candidate.get("raw_sha256"),
+            "Tier baseline candidate hash",
+        ),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--trust-manifest", type=Path, required=True)
-    parser.add_argument("--expected-trust-manifest-sha256", required=True)
-    parser.add_argument("--source-root", type=Path, required=True)
+    baseline = parser.add_mutually_exclusive_group(required=True)
+    baseline.add_argument("--trust-manifest", type=Path)
+    baseline.add_argument("--baseline-bundle", type=Path)
+    parser.add_argument("--expected-trust-manifest-sha256")
+    parser.add_argument("--expected-baseline-bundle-sha256")
+    parser.add_argument("--source-root", type=Path)
     parser.add_argument("--v2-candidate", type=Path)
     parser.add_argument("--expected-v2-candidate-sha256")
     parser.add_argument(
@@ -868,6 +1005,35 @@ def main() -> int:
     )
     parser.add_argument("--output-root", type=Path, required=True)
     args = parser.parse_args()
+    if args.baseline_bundle is not None:
+        if args.expected_baseline_bundle_sha256 is None:
+            raise FullCensusTierDiffError(
+                "--expected-baseline-bundle-sha256 is required with --baseline-bundle"
+            )
+        if args.expected_trust_manifest_sha256 is not None:
+            raise FullCensusTierDiffError(
+                "--expected-trust-manifest-sha256 cannot be used with --baseline-bundle"
+            )
+        baseline_inputs = _load_baseline_bundle_inputs(
+            baseline_bundle_path=args.baseline_bundle.expanduser(),
+            expected_baseline_bundle_sha256=args.expected_baseline_bundle_sha256,
+        )
+    else:
+        if args.expected_trust_manifest_sha256 is None or args.source_root is None:
+            raise FullCensusTierDiffError(
+                "--expected-trust-manifest-sha256 and --source-root are required with --trust-manifest"
+            )
+        if args.expected_baseline_bundle_sha256 is not None:
+            raise FullCensusTierDiffError(
+                "--expected-baseline-bundle-sha256 cannot be used with --trust-manifest"
+            )
+        baseline_inputs = _load_trust_manifest_inputs(
+            trust_manifest_path=args.trust_manifest.expanduser().resolve(),
+            expected_trust_manifest_sha256=args.expected_trust_manifest_sha256,
+            source_root=args.source_root,
+            v2_candidate_path=args.v2_candidate or Path("/dev/null"),
+            expected_v2_candidate_sha256=args.expected_v2_candidate_sha256 or "0" * 64,
+        )
     if args.variant_candidate or args.expected_variant_candidate_sha256:
         candidate_paths: dict[str, Path] = {}
         candidate_hashes: dict[str, str] = {}
@@ -883,16 +1049,9 @@ def main() -> int:
                 )
             variant, value = item.split("=", 1)
             candidate_hashes[variant] = value
-        trust_inputs = _load_trust_manifest_inputs(
-            trust_manifest_path=args.trust_manifest.expanduser().resolve(),
-            expected_trust_manifest_sha256=args.expected_trust_manifest_sha256,
-            source_root=args.source_root,
-            v2_candidate_path=args.v2_candidate or Path("/dev/null"),
-            expected_v2_candidate_sha256=args.expected_v2_candidate_sha256 or "0" * 64,
-        )
         inputs = {
             key: value
-            for key, value in trust_inputs.items()
+            for key, value in baseline_inputs.items()
             if key not in {"v2_candidate_path", "expected_v2_candidate_sha256"}
         }
         inputs.update(
@@ -907,12 +1066,12 @@ def main() -> int:
             raise FullCensusTierDiffError(
                 "V2 candidate arguments or four-way candidate arguments are required"
             )
-        inputs = _load_trust_manifest_inputs(
-            trust_manifest_path=args.trust_manifest.expanduser().resolve(),
-            expected_trust_manifest_sha256=args.expected_trust_manifest_sha256,
-            source_root=args.source_root,
-            v2_candidate_path=args.v2_candidate.expanduser().resolve(),
-            expected_v2_candidate_sha256=args.expected_v2_candidate_sha256,
+        inputs = dict(baseline_inputs)
+        inputs.update(
+            {
+                "v2_candidate_path": args.v2_candidate.expanduser().resolve(),
+                "expected_v2_candidate_sha256": args.expected_v2_candidate_sha256,
+            }
         )
         report = build_full_census_tier_diff(**inputs)
     report_path, receipt_path = write_full_census_tier_diff(

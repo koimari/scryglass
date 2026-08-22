@@ -4,16 +4,22 @@ import hashlib
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from benchmarks.future_value_tierlist_full_census_diff import (
     FullCensusTierDiffError,
+    _load_baseline_bundle_inputs,
     audit_final_v2_full_census_scoreability,
     build_full_census_fourway_diff,
     build_full_census_tier_diff,
     canonical_json_bytes,
     sha256_path,
     write_full_census_tier_diff,
+)
+from benchmarks.rebuild_future_value_tier_baseline import (
+    BUNDLE_FILE,
+    rebuild_tier_baseline,
 )
 from lol_kills.research.future_value_tierlist import VARIANTS, make_offset_provenance
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
@@ -352,6 +358,73 @@ def _fourway_fixture(tmp_path: Path) -> dict[str, object]:
     return inputs
 
 
+def _baseline_bundle_fixture(tmp_path: Path) -> tuple[Path, str]:
+    input_root = tmp_path / "baseline-input"
+    source_root = input_root / "source"
+    source_root.mkdir(parents=True)
+    source_names = {
+        "maps": "maps.parquet",
+        "players": "oe_player_games.parquet",
+        "teams": "oe_team_games.parquet",
+    }
+    for label, name in source_names.items():
+        pd.DataFrame({"game_uid": list(ACCEPTED)}).to_parquet(source_root / name)
+    accepted_census = {
+        "schema_version": "scryglass:accepted-game-census:v1",
+        "game_count": len(ACCEPTED),
+        "source_identity_sha256": identity_sha256(ACCEPTED),
+        "game_ids": list(ACCEPTED),
+    }
+    _write_json(source_root / "accepted-census.json", accepted_census)
+    _write_json(source_root / "meta.json", {"source_as_of": SOURCE_AS_OF})
+
+    source_receipt = _source_receipt()
+    source_receipt["source_files"] = {
+        label: {
+            "locator": name,
+            "bytes": (source_root / name).stat().st_size,
+            "sha256": sha256_path(source_root / name),
+        }
+        for label, name in source_names.items()
+    }
+    source_receipt["source_files"]["accepted_census"] = {
+        "locator": "accepted-census.json",
+        "bytes": (source_root / "accepted-census.json").stat().st_size,
+        "sha256": sha256_path(source_root / "accepted-census.json"),
+    }
+    source_receipt = _seal(source_receipt, "receipt_sha256")
+    source_receipt_path = input_root / "future-value-source-receipt.json"
+    source_receipt_file_sha256 = _write_json(source_receipt_path, source_receipt)
+
+    def candidate_builder(_runtime_root: Path, **_kwargs: object) -> dict[str, object]:
+        candidate = _candidate(
+            game_count=len(ACCEPTED),
+            source_identity=identity_sha256(ACCEPTED),
+            rows=[_row("a", "A", 1, "S"), _row("b", "B", 2, "A")],
+        )
+        candidate["joint_model"] = {"map_ids": list(ACCEPTED)}
+        return _seal(candidate, "artifact_sha256")
+
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    output = tmp_path / "baseline-bundle"
+    rebuild_tier_baseline(
+        source_root=source_root,
+        source_receipt_path=source_receipt_path,
+        expected_source_receipt_file_sha256=source_receipt_file_sha256,
+        expected_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+        output_root=output,
+        repository_root=repository,
+        expected_accepted_game_count=len(ACCEPTED),
+        expected_accepted_identity_sha256=identity_sha256(ACCEPTED),
+        expected_model_eligible_game_count=len(ELIGIBLE),
+        expected_model_eligible_identity_sha256=identity_sha256(ELIGIBLE),
+        candidate_builder=candidate_builder,
+    )
+    bundle_path = output / BUNDLE_FILE
+    return bundle_path, sha256_path(bundle_path)
+
+
 def test_fourway_full_census_uses_identical_universe_and_keeps_baseline_unchanged(
     tmp_path: Path,
 ) -> None:
@@ -375,6 +448,54 @@ def test_fourway_full_census_uses_identical_universe_and_keeps_baseline_unchange
     assert "chronological_subset_evidence_not_used_for_full_census_offsets" in report[
         "blockers"
     ]
+
+
+def test_baseline_bundle_external_hash_rejects_changed_bytes(tmp_path: Path) -> None:
+    bundle_path, bundle_sha256 = _baseline_bundle_fixture(tmp_path)
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    payload["status"] = "changed"
+    bundle_path.write_bytes(canonical_json_bytes(payload) + b"\n")
+
+    with pytest.raises(
+        FullCensusTierDiffError,
+        match="Tier baseline bundle failed validation: trust-input bundle bytes changed",
+    ):
+        _load_baseline_bundle_inputs(
+            baseline_bundle_path=bundle_path,
+            expected_baseline_bundle_sha256=bundle_sha256,
+        )
+
+
+def test_baseline_bundle_rejects_resealed_source_mismatch(tmp_path: Path) -> None:
+    bundle_path, _bundle_sha256 = _baseline_bundle_fixture(tmp_path)
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    payload["source"]["source_game_count"] = 99
+    payload = _seal(payload, "bundle_sha256")
+    bundle_sha256 = _write_json(bundle_path, payload)
+
+    with pytest.raises(
+        FullCensusTierDiffError,
+        match="Tier baseline bundle source binding changed: source_game_count",
+    ):
+        _load_baseline_bundle_inputs(
+            baseline_bundle_path=bundle_path,
+            expected_baseline_bundle_sha256=bundle_sha256,
+        )
+
+
+def test_fourway_receipt_binds_all_variant_comparisons(tmp_path: Path) -> None:
+    report = build_full_census_fourway_diff(**_fourway_fixture(tmp_path))
+    report_path, receipt_path = write_full_census_tier_diff(
+        report,
+        output_root=tmp_path / "fourway-output",
+    )
+
+    written_report = json.loads(report_path.read_text(encoding="utf-8"))
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert "comparison" not in receipt
+    assert receipt["comparisons"] == written_report["comparisons"]
+    assert set(receipt["comparisons"]) == set(VARIANTS)
+    assert receipt["report"]["sha256"] == sha256_path(report_path)
 
 
 def test_fourway_full_census_rejects_missing_or_extra_candidate_rows(
