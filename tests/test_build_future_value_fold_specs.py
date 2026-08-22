@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+import benchmarks.build_future_value_fold_specs as fold_specs_module
 from benchmarks.build_future_value_fold_specs import FoldSpecError, build_fold_specs
 from lol_kills.research.future_value_rating import FutureValueSourceError
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
@@ -84,6 +85,67 @@ def test_fold_specs_bind_mixed_partition_and_reject_receipt_mutation(
     assert result["series_partition"]["map_count"] == 40
     assert result["series_partition"]["retained_proxy_game_count"] == 0
     assert result["source"]["model_eligible_game_count"] == 40
+    expected_series = {
+        1: {
+            "train": [
+                "leaguepedia:series-0",
+                "leaguepedia:series-1",
+                "leaguepedia:series-2",
+                "leaguepedia:series-3",
+                "leaguepedia:series-4",
+                "leaguepedia:series-5",
+                "leaguepedia:series-6",
+            ],
+            "validation": [
+                "leaguepedia:series-10",
+                "leaguepedia:series-11",
+                "leaguepedia:series-12",
+                "leaguepedia:series-7",
+                "leaguepedia:series-8",
+                "leaguepedia:series-9",
+            ],
+        },
+        2: {
+            "train": [
+                "leaguepedia:series-0",
+                "leaguepedia:series-1",
+                "leaguepedia:series-10",
+                "leaguepedia:series-11",
+                "leaguepedia:series-12",
+                "leaguepedia:series-2",
+                "leaguepedia:series-3",
+                "leaguepedia:series-4",
+                "leaguepedia:series-5",
+                "leaguepedia:series-6",
+                "leaguepedia:series-7",
+                "leaguepedia:series-8",
+                "leaguepedia:series-9",
+            ],
+            "validation": [
+                "leaguepedia:series-14",
+                "leaguepedia:series-15",
+                "leaguepedia:series-16",
+                "leaguepedia:series-17",
+                "leaguepedia:series-18",
+                "leaguepedia:series-19",
+            ],
+        },
+    }
+    for record in result["folds"]:
+        expected = expected_series[record["fold"]]
+        assert record["train_series_ids"] == expected["train"]
+        assert record["validation_series_ids"] == expected["validation"]
+        assert record["train_series_count"] == len(expected["train"])
+        assert record["validation_series_count"] == len(expected["validation"])
+        assert record["train_series_identity_sha256"] == identity_sha256(
+            expected["train"]
+        )
+        assert record["validation_series_identity_sha256"] == identity_sha256(
+            expected["validation"]
+        )
+        assert set(record["train_series_ids"]).isdisjoint(
+            record["validation_series_ids"]
+        )
     with pytest.raises(FutureValueSourceError, match="receipt file changed"):
         build_fold_specs(
             maps=maps,
@@ -92,6 +154,112 @@ def test_fold_specs_bind_mixed_partition_and_reject_receipt_mutation(
             crosswalk_receipt_path=receipt_path,
             expected_crosswalk_receipt_file_sha256="0" * 64,
             n_folds=2,
+        )
+
+
+def test_fold_specs_reject_mutated_series_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    game_ids = [f"g{index:02d}" for index in range(1, 41)]
+    source = _source_receipt(game_ids)
+    crosswalk_path, receipt_path, receipt_file_sha = _write_crosswalk(
+        tmp_path, source, _assignments(game_ids)
+    )
+    original = fold_specs_module.chronological_whole_series_folds
+
+    def mutated(*args: object, **kwargs: object) -> list[dict[str, object]]:
+        folds = original(*args, **kwargs)
+        folds[0]["train_series_ids"] = ("leaguepedia:forged",)
+        return folds
+
+    monkeypatch.setattr(fold_specs_module, "chronological_whole_series_folds", mutated)
+    with pytest.raises(FoldSpecError, match="train series IDs changed"):
+        build_fold_specs(
+            maps=_maps(game_ids),
+            source_receipt=source,
+            crosswalk_path=crosswalk_path,
+            crosswalk_receipt_path=receipt_path,
+            expected_crosswalk_receipt_file_sha256=receipt_file_sha,
+            n_folds=2,
+        )
+
+
+def test_fold_specs_reject_series_overlap_even_when_game_ids_are_disjoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    game_ids = [f"g{index:02d}" for index in range(1, 41)]
+    source = _source_receipt(game_ids)
+    crosswalk_path, receipt_path, receipt_file_sha = _write_crosswalk(
+        tmp_path, source, _assignments(game_ids)
+    )
+    original = fold_specs_module.chronological_whole_series_folds
+
+    def mutated(*args: object, **kwargs: object) -> list[dict[str, object]]:
+        folds = original(*args, **kwargs)
+        folds[0]["train_game_ids"] = ("g01",)
+        folds[0]["validation_game_ids"] = ("g02",)
+        folds[0]["train_series_ids"] = ("leaguepedia:series-0",)
+        folds[0]["validation_series_ids"] = ("leaguepedia:series-0",)
+        folds[0]["validation_start"] = "2026-01-01T01:00:00Z"
+        folds[0]["validation_end"] = "2026-01-01T01:00:00Z"
+        return folds
+
+    monkeypatch.setattr(fold_specs_module, "chronological_whole_series_folds", mutated)
+    with pytest.raises(FoldSpecError, match="series overlap"):
+        build_fold_specs(
+            maps=_maps(game_ids),
+            source_receipt=source,
+            crosswalk_path=crosswalk_path,
+            crosswalk_receipt_path=receipt_path,
+            expected_crosswalk_receipt_file_sha256=receipt_file_sha,
+            n_folds=2,
+        )
+
+
+def test_main_emits_series_ledger_in_each_fold_spec(tmp_path: Path) -> None:
+    game_ids = [f"g{index:02d}" for index in range(1, 41)]
+    source = _source_receipt(game_ids)
+    crosswalk_path, receipt_path, receipt_file_sha = _write_crosswalk(
+        tmp_path, source, _assignments(game_ids)
+    )
+    source_path = tmp_path / "source-receipt.json"
+    source_path.write_text(
+        json.dumps(source, allow_nan=False, sort_keys=True), encoding="utf-8"
+    )
+    maps_path = tmp_path / "maps.parquet"
+    _maps(game_ids).to_parquet(maps_path, index=False)
+    output_root = tmp_path / "fold-specs"
+    output_root.mkdir()
+    assert (
+        fold_specs_module.main(
+            [
+                "--maps",
+                str(maps_path),
+                "--source-receipt",
+                str(source_path),
+                "--crosswalk",
+                str(crosswalk_path),
+                "--crosswalk-receipt",
+                str(receipt_path),
+                "--crosswalk-receipt-file-sha256",
+                receipt_file_sha,
+                "--output-root",
+                str(output_root),
+                "--folds",
+                "2",
+            ]
+        )
+        == 0
+    )
+    for fold in (1, 2):
+        spec = json.loads((output_root / f"fold-{fold}-spec.json").read_text())
+        assert spec["train_series_count"] == len(spec["train_series_ids"])
+        assert spec["validation_series_count"] == len(spec["validation_series_ids"])
+        assert spec["train_series_identity_sha256"] == identity_sha256(
+            spec["train_series_ids"]
+        )
+        assert spec["validation_series_identity_sha256"] == identity_sha256(
+            spec["validation_series_ids"]
         )
 
 
