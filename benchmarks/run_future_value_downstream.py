@@ -41,6 +41,10 @@ FINAL_FIT_MANIFEST_SCHEMA_VERSION = "scryglass:future-value-final-fit-manifest:v
 # snapshot producer.  Keep the name local to the runner so callers do not
 # need to import the producer module just to inspect a plan.
 SNAPSHOT_CAPABILITY_MANIFEST_SCHEMA_VERSION = "scryglass:future-value-snapshot-capability:v1"
+SCALING_ARTIFACT_NAME = "scaling-feature-ledger-online.parquet"
+SCALING_RECEIPT_NAME = "scaling-feature-ledger-online-receipt.json"
+SCALING_MANIFEST_NAME = "scaling-feature-ledger-online-manifest.json"
+NESTED_SELECTION_BUNDLE_NAME = "nested-selection-bundle.json"
 VARIANTS = tuple(str(value) for value in FOURWAY_VARIANTS)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 DEFAULT_MAX_LOG_BYTES = 1_048_576
@@ -500,8 +504,10 @@ def _source_binding(
     if len(eval_outputs) != sum(1 for record in raw_eval_outputs if isinstance(record, Mapping)):
         raise DownstreamRunError("fourway evaluation output records contain duplicate paths")
     for variant in VARIANTS:
-        path = fourway_root / "stages" / "evaluations" / variant / "model.json"
-        runtime = fourway_root / "stages" / "evaluations" / variant / "runtime.json"
+        # The fourway receipt keeps the historical stage name ``evaluations``.
+        # Its verified artifacts live in the singular ``evaluation`` root.
+        path = fourway_root / "stages" / "evaluation" / variant / "model.json"
+        runtime = fourway_root / "stages" / "evaluation" / variant / "runtime.json"
         if not path.is_file() or path.is_symlink() or not runtime.is_file() or runtime.is_symlink():
             raise DownstreamRunError(f"fourway evaluation outputs are incomplete: {variant}")
         for candidate in (path, runtime):
@@ -726,6 +732,25 @@ def _nested_selection_blockers(
         value = _load_json(path, "nested selection evidence")
     except DownstreamRunError:
         return ("nested_selection_input_invalid",)
+    claimed_artifact_hash = value.get("artifact_sha256")
+    if claimed_artifact_hash is not None:
+        try:
+            claimed = _require_hash(claimed_artifact_hash, "nested selection artifact hash")
+            unsigned = dict(value)
+            unsigned.pop("artifact_sha256", None)
+            if _sha256_bytes(_canonical(unsigned)) != claimed:
+                return ("nested_selection_artifact_hash_changed",)
+        except DownstreamRunError:
+            return ("nested_selection_artifact_hash_invalid",)
+    try:
+        _authority_is_closed(value.get("authority"), "nested selection evidence")
+    except DownstreamRunError:
+        return ("nested_selection_authority_invalid",)
+    raw_blockers = value.get("blockers")
+    if isinstance(raw_blockers, list) and any(str(item).strip() for item in raw_blockers):
+        return tuple(sorted({f"nested_selection_semantic_blocker:{item}" for item in raw_blockers}))
+    if value.get("status") in {"blocked", "invalid", "failed", "error"}:
+        return ("nested_selection_semantic_status",)
     source = value.get("source")
     if not isinstance(source, Mapping):
         return ("nested_selection_source_binding_missing",)
@@ -878,6 +903,7 @@ def _final_fit_manifest_worker(argv: Sequence[str]) -> int:
             raise DownstreamRunError("final-fit manifest source receipt file changed")
         directories = _variant_directory_arguments(args.variant_output, "--variant-output")
         variants: dict[str, Any] = {}
+        manifest_blockers: list[str] = []
         for ordinal, variant in enumerate(VARIANTS, start=1):
             root = _safe_path(directories[variant], f"{variant} final-fit root", directory=True)
             model_path = _safe_path(root / f"final-v{ordinal}-model.json", f"{variant} final-fit model")
@@ -903,9 +929,17 @@ def _final_fit_manifest_worker(argv: Sequence[str]) -> int:
                             raise DownstreamRunError(f"{variant} final-fit {label} source changed: {field}")
             if run.get("model_artifact_sha256") not in {None, _sha256_path(model_path)}:
                 raise DownstreamRunError(f"{variant} final-fit model artifact hash changed")
+            variant_blockers = (
+                list(receipt.get("blockers", []))
+                if isinstance(receipt.get("blockers"), list)
+                else []
+            )
+            manifest_blockers.extend(
+                f"{variant}:{value}" for value in variant_blockers if str(value).strip()
+            )
             variants[variant] = {
                 "status": receipt.get("status"),
-                "blockers": list(receipt.get("blockers", [])) if isinstance(receipt.get("blockers"), list) else [],
+                "blockers": variant_blockers,
                 "model": _file_record(model_path),
                 "receipt": _file_record(receipt_path),
                 "run": _file_record(run_path),
@@ -915,7 +949,7 @@ def _final_fit_manifest_worker(argv: Sequence[str]) -> int:
             }
         payload: dict[str, Any] = {
             "schema_version": FINAL_FIT_MANIFEST_SCHEMA_VERSION,
-            "status": "research_only",
+            "status": "blocked" if manifest_blockers else "research_only",
             "authority": dict(AUTHORITY),
             "source": {
                 "source_as_of": source.get("source_as_of"),
@@ -929,7 +963,7 @@ def _final_fit_manifest_worker(argv: Sequence[str]) -> int:
                 "model_eligible_game_ids": list(source.get("model_eligible_game_ids", [])),
             },
             "variants": variants,
-            "blockers": [],
+            "blockers": sorted(set(manifest_blockers)),
         }
         payload["manifest_sha256"] = _sha256_bytes(_canonical(payload))
         _write_json(args.output.resolve(), payload)
@@ -937,6 +971,267 @@ def _final_fit_manifest_worker(argv: Sequence[str]) -> int:
         return 0
     except (DownstreamRunError, OSError, ValueError, TypeError, KeyError) as error:
         print(f"final-fit manifest worker failed: {error}", file=sys.stderr)
+        return 1
+
+
+def _variant_file_arguments(values: Sequence[str], label: str) -> dict[str, Path]:
+    """Parse the closed ``variant=file`` worker argument set."""
+
+    result: dict[str, Path] = {}
+    for raw in values:
+        if "=" not in raw:
+            raise DownstreamRunError(f"{label} must use VARIANT=PATH")
+        variant, value = raw.split("=", 1)
+        variant = variant.strip()
+        if variant not in VARIANTS or not value.strip() or variant in result:
+            raise DownstreamRunError(f"{label} has an invalid variant binding")
+        result[variant] = Path(value).expanduser()
+    if set(result) != set(VARIANTS):
+        raise DownstreamRunError(f"{label} must cover: {', '.join(VARIANTS)}")
+    return result
+
+
+def _scaling_online_worker(argv: Sequence[str]) -> int:
+    """Build the source-bound online full-census scaling feature ledger."""
+
+    parser = argparse.ArgumentParser(description="Build an online scaling feature ledger")
+    parser.add_argument("--scaling-online-worker", action="store_true")
+    parser.add_argument("--source-root", required=True, type=Path)
+    parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument("--source-receipt-file-sha256", required=True)
+    parser.add_argument("--source-receipt-sha256", required=True)
+    parser.add_argument("--output-root", required=True, type=Path)
+    args = parser.parse_args(list(argv))
+    try:
+        import pandas as pd
+
+        from lol_kills.research.atomized_rf_composite import build_scaling_feature_ledger
+
+        source_root = _safe_path(args.source_root, "scaling source root", directory=True)
+        source_path = _safe_path(args.source_receipt, "scaling source receipt")
+        output_root = _safe_output_root(args.output_root, "scaling output root")
+        source = _load_json(source_path, "scaling source receipt")
+        try:
+            validate_future_value_source_receipt_payload(source)
+        except FutureValueSourceError as error:
+            raise DownstreamRunError("scaling source receipt is not verified") from error
+        _authority_is_closed(source.get("authority"), "scaling source receipt")
+        expected_file_hash = _require_hash(
+            args.source_receipt_file_sha256, "scaling source receipt file hash"
+        )
+        if _sha256_path(source_path) != expected_file_hash:
+            raise DownstreamRunError("scaling source receipt file hash changed")
+        expected_receipt_hash = _require_hash(
+            args.source_receipt_sha256, "scaling source receipt hash"
+        )
+        if str(source.get("receipt_sha256") or "").lower() != expected_receipt_hash:
+            raise DownstreamRunError("scaling source receipt hash changed")
+        _source_paths_from_receipt(source_root, source_path, source)
+        maps = pd.read_parquet(source_root / "maps.parquet")
+        players = pd.read_parquet(source_root / "oe_player_games.parquet")
+        teams = pd.read_parquet(source_root / "oe_team_games.parquet")
+        ledger, receipt = build_scaling_feature_ledger(
+            maps,
+            players,
+            teams,
+            source_receipt=source,
+            source_receipt_sha256=expected_receipt_hash,
+            model_eligible_only=True,
+        )
+        output_root.mkdir(parents=True, exist_ok=True)
+        artifact_path = output_root / SCALING_ARTIFACT_NAME
+        ledger.to_parquet(artifact_path, index=False)
+        receipt_path = output_root / SCALING_RECEIPT_NAME
+        _write_json(receipt_path, receipt)
+        artifact_hash = _sha256_path(artifact_path)
+        receipt_hash = _sha256_path(receipt_path)
+        manifest: dict[str, Any] = {
+            "schema_version": "scryglass:scaling-ledger-artifact:v1",
+            "status": "research_only",
+            "authority": {
+                "research_only": True,
+                "promotion": False,
+                "deployment": False,
+            },
+            "artifact_path": str(artifact_path),
+            "artifact_bytes": artifact_path.stat().st_size,
+            "artifact_sha256": artifact_hash,
+            "producer_receipt_path": str(receipt_path),
+            "producer_receipt_file_sha256": receipt_hash,
+            "producer_receipt_sha256": receipt.get("receipt_sha256"),
+            "source": {
+                "source_as_of": source.get("source_as_of"),
+                "source_game_count": source.get("source_game_count"),
+                "source_identity_sha256": source.get("source_identity_sha256"),
+                "source_receipt_sha256": source.get("receipt_sha256"),
+                "source_receipt_file_sha256": expected_file_hash,
+            },
+            "rows": len(ledger),
+        }
+        manifest["receipt_sha256"] = _sha256_bytes(_canonical(manifest))
+        _write_json(output_root / SCALING_MANIFEST_NAME, manifest)
+        print(
+            json.dumps(
+                {
+                    "status": manifest["status"],
+                    "rows": len(ledger),
+                    "artifact_sha256": artifact_hash,
+                    "receipt_sha256": receipt_hash,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    except (DownstreamRunError, FutureValueSourceError, OSError, ValueError, TypeError, KeyError) as error:
+        print(f"scaling online worker failed: {error}", file=sys.stderr)
+        return 1
+
+
+def _nested_selection_bundle_worker(argv: Sequence[str]) -> int:
+    """Seal nested-selection evidence from all verified evaluation models."""
+
+    parser = argparse.ArgumentParser(description="Build an all-variant nested-selection bundle")
+    parser.add_argument("--nested-selection-bundle-worker", action="store_true")
+    parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument("--source-receipt-file-sha256", required=True)
+    parser.add_argument("--evaluation", action="append", default=[])
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args(list(argv))
+    try:
+        source_path = _safe_path(args.source_receipt, "nested selection source receipt")
+        source = _load_json(source_path, "nested selection source receipt")
+        try:
+            validate_future_value_source_receipt_payload(source)
+        except FutureValueSourceError as error:
+            raise DownstreamRunError("nested selection source receipt is not verified") from error
+        _authority_is_closed(source.get("authority"), "nested selection source receipt")
+        expected_source_file_hash = _require_hash(
+            args.source_receipt_file_sha256,
+            "nested selection source receipt file hash",
+        )
+        if _sha256_path(source_path) != expected_source_file_hash:
+            raise DownstreamRunError("nested selection source receipt file hash changed")
+        evaluation_paths = _variant_file_arguments(args.evaluation, "--evaluation")
+        records: dict[str, dict[str, Any]] = {}
+        variant_payloads: dict[str, dict[str, Any]] = {}
+        top_source: Mapping[str, Any] | None = None
+        payload_source: Mapping[str, Any] | None = None
+        for variant in VARIANTS:
+            evaluation_path = _safe_path(
+                evaluation_paths[variant],
+                f"{variant} evaluation model",
+            )
+            before_hash = _sha256_path(evaluation_path)
+            model = _load_json(evaluation_path, f"{variant} evaluation model")
+            after_hash = _sha256_path(evaluation_path)
+            if before_hash != after_hash:
+                raise DownstreamRunError(f"{variant} evaluation model changed during read")
+            if model.get("schema_version") != "scryglass:future-value-four-variant-evaluation:v1":
+                raise DownstreamRunError(f"{variant} evaluation model schema changed")
+            _authority_is_closed(model.get("authority"), f"{variant} evaluation model")
+            model_source = model.get("source")
+            if not isinstance(model_source, Mapping):
+                raise DownstreamRunError(f"{variant} evaluation model source is missing")
+            required_source = {
+                "source_as_of": source.get("source_as_of"),
+                "source_game_count": source.get("source_game_count"),
+                "source_identity_sha256": source.get("source_identity_sha256"),
+                "source_receipt_sha256": source.get("receipt_sha256"),
+            }
+            if any(model_source.get(field) != expected for field, expected in required_source.items()):
+                raise DownstreamRunError(f"{variant} evaluation model source changed")
+            payloads = model.get("variants")
+            payload = payloads.get(variant) if isinstance(payloads, Mapping) else None
+            if not isinstance(payload, Mapping) or payload.get("variant") != variant:
+                raise DownstreamRunError(f"{variant} evaluation payload is missing")
+            _authority_is_closed(payload.get("authority"), f"{variant} evaluation payload")
+            payload_blockers = payload.get("blockers")
+            if isinstance(payload_blockers, list) and any(str(value).strip() for value in payload_blockers):
+                raise DownstreamRunError(f"{variant} evaluation payload carries blockers")
+            current_payload_source = payload.get("source")
+            if not isinstance(current_payload_source, Mapping):
+                raise DownstreamRunError(f"{variant} evaluation payload source is missing")
+            if current_payload_source.get("source_receipt_sha256") != source.get("receipt_sha256"):
+                raise DownstreamRunError(f"{variant} evaluation payload source changed")
+            folds = payload.get("folds")
+            if not isinstance(folds, list) or not folds:
+                raise DownstreamRunError(f"{variant} nested folds are missing")
+            feature_names: list[str] | None = None
+            copied_folds: list[Any] = []
+            for fold in folds:
+                if not isinstance(fold, Mapping):
+                    raise DownstreamRunError(f"{variant} nested fold is invalid")
+                selection = fold.get("regularization_selection")
+                if not isinstance(selection, Mapping):
+                    raise DownstreamRunError(f"{variant} nested selection is missing from a fold")
+                binding = selection.get("inner_feature_ledger_binding")
+                if not isinstance(binding, Mapping):
+                    raise DownstreamRunError(f"{variant} nested inner ledger binding is missing")
+                names = binding.get("feature_names")
+                if not isinstance(names, list) or not names or any(not isinstance(item, str) for item in names):
+                    raise DownstreamRunError(f"{variant} nested feature names are missing")
+                if feature_names is None:
+                    feature_names = list(names)
+                elif feature_names != list(names):
+                    raise DownstreamRunError(f"{variant} nested feature order changed across folds")
+                artifacts = binding.get("producer_artifacts")
+                if not isinstance(artifacts, Mapping) or not artifacts:
+                    raise DownstreamRunError(f"{variant} nested producer artifacts are missing")
+                copied_folds.append(json.loads(json.dumps(fold, allow_nan=False)))
+            if feature_names is None:
+                raise DownstreamRunError(f"{variant} nested feature names are missing")
+            if top_source is None:
+                top_source = dict(model_source)
+            elif dict(model_source) != dict(top_source):
+                raise DownstreamRunError("evaluation model source bindings differ")
+            if payload_source is None:
+                payload_source = dict(current_payload_source)
+            elif dict(current_payload_source) != dict(payload_source):
+                raise DownstreamRunError("evaluation payload source bindings differ")
+            records[variant] = {
+                "path": str(evaluation_path),
+                "bytes": evaluation_path.stat().st_size,
+                "sha256": before_hash,
+            }
+            variant_payloads[variant] = {
+                "authority": json.loads(json.dumps(payload.get("authority"), allow_nan=False)),
+                "status": payload.get("status"),
+                "variant": variant,
+                "variant_receipt": json.loads(json.dumps(payload.get("variant_receipt"), allow_nan=False)),
+                "source": json.loads(json.dumps(current_payload_source, allow_nan=False)),
+                "feature_names": feature_names,
+                "folds": copied_folds,
+                "evaluation_artifact": dict(records[variant]),
+            }
+        if top_source is None or payload_source is None:
+            raise DownstreamRunError("nested selection source bindings are missing")
+        body: dict[str, Any] = {
+            "schema_version": "scryglass:future-value-nested-selection-bundle:v1",
+            "status": "research_only",
+            "authority": dict(AUTHORITY),
+            "source": dict(top_source),
+            "source_receipt_file_sha256": expected_source_file_hash,
+            "evaluation_artifacts": records,
+            "variants": variant_payloads,
+            "blockers": [],
+        }
+        body["artifact_sha256"] = _sha256_bytes(_canonical(body))
+        output = _safe_output_root(args.output, "nested selection output")
+        _write_json(output, body)
+        print(
+            json.dumps(
+                {
+                    "status": body["status"],
+                    "variants": list(VARIANTS),
+                    "artifact_sha256": body["artifact_sha256"],
+                    "file_sha256": _sha256_path(output),
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    except (DownstreamRunError, FutureValueSourceError, OSError, ValueError, TypeError, KeyError) as error:
+        print(f"nested selection bundle worker failed: {error}", file=sys.stderr)
         return 1
 
 
@@ -976,6 +1271,7 @@ def _snapshot_capability_manifest_worker(argv: Sequence[str]) -> int:
             "model_eligible_identity_sha256": source.get("model_eligible_identity_sha256"),
         }
         variants: dict[str, Any] = {}
+        manifest_blockers: list[str] = []
         for variant in VARIANTS:
             root = _safe_path(directories[variant], f"{variant} snapshot root", directory=True)
             receipt_path = _safe_path(root / "future-value-snapshot-receipt.json", f"{variant} snapshot receipt")
@@ -1053,12 +1349,20 @@ def _snapshot_capability_manifest_worker(argv: Sequence[str]) -> int:
                         raise DownstreamRunError(f"{variant} {kind} capability is not typed N/A")
                     if not isinstance(coverage, Mapping) or coverage.get("status") != "not_applicable" or coverage.get("row_policy") != "no_rows":
                         raise DownstreamRunError(f"{variant} {kind} N/A coverage is incomplete")
+            variant_blockers = (
+                list(receipt.get("blockers", []))
+                if isinstance(receipt.get("blockers"), list)
+                else blockers
+            )
+            manifest_blockers.extend(
+                f"{variant}:{value}" for value in variant_blockers if str(value).strip()
+            )
             variants[variant] = {
                 "status": receipt.get("status"),
                 "variant": variant,
                 "capability_schema_version": receipt.get("capability_schema_version"),
                 "capability": capability,
-                "blockers": list(receipt.get("blockers", [])) if isinstance(receipt.get("blockers"), list) else blockers,
+                "blockers": variant_blockers,
                 "player_row_count": receipt.get("player_row_count"),
                 "team_row_count": receipt.get("team_row_count"),
                 "player_rank_diff_count": receipt.get("player_rank_diff_count"),
@@ -1071,12 +1375,12 @@ def _snapshot_capability_manifest_worker(argv: Sequence[str]) -> int:
         payload: dict[str, Any] = {
             "schema_version": SNAPSHOT_CAPABILITY_MANIFEST_SCHEMA_VERSION,
             "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
-            "status": "research_only",
+            "status": "blocked" if manifest_blockers else "research_only",
             "authority": dict(AUTHORITY),
             "source": source_binding,
             "variants": variants,
             "capability_matrix": json.loads(json.dumps(SNAPSHOT_CAPABILITY_MATRIX, sort_keys=True)),
-            "blockers": [],
+            "blockers": sorted(set(manifest_blockers)),
         }
         payload["manifest_sha256"] = _sha256_bytes(_canonical(payload))
         _write_json(args.output.resolve(), payload)
@@ -1180,6 +1484,86 @@ def _tier_shadow_fourway_worker(argv: Sequence[str]) -> int:
         return 1
 
 
+def _scaling_bindings(config: RunConfig) -> dict[str, Any]:
+    """Resolve internal or caller-supplied online scaling evidence."""
+
+    supplied = (
+        config.scaling_root,
+        config.scaling_artifact,
+        config.scaling_artifact_sha256,
+        config.scaling_receipt,
+        config.scaling_receipt_sha256,
+        config.scaling_manifest,
+        config.scaling_manifest_sha256,
+    )
+    if not any(value is not None for value in supplied):
+        root = _root(config, "scaling-online")
+        return {
+            "external": False,
+            "root": root,
+            "artifact": root / SCALING_ARTIFACT_NAME,
+            "artifact_sha256": None,
+            "receipt": root / SCALING_RECEIPT_NAME,
+            "receipt_sha256": None,
+            "manifest": root / SCALING_MANIFEST_NAME,
+            "manifest_sha256": None,
+            "blockers": (),
+        }
+    complete = all(
+        value is not None
+        for value in (
+            config.scaling_artifact,
+            config.scaling_artifact_sha256,
+            config.scaling_receipt,
+            config.scaling_receipt_sha256,
+            config.scaling_manifest,
+            config.scaling_manifest_sha256,
+        )
+    )
+    root = config.scaling_root or (
+        config.scaling_artifact.parent
+        if config.scaling_artifact is not None
+        else _root(config, "scaling-online")
+    )
+    return {
+        "external": complete,
+        "root": root,
+        "artifact": config.scaling_artifact or root / SCALING_ARTIFACT_NAME,
+        "artifact_sha256": config.scaling_artifact_sha256,
+        "receipt": config.scaling_receipt or root / SCALING_RECEIPT_NAME,
+        "receipt_sha256": config.scaling_receipt_sha256,
+        "manifest": config.scaling_manifest or root / SCALING_MANIFEST_NAME,
+        "manifest_sha256": config.scaling_manifest_sha256,
+        "blockers": () if complete else ("scaling_external_inputs_incomplete",),
+    }
+
+
+def _nested_selection_bindings(config: RunConfig) -> dict[str, Any]:
+    """Resolve caller evidence or the runner-owned combined bundle."""
+
+    if config.nested_selection is None and config.nested_selection_sha256 is None:
+        path = _root(config, "nested-selection") / NESTED_SELECTION_BUNDLE_NAME
+        return {
+            "external": False,
+            "path": path,
+            "sha256": None,
+            "blockers": (),
+        }
+    if config.nested_selection is None or config.nested_selection_sha256 is None:
+        return {
+            "external": True,
+            "path": config.nested_selection or _root(config, "nested-selection") / NESTED_SELECTION_BUNDLE_NAME,
+            "sha256": config.nested_selection_sha256,
+            "blockers": ("nested_selection_external_input_incomplete",),
+        }
+    return {
+        "external": True,
+        "path": config.nested_selection,
+        "sha256": config.nested_selection_sha256,
+        "blockers": (),
+    }
+
+
 def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, ...]:
     source = inputs.source_root
     receipt = inputs.source_receipt
@@ -1191,15 +1575,18 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
     current_receipt = current / "current-rating-ledger-receipt.json"
     current_artifact = current / "current-rating-ledger.parquet"
     current_snapshot_receipt = current / "current-rating-snapshot-receipt-v1.json"
-    nested_blockers: list[str] = []
-    nested = config.nested_selection
-    nested_hash = config.nested_selection_sha256
-    if nested is None or nested_hash is None:
-        nested_blockers.append("nested_selection_input_missing")
-    elif not nested.is_file() or nested.is_symlink():
-        nested_blockers.append("nested_selection_input_missing")
-    else:
-        nested_blockers.extend(_nested_selection_blockers(nested, inputs))
+    scaling = _scaling_bindings(config)
+    nested_binding = _nested_selection_bindings(config)
+    nested = nested_binding["path"]
+    nested_hash = nested_binding["sha256"]
+    nested_blockers = list(nested_binding["blockers"])
+    if nested_binding["external"]:
+        if not nested.is_file() or nested.is_symlink():
+            nested_blockers.append("nested_selection_input_missing")
+        elif nested_binding["sha256"] is None:
+            nested_blockers.append("nested_selection_input_missing")
+        else:
+            nested_blockers.extend(_nested_selection_blockers(nested, inputs))
     current_stage = Stage(
         name="current_rating_trust",
         jobs=(Job(
@@ -1219,6 +1606,68 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
         output_roots=(current,),
         expected_files=(current_artifact, current_receipt, current_snapshot_receipt),
     )
+    scaling_stage: Stage | None = None
+    if not scaling["external"]:
+        scaling_root = scaling["root"]
+        scaling_stage = Stage(
+            name="scaling_online",
+            jobs=(Job(
+                name="scaling_online",
+                command=_python_module(
+                    "benchmarks.run_future_value_downstream",
+                    "--scaling-online-worker",
+                    "--source-root", source,
+                    "--source-receipt", receipt,
+                    "--source-receipt-file-sha256", inputs.source_receipt_file_sha256,
+                    "--source-receipt-sha256", inputs.source_receipt_sha256,
+                    "--output-root", scaling_root,
+                ),
+                output_roots=(scaling_root,),
+                expected_files=(scaling["artifact"], scaling["receipt"], scaling["manifest"]),
+                input_paths=(
+                    source / "maps.parquet",
+                    source / "oe_player_games.parquet",
+                    source / "oe_team_games.parquet",
+                    receipt,
+                ),
+                output_dir_policy="absent",
+            ),),
+            output_roots=(scaling_root,),
+            expected_files=(scaling["artifact"], scaling["receipt"], scaling["manifest"]),
+            blockers=tuple(scaling["blockers"]),
+        )
+    elif scaling["blockers"]:
+        scaling_stage = Stage(
+            name="scaling_online",
+            output_roots=(scaling["root"],),
+            expected_files=(scaling["artifact"], scaling["receipt"], scaling["manifest"]),
+            blockers=tuple(scaling["blockers"]),
+        )
+    nested_stage: Stage | None = None
+    if not nested_binding["external"]:
+        nested_command: list[str] = list(_python_module(
+            "benchmarks.run_future_value_downstream",
+            "--nested-selection-bundle-worker",
+        )) + [
+            "--source-receipt", receipt,
+            "--source-receipt-file-sha256", inputs.source_receipt_file_sha256,
+        ]
+        for variant in VARIANTS:
+            nested_command.extend(("--evaluation", f"{variant}={inputs.evaluation_paths[variant]}"))
+        nested_command.extend(("--output", nested))
+        nested_stage = Stage(
+            name="nested_selection",
+            jobs=(Job(
+                name="nested_selection",
+                command=tuple(nested_command),
+                output_roots=(nested.parent,),
+                expected_files=(nested,),
+                input_paths=(receipt, *inputs.evaluation_paths.values()),
+                output_dir_policy="absent",
+            ),),
+            output_roots=(nested.parent,),
+            expected_files=(nested,),
+        )
     final_jobs: list[Job] = []
     final_roots: list[Path] = []
     final_expected: list[Path] = []
@@ -1240,26 +1689,21 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
                 "--source-receipt-sha256", inputs.source_receipt_file_sha256,
                 "--current-receipt-sha256", _digest_or_placeholder(current_receipt, "current-receipt-file"),
                 "--current-artifact-sha256", _digest_or_placeholder(current_artifact, "current-artifact"),
-                "--nested-selection", nested or "",
-                "--nested-selection-sha256", nested_hash or "__NESTED_SELECTION_SHA256__",
+                "--nested-selection", nested,
+                "--nested-selection-sha256", nested_hash or _digest_or_placeholder(nested, "nested-selection"),
                 "--output-dir", variant_root,
             )
         )
         if variant in {"scaling_curve", "both"}:
-            if config.scaling_root is not None:
-                command.extend(("--scaling-root", config.scaling_root))
-            if config.scaling_artifact is not None:
-                command.extend(("--scaling-artifact", config.scaling_artifact))
-            if config.scaling_receipt is not None:
-                command.extend(("--scaling-receipt", config.scaling_receipt))
-            if config.scaling_manifest is not None:
-                command.extend(("--scaling-manifest", config.scaling_manifest))
-            if config.scaling_artifact_sha256 is not None:
-                command.extend(("--scaling-artifact-sha256", config.scaling_artifact_sha256))
-            if config.scaling_receipt_sha256 is not None:
-                command.extend(("--scaling-receipt-sha256", config.scaling_receipt_sha256))
-            if config.scaling_manifest_sha256 is not None:
-                command.extend(("--scaling-manifest-sha256", config.scaling_manifest_sha256))
+            command.extend((
+                "--scaling-root", scaling["root"],
+                "--scaling-artifact", scaling["artifact"],
+                "--scaling-receipt", scaling["receipt"],
+                "--scaling-manifest", scaling["manifest"],
+                "--scaling-artifact-sha256", scaling["artifact_sha256"] or _digest_or_placeholder(scaling["artifact"], "scaling-artifact"),
+                "--scaling-receipt-sha256", scaling["receipt_sha256"] or _digest_or_placeholder(scaling["receipt"], "scaling-receipt"),
+                "--scaling-manifest-sha256", scaling["manifest_sha256"] or _digest_or_placeholder(scaling["manifest"], "scaling-manifest"),
+            ))
         final_jobs.append(
             Job(
                 name=f"final_fit_{variant}",
@@ -1270,12 +1714,9 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
                     source / "maps.parquet", source / "oe_player_games.parquet",
                     source / "oe_team_games.parquet", receipt, current_artifact,
                     current_receipt, inputs.evaluation_paths[variant],
-                    *( (nested,) if nested is not None else () ),
-                    *( (config.scaling_artifact, config.scaling_receipt, config.scaling_manifest)
-                       if variant in {"scaling_curve", "both"}
-                       and config.scaling_artifact is not None
-                       and config.scaling_receipt is not None
-                       and config.scaling_manifest is not None else () ),
+                    nested,
+                    *( (scaling["artifact"], scaling["receipt"], scaling["manifest"])
+                       if variant in {"scaling_curve", "both"} else () ),
                 ),
                 output_dir_policy="absent",
             )
@@ -1284,10 +1725,10 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
         final_expected.extend((model, model_receipt, run_receipt))
     final_stage = Stage(
         name="final_fit",
-        jobs=() if nested_blockers else tuple(final_jobs),
+        jobs=() if nested_blockers or scaling["blockers"] else tuple(final_jobs),
         output_roots=tuple(final_roots),
         expected_files=tuple(final_expected),
-        blockers=tuple(sorted(set(nested_blockers))),
+        blockers=tuple(sorted(set(nested_blockers).union(scaling["blockers"]))),
     )
     manifest_command: list[str] = list(
         _python_module("benchmarks.run_future_value_downstream", "--final-fit-manifest-worker")
@@ -1382,7 +1823,13 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
         output_roots=(snapshot_manifest_root,),
         expected_files=(capability_manifest,),
     )
-    return (current_stage, final_stage, final_manifest_stage, snapshot_stage, comparison_stage)
+    stages: list[Stage] = [current_stage]
+    if scaling_stage is not None:
+        stages.append(scaling_stage)
+    if nested_stage is not None:
+        stages.append(nested_stage)
+    stages.extend((final_stage, final_manifest_stage, snapshot_stage, comparison_stage))
+    return tuple(stages)
 
 
 def build_stage_plan(config: RunConfig, inputs: ResolvedInputs | None = None) -> tuple[Stage, ...]:
@@ -1407,8 +1854,8 @@ def build_stage_plan(config: RunConfig, inputs: ResolvedInputs | None = None) ->
             accepted_identity_sha256="0" * 64,
             eligible_game_ids=(),
             eligible_identity_sha256="0" * 64,
-            evaluation_paths={variant: root / "stages/evaluations" / variant / "model.json" for variant in VARIANTS},
-            evaluation_runtime_paths={variant: root / "stages/evaluations" / variant / "runtime.json" for variant in VARIANTS},
+            evaluation_paths={variant: root / "stages/evaluation" / variant / "model.json" for variant in VARIANTS},
+            evaluation_runtime_paths={variant: root / "stages/evaluation" / variant / "runtime.json" for variant in VARIANTS},
             evaluation_stage_receipt=root / "receipts/evaluations.json",
             evaluation_receipt_paths={},
             paired_uncertainty=root / "stages/paired-uncertainty/paired-uncertainty.json",
@@ -1997,6 +2444,7 @@ def _optional_stage_plan(
         else inputs.source_receipt
     )
     tier_root = _root(config, "tier-shadow")
+    scaling = _scaling_bindings(config)
     tier_blockers: list[str] = []
     if config.tier_source_root is None or config.tier_trust_manifest is None or config.tier_trust_manifest_sha256 is None:
         tier_blockers.append("tier_shadow_exact_inputs_missing")
@@ -2008,8 +2456,7 @@ def _optional_stage_plan(
         )
     ):
         tier_blockers.append("tier_shadow_source_files_missing")
-    if config.scaling_artifact is None or config.scaling_receipt is None or config.scaling_artifact_sha256 is None or config.scaling_receipt_sha256 is None:
-        tier_blockers.append("tier_shadow_scaling_inputs_missing")
+    tier_blockers.extend(str(value) for value in scaling["blockers"])
     tier_expected_files: list[Path] = [tier_root / "fourway-tier-shadow-manifest.json"]
     for variant in VARIANTS:
         tier_expected_files.extend((
@@ -2030,21 +2477,19 @@ def _optional_stage_plan(
     ]
     for ordinal, variant in enumerate(VARIANTS, start=1):
         tier_command.extend(("--variant-model", f"{variant}={final / variant}"))
-    if config.scaling_artifact is not None:
-        tier_command.extend(("--scaling-ledger", config.scaling_artifact))
-    if config.scaling_artifact_sha256 is not None:
-        tier_command.extend(("--scaling-ledger-sha256", config.scaling_artifact_sha256))
-    if config.scaling_receipt is not None:
-        tier_command.extend(("--scaling-receipt", config.scaling_receipt))
-    if config.scaling_receipt_sha256 is not None:
-        tier_command.extend(("--scaling-receipt-file-sha256", config.scaling_receipt_sha256))
+    tier_command.extend((
+        "--scaling-ledger", scaling["artifact"],
+        "--scaling-ledger-sha256", scaling["artifact_sha256"] or _digest_or_placeholder(scaling["artifact"], "scaling-ledger"),
+        "--scaling-receipt", scaling["receipt"],
+        "--scaling-receipt-file-sha256", scaling["receipt_sha256"] or _digest_or_placeholder(scaling["receipt"], "scaling-receipt-file"),
+    ))
     tier_inputs = [tier_receipt, current / "current-rating-ledger.parquet", current / "current-rating-ledger-receipt.json"]
     tier_inputs.extend(
         final / variant / name
         for variant in VARIANTS
         for name in (f"final-v{VARIANTS.index(variant) + 1}-model.json", f"final-v{VARIANTS.index(variant) + 1}-model-receipt.json", "final-fit-run.json")
     )
-    tier_inputs.extend(path for path in (config.tier_trust_manifest, config.scaling_artifact, config.scaling_receipt) if path is not None)
+    tier_inputs.extend(path for path in (config.tier_trust_manifest, scaling["artifact"], scaling["receipt"]) if path is not None)
     stage_list.append(Stage(
         name="tier_shadow",
         jobs=() if tier_blockers else (Job(name="tier_shadow", command=tuple(tier_command), output_roots=(tier_root,), expected_files=tuple(tier_expected_files), input_paths=tuple(tier_inputs), output_dir_policy="absent"),),
@@ -2063,7 +2508,7 @@ def _optional_stage_plan(
         "benchmarks.future_value_tierlist_fourway",
         "--repo-root", config.tier_repository_root or config.repository_root,
         "--source-root", tier_source,
-        "--evaluation-root", inputs.fourway_root / "stages/evaluations",
+        "--evaluation-root", inputs.fourway_root / "stages/evaluation",
         "--trust-manifest", config.tier_trust_manifest or "",
         "--expected-trust-manifest-sha256", config.tier_trust_manifest_sha256 or "",
         "--output-root", chronological_root,
@@ -2128,7 +2573,7 @@ def _optional_stage_plan(
         "--expected-trust-root-sha256", config.draft_trust_root_sha256 or "",
         "--source-root", inputs.source_root,
         "--folds-root", config.draft_folds_root or "",
-        "--evaluation-root", inputs.fourway_root / "stages/evaluations",
+        "--evaluation-root", inputs.fourway_root / "stages/evaluation",
         "--public-pack-root", config.draft_public_pack_root or "",
         "--expected-manifest-sha256", config.draft_manifest_sha256 or "",
         "--output-dir", draft_root,
@@ -2500,13 +2945,26 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
     # hashes of receipts produced by the preceding stage.
     failed_core_stages: set[str] = set()
     core_dependencies = {
-        "final_fit": {"current_rating_trust"},
+        "scaling_online": set(),
+        "nested_selection": set(),
+        "final_fit": {"current_rating_trust", "scaling_online", "nested_selection"},
         "final_fit_manifest": {"final_fit"},
-        "snapshots": {"current_rating_trust"},
-        "snapshot_capabilities": set(),
+        "snapshots": {"current_rating_trust", "final_fit"},
+        "snapshot_capabilities": {"snapshots"},
     }
-    for stage_name in ("current_rating_trust", "final_fit", "final_fit_manifest", "snapshots", "snapshot_capabilities"):
-        stage = next(item for item in build_stage_plan(config, inputs) if item.name == stage_name)
+    for stage_name in (
+        "current_rating_trust",
+        "scaling_online",
+        "nested_selection",
+        "final_fit",
+        "final_fit_manifest",
+        "snapshots",
+        "snapshot_capabilities",
+    ):
+        planned_core = build_stage_plan(config, inputs)
+        stage = next((item for item in planned_core if item.name == stage_name), None)
+        if stage is None:
+            continue
         dependency_blockers = [
             f"dependency_{name}_blocked"
             for name in sorted(core_dependencies.get(stage_name, set()) & failed_core_stages)
@@ -2673,6 +3131,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _snapshot_comparison_worker(raw_argv)
         if "--final-fit-manifest-worker" in raw_argv:
             return _final_fit_manifest_worker(raw_argv)
+        if "--scaling-online-worker" in raw_argv:
+            return _scaling_online_worker(raw_argv)
+        if "--nested-selection-bundle-worker" in raw_argv:
+            return _nested_selection_bundle_worker(raw_argv)
         if "--snapshot-capability-manifest-worker" in raw_argv:
             return _snapshot_capability_manifest_worker(raw_argv)
         if "--tier-shadow-fourway-worker" in raw_argv:

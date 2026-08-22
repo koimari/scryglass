@@ -34,8 +34,8 @@ def _inputs(tmp_path: Path) -> downstream.ResolvedInputs:
     evaluations: dict[str, Path] = {}
     runtimes: dict[str, Path] = {}
     for variant in downstream.VARIANTS:
-        evaluations[variant] = _write(root / "stages" / "evaluations" / variant / "model.json", {"variant": variant})
-        runtimes[variant] = _write(root / "stages" / "evaluations" / variant / "runtime.json", {"variant": variant})
+        evaluations[variant] = _write(root / "stages" / "evaluation" / variant / "model.json", {"variant": variant})
+        runtimes[variant] = _write(root / "stages" / "evaluation" / variant / "runtime.json", {"variant": variant})
     evaluation_receipt = _write(root / "receipts" / "evaluations.json", {"stage": "evaluations"})
     uncertainty = _write(root / "stages" / "paired-uncertainty" / "paired-uncertainty.json", {"rows": 1})
     return downstream.ResolvedInputs(
@@ -112,6 +112,8 @@ def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Pa
 
     assert [stage.name for stage in stages] == [
         "current_rating_trust",
+        "scaling_online",
+        "nested_selection",
         "final_fit",
         "final_fit_manifest",
         "snapshots",
@@ -135,19 +137,19 @@ def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Pa
     )
     monkeypatch.setattr(downstream, "_nested_selection_blockers", lambda path, inputs: ())
     stages = downstream._core_stage_plan(config_with_nested, _inputs(tmp_path))
-    final = stages[1]
+    final = next(stage for stage in stages if stage.name == "final_fit")
     assert len(final.jobs) == 4
     assert final.jobs[1].output_dir_policy == "absent"
     assert all(
         f"--variant" in job.command and downstream.VARIANTS[index] in job.command
         for index, job in enumerate(final.jobs)
     )
-    manifest = stages[2].jobs[0]
+    manifest = next(stage for stage in stages if stage.name == "final_fit_manifest").jobs[0]
     assert "--final-fit-manifest-worker" in manifest.command
     assert all(variant in " ".join(manifest.command) for variant in downstream.VARIANTS)
-    snapshots = stages[3]
+    snapshots = next(stage for stage in stages if stage.name == "snapshots")
     assert [job.name for job in snapshots.jobs] == [f"snapshot_{variant}" for variant in downstream.VARIANTS]
-    capabilities = stages[4].jobs[0]
+    capabilities = next(stage for stage in stages if stage.name == "snapshot_capabilities").jobs[0]
     assert "--snapshot-capability-manifest-worker" in capabilities.command
     assert all(variant in " ".join(capabilities.command) for variant in downstream.VARIANTS)
 
@@ -201,7 +203,7 @@ def test_draft_plan_uses_explicit_fold_root_when_exact_inputs_exist(tmp_path: Pa
     assert draft.blockers == ()
     command = list(draft.jobs[0].command)
     assert command[command.index("--folds-root") + 1] == str(folds)
-    assert str(tmp_path / "fourway" / "stages" / "evaluations") in command
+    assert str(tmp_path / "fourway" / "stages" / "evaluation") in command
 
 
 def test_selection_sidecars_bind_exact_artifact_bytes(tmp_path: Path) -> None:
