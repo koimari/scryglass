@@ -502,9 +502,8 @@ def _verified_nested_selection(
     """Verify nested candidate-C evidence before a final fit consumes it.
 
     The evidence is fold-local.  Each outer fold must carry a separately bound
-    inner feature ledger.  The final fit accepts a C only when every supplied
-    outer fold selected the same value from the declared grid and every
-    candidate fit converged.
+    inner feature ledger.  The final refit uses the most common outer-fold C.
+    A tie selects the smaller C.  Every candidate fit must converge.
     """
 
     payload = _load_json(path, "nested regularization evidence")
@@ -537,7 +536,7 @@ def _verified_nested_selection(
         if claimed_variant_receipt is not None and claimed_variant_receipt != rating_variant_config(variant).receipt():
             raise FinalFitError("nested selection variant configuration changed")
         claimed_feature_names = variant_payload.get("feature_names")
-        if claimed_feature_names is not None and tuple(claimed_feature_names) != rating_variant_config(variant).feature_names:
+        if claimed_feature_names is not None and tuple(claimed_feature_names) != rating_variant_config(variant).signed_map_features:
             raise FinalFitError("nested selection variant feature order changed")
         folds = variant_payload.get("folds")
     elif payload.get("variant") == variant.value:
@@ -714,9 +713,14 @@ def _verified_nested_selection(
                 "inner_validation_end": selection.get("inner_validation_end"),
             }
         )
-    selected_values = {float(row["selected_c"]) for row in selections}
-    if len(selected_values) != 1:
-        raise FinalFitError("nested selection folds disagree on selected C")
+    selected_counts: dict[float, int] = {}
+    for row in selections:
+        value = float(row["selected_c"])
+        selected_counts[value] = selected_counts.get(value, 0) + 1
+    highest_count = max(selected_counts.values())
+    selected_c = min(
+        value for value, count in selected_counts.items() if count == highest_count
+    )
     return {
         "schema_version": "scryglass:future-value-nested-selection-binding:v1",
         "path": str(path),
@@ -726,7 +730,11 @@ def _verified_nested_selection(
         "source_identity_sha256": str(source_receipt["source_identity_sha256"]),
         "variant": variant.value,
         "folds": selections,
-        "selected_c": float(next(iter(selected_values))),
+        "selected_c": selected_c,
+        "final_refit_selection_rule": "outer_fold_mode_then_smaller_c_tie",
+        "outer_fold_selected_c_counts": {
+            str(value): selected_counts[value] for value in sorted(selected_counts)
+        },
         "candidate_grid": list(float(value) for value in REGULARIZATION_GRID),
     }
 

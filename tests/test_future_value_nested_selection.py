@@ -297,6 +297,33 @@ def test_final_fit_accepts_only_verified_nested_selection_evidence(tmp_path) -> 
         inner_train
     )
 
+    modal_payload = json.loads(json.dumps(payload))
+    variant_payload = modal_payload["variants"][
+        rating.RatingVariant.FUTURE_PLAYER_FORM.value
+    ]
+    variant_payload["feature_names"] = list(
+        rating.CURRENT_RATING_SIGNED_MAP_FEATURES
+    )
+    variant_payload["folds"] = []
+    for fold, selected_c in enumerate((0.003, 0.001, 0.001), start=1):
+        fold_selection = json.loads(json.dumps(selection))
+        fold_selection["selected_c"] = selected_c
+        variant_payload["folds"].append(
+            {"fold": fold, "regularization_selection": fold_selection}
+        )
+    modal_path = tmp_path / "nested-selection-modal.json"
+    modal_path.write_text(json.dumps(modal_payload, sort_keys=True), encoding="utf-8")
+    modal = _verified_nested_selection(
+        modal_path,
+        source,
+        expected_file_sha256=hashlib.sha256(modal_path.read_bytes()).hexdigest(),
+    )
+    assert modal["selected_c"] == 0.001
+    assert modal["final_refit_selection_rule"] == (
+        "outer_fold_mode_then_smaller_c_tie"
+    )
+    assert modal["outer_fold_selected_c_counts"] == {"0.001": 2, "0.003": 1}
+
     mutated = json.loads(path.read_text(encoding="utf-8"))
     mutated["variants"][rating.RatingVariant.FUTURE_PLAYER_FORM.value]["folds"][0][
         "regularization_selection"
