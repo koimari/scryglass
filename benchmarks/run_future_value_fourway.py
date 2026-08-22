@@ -37,6 +37,7 @@ from lol_kills.research.future_value_rating import (
 SCHEMA_VERSION = "scryglass:future-value-fourway-run:v1"
 STAGE_RECEIPT_SCHEMA_VERSION = "scryglass:future-value-fourway-stage:v1"
 RUN_CONFIG_SCHEMA_VERSION = "scryglass:future-value-fourway-config:v1"
+TRUST_MANIFEST_SCHEMA_VERSION = "scryglass:future-value-fourway-trust:v1"
 VARIANTS = ("current_only", "future_player_form", "scaling_curve", "both")
 DEFAULT_WORKERS = max(1, min(4, int(os.cpu_count() or 1)))
 DEFAULT_DRAWS = 2000
@@ -70,6 +71,11 @@ SCALING_FILES = (
     "scaling-adapter.json",
     "scaling-producer-manifest.json",
     "scaling-run.json",
+    "scaling-series-binding.json",
+)
+DEFAULT_TRUST_MANIFEST = (
+    Path(__file__).resolve().parents[1]
+    / "data/lol/v2/evaluation/future-value-fourway-run-trust-v1.json"
 )
 
 
@@ -199,6 +205,7 @@ class RunConfig:
     crosswalk: Path
     crosswalk_receipt: Path
     crosswalk_receipt_file_sha256: str
+    trust_manifest: Path
     output_root: Path
     outer_evaluation_start: str
     workers: int = DEFAULT_WORKERS
@@ -254,11 +261,17 @@ def build_stage_plan(
     *,
     phase_artifact_sha256: str | None = None,
     phase_receipt_file_sha256: str | None = None,
+    outer_evaluation_start: str | None = None,
 ) -> tuple[Stage, ...]:
     """Return the exact child command plan without running a child process."""
 
     source = config.source_root
     receipt = config.source_receipt
+    evaluation_start = (
+        config.outer_evaluation_start
+        if outer_evaluation_start is None
+        else outer_evaluation_start
+    )
     phase_root = _stage_dir(config, "phase")
     phase = Stage(
         name="phase",
@@ -352,10 +365,11 @@ def build_stage_plan(
                     spec,
                     "--output-dir",
                     scaling_root,
+                    *_common_crosswalk_args(config),
                 ),
                 output_roots=(scaling_root,),
                 expected_files=tuple(scaling_root / name for name in SCALING_FILES),
-                input_paths=(receipt, spec, *[source / name for name in SOURCE_FILES.values()]),
+                input_paths=(receipt, spec, *[source / name for name in SOURCE_FILES.values()], config.crosswalk, config.crosswalk_receipt),
             )
         )
     producers = Stage(
@@ -412,7 +426,7 @@ def build_stage_plan(
                     "--producer-root",
                     calibration_root / "producer",
                     "--outer-evaluation-start",
-                    config.outer_evaluation_start,
+                    evaluation_start,
                     "--fold-count",
                     config.calibration_folds,
                     "--output",
@@ -833,7 +847,15 @@ def _validate_source_and_crosswalk(config: RunConfig) -> dict[str, Any]:
         source_receipt=receipt,
         expected_receipt_file_sha256=config.crosswalk_receipt_file_sha256,
     )
+    trust = _validate_trust_manifest(
+        config,
+        source_receipt=receipt,
+        source_receipt_file_sha256=receipt_hash,
+        freeze_file_sha256=_sha256_path(freeze_path),
+        crosswalk_binding=crosswalk_binding,
+    )
     return {
+        "trust_manifest": trust,
         "source_receipt": _file_record(source_receipt_path),
         "source_receipt_sha256": str(receipt["receipt_sha256"]),
         "source_freeze": _file_record(freeze_path),
@@ -847,6 +869,54 @@ def _validate_source_and_crosswalk(config: RunConfig) -> dict[str, Any]:
         "crosswalk_sha256": crosswalk_binding["crosswalk_sha256"],
         "crosswalk_receipt_file_sha256": config.crosswalk_receipt_file_sha256,
     }
+
+
+def _validate_trust_manifest(
+    config: RunConfig,
+    *,
+    source_receipt: Mapping[str, Any],
+    source_receipt_file_sha256: str,
+    freeze_file_sha256: str,
+    crosswalk_binding: Mapping[str, Any],
+) -> dict[str, Any]:
+    path = _safe_path(config.trust_manifest, "fourway trust manifest")
+    manifest = _load_json(path, "fourway trust manifest")
+    body = dict(manifest)
+    claimed = body.pop("manifest_sha256", None)
+    if manifest.get("schema_version") != TRUST_MANIFEST_SCHEMA_VERSION:
+        raise FourwayRunError("fourway trust manifest schema changed")
+    if claimed != _sha256_bytes(_canonical_bytes(body)):
+        raise FourwayRunError("fourway trust manifest self hash changed")
+    if manifest.get("status") != "research_only":
+        raise FourwayRunError("fourway trust manifest status changed")
+    authority = manifest.get("authority")
+    if not isinstance(authority, Mapping) or authority.get("research_only") is not True or any(
+        bool(value) for key, value in authority.items() if key != "research_only"
+    ):
+        raise FourwayRunError("fourway trust manifest grants authority")
+    source = manifest.get("source")
+    series = manifest.get("series")
+    if not isinstance(source, Mapping) or not isinstance(series, Mapping):
+        raise FourwayRunError("fourway trust manifest bindings are missing")
+    expected_source = {
+        "source_game_count": source_receipt.get("source_game_count"),
+        "source_identity_sha256": source_receipt.get("source_identity_sha256"),
+        "model_eligible_game_count": source_receipt.get("model_eligible_game_count"),
+        "model_eligible_identity_sha256": source_receipt.get("model_eligible_identity_sha256"),
+        "source_receipt_sha256": source_receipt.get("receipt_sha256"),
+        "source_receipt_file_sha256": source_receipt_file_sha256,
+        "freeze_file_sha256": freeze_file_sha256,
+    }
+    if dict(source) != expected_source:
+        raise FourwayRunError("source does not match the immutable fourway trust manifest")
+    expected_series = {
+        "crosswalk_receipt_file_sha256": config.crosswalk_receipt_file_sha256,
+        "crosswalk_sha256": crosswalk_binding.get("crosswalk_sha256"),
+        "crosswalk_assignment_sha256": crosswalk_binding.get("assignment_sha256"),
+    }
+    if dict(series) != expected_series:
+        raise FourwayRunError("series input does not match the immutable fourway trust manifest")
+    return {**_file_record(path), "manifest_sha256": claimed}
 
 
 def _validate_crosswalk_binding(
@@ -894,7 +964,123 @@ def _validate_crosswalk_binding(
         "artifact_sha256": binding["artifact_sha256"],
         "crosswalk_sha256": binding["crosswalk_sha256"],
         "receipt_sha256": binding["receipt_sha256"],
+        "assignment_sha256": binding["assignment_sha256"],
     }
+
+
+def _normalize_utc(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise FourwayRunError(f"{label} is missing")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as error:
+        raise FourwayRunError(f"{label} is not an ISO timestamp") from error
+    if parsed.tzinfo is None:
+        raise FourwayRunError(f"{label} must include a timezone")
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _validate_fold_plan_cutoff(config: RunConfig) -> str:
+    root = _stage_dir(config, "fold-specs")
+    bundle = _load_json(root / "fold-spec-bundle.json", "fold spec bundle")
+    body = dict(bundle)
+    claimed = body.pop("bundle_sha256", None)
+    if claimed != _sha256_bytes(_canonical_bytes(body)):
+        raise FourwayRunError("fold spec bundle self hash changed")
+    source = bundle.get("source")
+    if not isinstance(source, Mapping):
+        raise FourwayRunError("fold spec bundle source binding is missing")
+    source_receipt = _load_json(config.source_receipt, "source receipt")
+    if source.get("source_receipt_sha256") != source_receipt.get("receipt_sha256"):
+        raise FourwayRunError("fold spec bundle source receipt changed")
+    folds = bundle.get("folds")
+    if not isinstance(folds, list) or len(folds) != config.folds:
+        raise FourwayRunError("fold spec bundle fold count changed")
+    starts: list[str] = []
+    for expected_fold, record in enumerate(folds, start=1):
+        if not isinstance(record, Mapping) or record.get("fold") != expected_fold:
+            raise FourwayRunError("fold spec bundle order changed")
+        start = _normalize_utc(record.get("validation_start"), "fold validation start")
+        if _normalize_utc(record.get("fit_window_end"), "fold fit cutoff") != start:
+            raise FourwayRunError("fold validation start and fit cutoff differ")
+        spec = _load_json(root / f"fold-{expected_fold}-spec.json", "fold spec")
+        if _normalize_utc(spec.get("fit_window_end"), "fold spec cutoff") != start:
+            raise FourwayRunError("fold spec cutoff differs from bundle")
+        starts.append(start)
+    derived = min(starts)
+    supplied = _normalize_utc(config.outer_evaluation_start, "outer evaluation start")
+    if supplied != derived:
+        raise FourwayRunError(
+            "outer evaluation start differs from the generated fold plan: "
+            f"expected {derived}"
+        )
+    return derived
+
+
+def _validate_scaling_series_bindings(config: RunConfig) -> None:
+    source_receipt = _load_json(config.source_receipt, "source receipt")
+    expected_eligible_assignment: str | None = None
+    for fold in range(1, config.folds + 1):
+        spec = _load_json(
+            _stage_dir(config, "fold-specs") / f"fold-{fold}-spec.json",
+            "fold spec",
+        )
+        path = (
+            _stage_dir(config, "fold-producers")
+            / f"fold-{fold}/scaling-v2/scaling-series-binding.json"
+        )
+        binding = _load_json(path, "scaling series binding")
+        body = dict(binding)
+        claimed = body.pop("receipt_sha256", None)
+        if claimed != _sha256_bytes(_canonical_bytes(body)):
+            raise FourwayRunError("scaling series binding self hash changed")
+        if (
+            binding.get("schema_version")
+            != "scryglass:future-value-scaling-series-binding:v1"
+            or binding.get("status") != "research_only"
+        ):
+            raise FourwayRunError("scaling series binding status changed")
+        authority = binding.get("authority")
+        if not isinstance(authority, Mapping) or authority.get("research_only") is not True or any(
+            bool(value) for key, value in authority.items() if key != "research_only"
+        ):
+            raise FourwayRunError("scaling series binding grants authority")
+        expected = {
+            "fold": fold,
+            "source_receipt_sha256": source_receipt.get("receipt_sha256"),
+            "source_identity_sha256": source_receipt.get("source_identity_sha256"),
+            "model_eligible_game_count": source_receipt.get("model_eligible_game_count"),
+            "model_eligible_identity_sha256": source_receipt.get(
+                "model_eligible_identity_sha256"
+            ),
+            "crosswalk_receipt_file_sha256": config.crosswalk_receipt_file_sha256,
+        }
+        if any(binding.get(key) != value for key, value in expected.items()):
+            raise FourwayRunError("scaling series binding provenance changed")
+        trust_series = _load_json(
+            config.trust_manifest, "fourway trust manifest"
+        )["series"]
+        if binding.get("crosswalk_sha256") != trust_series["crosswalk_sha256"]:
+            raise FourwayRunError("scaling series crosswalk changed")
+        if binding.get("crosswalk_assignment_sha256") != trust_series[
+            "crosswalk_assignment_sha256"
+        ]:
+            raise FourwayRunError("scaling crosswalk assignments changed")
+        if tuple(binding.get("train_game_ids") or ()) != tuple(spec["train_game_ids"]):
+            raise FourwayRunError("scaling series training IDs changed")
+        if tuple(binding.get("validation_game_ids") or ()) != tuple(spec["validation_game_ids"]):
+            raise FourwayRunError("scaling series validation IDs changed")
+        if binding.get("fit_window_end") != spec.get("fit_window_end"):
+            raise FourwayRunError("scaling series cutoff changed")
+        eligible_assignment = _require_hash(
+            binding.get("eligible_series_assignment_sha256"),
+            "eligible series assignment hash",
+        )
+        _require_hash(binding.get("fold_series_assignment_sha256"), "fold series assignment hash")
+        if expected_eligible_assignment is None:
+            expected_eligible_assignment = eligible_assignment
+        elif eligible_assignment != expected_eligible_assignment:
+            raise FourwayRunError("scaling producers used different series assignments")
 
 
 def _config_payload(config: RunConfig, bindings: Mapping[str, Any]) -> dict[str, Any]:
@@ -909,6 +1095,7 @@ def _config_payload(config: RunConfig, bindings: Mapping[str, Any]) -> dict[str,
             "crosswalk": str(config.crosswalk),
             "crosswalk_receipt": str(config.crosswalk_receipt),
             "crosswalk_receipt_file_sha256": config.crosswalk_receipt_file_sha256,
+            "trust_manifest": str(config.trust_manifest),
         },
         "outer_evaluation_start": config.outer_evaluation_start,
         "workers": config.workers,
@@ -1013,6 +1200,7 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
             ],
         }
     receipts: list[dict[str, Any]] = []
+    derived_outer_start: str | None = None
     stage_index = 0
     while stage_index < len(stages):
         stage = stages[stage_index]
@@ -1028,7 +1216,22 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
                 config,
                 phase_artifact_sha256=phase_artifact_hash,
                 phase_receipt_file_sha256=phase_receipt_file_hash,
+                outer_evaluation_start=derived_outer_start,
             )
+        elif stage.name == "fold_specs":
+            derived_outer_start = _validate_fold_plan_cutoff(config)
+            stages = build_stage_plan(
+                config,
+                phase_artifact_sha256=_sha256_path(
+                    _stage_dir(config, "phase") / "future-phase-candidate.json"
+                ),
+                phase_receipt_file_sha256=_sha256_path(
+                    _stage_dir(config, "phase") / "run-receipt.json"
+                ),
+                outer_evaluation_start=derived_outer_start,
+            )
+        elif stage.name == "fold_producers":
+            _validate_scaling_series_bindings(config)
         stage_index += 1
     final = _write_final_receipt(config, bindings, receipts)
     return final
@@ -1042,6 +1245,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> tuple[RunConfig, bool, boo
     parser.add_argument("--freeze-root", type=Path)
     parser.add_argument("--crosswalk", required=True, type=Path)
     parser.add_argument("--crosswalk-receipt", required=True, type=Path)
+    parser.add_argument(
+        "--trust-manifest", type=Path, default=DEFAULT_TRUST_MANIFEST
+    )
     parser.add_argument(
         "--crosswalk-receipt-file-sha256",
         "--independent-receipt-file-sha256",
@@ -1068,6 +1274,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> tuple[RunConfig, bool, boo
         crosswalk=args.crosswalk.expanduser().resolve(),
         crosswalk_receipt=args.crosswalk_receipt.expanduser().resolve(),
         crosswalk_receipt_file_sha256=str(args.crosswalk_receipt_file_sha256),
+        trust_manifest=args.trust_manifest.expanduser().resolve(),
         output_root=args.output_root.expanduser().resolve(),
         outer_evaluation_start=str(args.outer_evaluation_start),
         workers=int(args.workers),

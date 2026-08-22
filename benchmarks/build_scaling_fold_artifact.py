@@ -13,6 +13,8 @@ import pandas as pd
 from lol_kills.research.atomized_rf_composite import build_scaling_feature_ledger
 from lol_kills.research.future_value_rating import (
     SCALING_CURVE_SIGNED_MAP_FEATURES,
+    _map_model_frame,
+    bind_verified_leaguepedia_series_crosswalk,
     build_rating_feature_producer_manifest,
     write_rating_feature_producer_receipt,
 )
@@ -44,12 +46,34 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _canonical_bytes(value: object) -> bytes:
+    return json.dumps(
+        value, allow_nan=False, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def _series_assignment_sha256(frame: pd.DataFrame) -> str:
+    rows = sorted(
+        (
+            {"game_id": str(game_id), "series_id": str(series_id)}
+            for game_id, series_id in zip(frame["game_id"], frame["series_id"])
+        ),
+        key=lambda row: row["game_id"],
+    )
+    if len(rows) != len({row["game_id"] for row in rows}):
+        raise RuntimeError("series assignment contains duplicate game IDs")
+    return hashlib.sha256(_canonical_bytes(rows)).hexdigest()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--source-receipt", required=True, type=Path)
     parser.add_argument("--fold-spec", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--crosswalk", required=True, type=Path)
+    parser.add_argument("--crosswalk-receipt", required=True, type=Path)
+    parser.add_argument("--crosswalk-receipt-file-sha256", required=True)
     args = parser.parse_args()
     source_root = args.source_root.resolve()
     source_receipt_path = args.source_receipt.resolve()
@@ -66,6 +90,39 @@ def main() -> int:
     train_ids = tuple(str(value) for value in fold["train_game_ids"])
     validation_ids = tuple(str(value) for value in fold["validation_game_ids"])
     output_ids = tuple(sorted((*train_ids, *validation_ids)))
+    bound_maps = bind_verified_leaguepedia_series_crosswalk(
+        maps,
+        crosswalk_path=args.crosswalk.resolve(),
+        receipt_path=args.crosswalk_receipt.resolve(),
+        source_receipt=source_receipt,
+        expected_receipt_file_sha256=str(args.crosswalk_receipt_file_sha256),
+    )
+    model_frame = _map_model_frame(
+        bound_maps,
+        verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+        verified_source_receipt=source_receipt,
+        verified_crosswalk_receipt_file_sha256=str(
+            args.crosswalk_receipt_file_sha256
+        ),
+    )
+    eligible_ids = tuple(
+        sorted(str(value) for value in source_receipt["model_eligible_game_ids"])
+    )
+    eligible_frame = model_frame[
+        model_frame["game_id"].astype(str).isin(eligible_ids)
+    ].copy()
+    if tuple(sorted(eligible_frame["game_id"].astype(str))) != eligible_ids:
+        raise RuntimeError("series assignment does not cover the eligible census")
+    fold_frame = eligible_frame[
+        eligible_frame["game_id"].astype(str).isin(output_ids)
+    ].copy()
+    if tuple(sorted(fold_frame["game_id"].astype(str))) != output_ids:
+        raise RuntimeError("series assignment does not cover the fold census")
+    crosswalk_binding = bound_maps.attrs.get(
+        "verified_leaguepedia_series_crosswalk"
+    )
+    if not isinstance(crosswalk_binding, dict):
+        raise RuntimeError("verified series binding is missing")
     started = time.perf_counter()
     native, native_receipt = build_scaling_feature_ledger(
         maps,
@@ -104,6 +161,41 @@ def main() -> int:
     manifest = build_rating_feature_producer_manifest([adapter])
     _write_json(output_dir / "scaling-adapter.json", adapter)
     _write_json(output_dir / "scaling-producer-manifest.json", manifest)
+    series_receipt = {
+        "schema_version": "scryglass:future-value-scaling-series-binding:v1",
+        "status": "research_only",
+        "fold": int(fold["fold"]),
+        "fit_window_end": fold["fit_window_end"],
+        "train_game_ids": list(train_ids),
+        "validation_game_ids": list(validation_ids),
+        "source_receipt_sha256": source_receipt["receipt_sha256"],
+        "source_identity_sha256": source_receipt["source_identity_sha256"],
+        "model_eligible_game_count": source_receipt["model_eligible_game_count"],
+        "model_eligible_identity_sha256": source_receipt[
+            "model_eligible_identity_sha256"
+        ],
+        "crosswalk_receipt_file_sha256": str(
+            args.crosswalk_receipt_file_sha256
+        ),
+        "crosswalk_sha256": crosswalk_binding["crosswalk_sha256"],
+        "crosswalk_assignment_sha256": crosswalk_binding["assignment_sha256"],
+        "eligible_series_assignment_sha256": _series_assignment_sha256(
+            eligible_frame
+        ),
+        "fold_series_assignment_sha256": _series_assignment_sha256(fold_frame),
+        "authority": {
+            "research_only": True,
+            "public_player_rating": False,
+            "public_team_rating": False,
+            "public_probability": False,
+            "promotion": False,
+            "deployment": False,
+        },
+    }
+    series_receipt["receipt_sha256"] = hashlib.sha256(
+        _canonical_bytes(series_receipt)
+    ).hexdigest()
+    _write_json(output_dir / "scaling-series-binding.json", series_receipt)
     run = {
         "fold": int(fold["fold"]),
         "rows": len(native),
@@ -115,6 +207,7 @@ def main() -> int:
         "producer_receipt_sha256": json.loads(
             producer_receipt_path.read_text(encoding="utf-8")
         )["receipt_sha256"],
+        "series_binding_receipt_sha256": series_receipt["receipt_sha256"],
         "authority": {
             "research_only": True,
             "public_player_rating": False,

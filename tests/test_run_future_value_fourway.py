@@ -18,6 +18,7 @@ def _config(tmp_path: Path) -> fourway.RunConfig:
         crosswalk=tmp_path / "crosswalk.json",
         crosswalk_receipt=tmp_path / "crosswalk-receipt.json",
         crosswalk_receipt_file_sha256="a" * 64,
+        trust_manifest=tmp_path / "trust.json",
         output_root=tmp_path / "run",
         outer_evaluation_start="2026-08-01T00:00:00Z",
         workers=2,
@@ -46,6 +47,7 @@ def test_plan_has_sequential_stages_and_parallel_jobs(tmp_path: Path) -> None:
         "benchmarks.build_current_rating_fold_artifact",
     )
     assert "--crosswalk-receipt-file-sha256" in stages[2].jobs[0].command
+    assert "--crosswalk-receipt-file-sha256" in stages[2].jobs[1].command
     assert "__PHASE_ARTIFACT_SHA256__" in stages[5].jobs[0].command
     assert "--rating-variant" in stages[5].jobs[-1].command
     assert stages[5].jobs[-1].command[stages[5].jobs[-1].command.index("--rating-variant") + 1] == "both"
@@ -201,3 +203,177 @@ def test_real_v14_receipt_separates_payload_and_file_hashes() -> None:
     )
     assert binding["artifact_sha256"] == receipt["artifact"]["sha256"]
     assert binding["crosswalk_sha256"] == receipt["crosswalk_sha256"]
+
+
+def test_trust_manifest_pins_source_and_series(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.trust_manifest.write_text("{}", encoding="utf-8")
+    source = {
+        "source_game_count": 2,
+        "source_identity_sha256": "1" * 64,
+        "model_eligible_game_count": 1,
+        "model_eligible_identity_sha256": "2" * 64,
+        "receipt_sha256": "3" * 64,
+    }
+    payload = {
+        "schema_version": fourway.TRUST_MANIFEST_SCHEMA_VERSION,
+        "status": "research_only",
+        "source": {
+            "source_game_count": 2,
+            "source_identity_sha256": "1" * 64,
+            "model_eligible_game_count": 1,
+            "model_eligible_identity_sha256": "2" * 64,
+            "source_receipt_sha256": "3" * 64,
+            "source_receipt_file_sha256": "4" * 64,
+            "freeze_file_sha256": "5" * 64,
+        },
+        "series": {
+            "crosswalk_receipt_file_sha256": "a" * 64,
+            "crosswalk_sha256": "6" * 64,
+            "crosswalk_assignment_sha256": "7" * 64,
+        },
+        "authority": {"research_only": True, "deployment": False},
+    }
+    payload["manifest_sha256"] = fourway._sha256_bytes(
+        fourway._canonical_bytes(payload)
+    )
+    config.trust_manifest.write_bytes(fourway._canonical_bytes(payload))
+    record = fourway._validate_trust_manifest(
+        config,
+        source_receipt=source,
+        source_receipt_file_sha256="4" * 64,
+        freeze_file_sha256="5" * 64,
+        crosswalk_binding={
+            "crosswalk_sha256": "6" * 64,
+            "assignment_sha256": "7" * 64,
+        },
+    )
+    assert record["manifest_sha256"] == payload["manifest_sha256"]
+
+    payload["source"]["source_game_count"] = 3
+    body = dict(payload)
+    body.pop("manifest_sha256")
+    payload["manifest_sha256"] = fourway._sha256_bytes(
+        fourway._canonical_bytes(body)
+    )
+    config.trust_manifest.write_bytes(fourway._canonical_bytes(payload))
+    with pytest.raises(fourway.FourwayRunError, match="immutable"):
+        fourway._validate_trust_manifest(
+            config,
+            source_receipt=source,
+            source_receipt_file_sha256="4" * 64,
+            freeze_file_sha256="5" * 64,
+            crosswalk_binding={
+                "crosswalk_sha256": "6" * 64,
+                "assignment_sha256": "7" * 64,
+            },
+        )
+
+
+def test_outer_cutoff_must_equal_generated_first_validation(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    root = config.output_root / "stages/fold-specs"
+    root.mkdir(parents=True)
+    folds = []
+    for fold, day in enumerate((1, 5, 9), start=1):
+        cutoff = f"2026-08-{day:02d}T00:00:00Z"
+        record = {
+            "fold": fold,
+            "fit_window_end": cutoff,
+            "validation_start": cutoff,
+        }
+        folds.append(record)
+        (root / f"fold-{fold}-spec.json").write_text(
+            json.dumps({"fold": fold, "fit_window_end": cutoff}), encoding="utf-8"
+        )
+    config.source_receipt.write_text(
+        json.dumps({"receipt_sha256": "b" * 64}), encoding="utf-8"
+    )
+    bundle = {"source": {"source_receipt_sha256": "b" * 64}, "folds": folds}
+    bundle["bundle_sha256"] = fourway._sha256_bytes(
+        fourway._canonical_bytes(bundle)
+    )
+    (root / "fold-spec-bundle.json").write_bytes(fourway._canonical_bytes(bundle))
+    matching = fourway.RunConfig(
+        **{**config.__dict__, "outer_evaluation_start": "2026-08-01T00:00:00+00:00"}
+    )
+    assert fourway._validate_fold_plan_cutoff(matching) == "2026-08-01T00:00:00Z"
+    mismatched = fourway.RunConfig(
+        **{**config.__dict__, "outer_evaluation_start": "2026-08-02T00:00:00Z"}
+    )
+    with pytest.raises(fourway.FourwayRunError, match="differs from the generated"):
+        fourway._validate_fold_plan_cutoff(mismatched)
+
+
+def test_scaling_binding_rejects_crosswalk_or_assignment_change(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.source_receipt.write_text(
+        json.dumps(
+            {
+                "receipt_sha256": "b" * 64,
+                "source_identity_sha256": "c" * 64,
+                "model_eligible_game_count": 2,
+                "model_eligible_identity_sha256": "1" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    trust = {
+        "series": {
+            "crosswalk_sha256": "d" * 64,
+            "crosswalk_assignment_sha256": "8" * 64,
+        }
+    }
+    config.trust_manifest.write_text(json.dumps(trust), encoding="utf-8")
+    folds_root = config.output_root / "stages/fold-specs"
+    producers = config.output_root / "stages/fold-producers"
+    folds_root.mkdir(parents=True)
+    for fold in range(1, 4):
+        spec = {
+            "fold": fold,
+            "fit_window_end": "2026-08-01T00:00:00Z",
+            "train_game_ids": [f"t{fold}"],
+            "validation_game_ids": [f"v{fold}"],
+        }
+        (folds_root / f"fold-{fold}-spec.json").write_text(
+            json.dumps(spec), encoding="utf-8"
+        )
+        binding = {
+            "schema_version": "scryglass:future-value-scaling-series-binding:v1",
+            "status": "research_only",
+            "fold": fold,
+            "fit_window_end": spec["fit_window_end"],
+            "train_game_ids": spec["train_game_ids"],
+            "validation_game_ids": spec["validation_game_ids"],
+            "source_receipt_sha256": "b" * 64,
+            "source_identity_sha256": "c" * 64,
+            "model_eligible_game_count": 2,
+            "model_eligible_identity_sha256": "1" * 64,
+            "crosswalk_receipt_file_sha256": "a" * 64,
+            "crosswalk_sha256": "d" * 64,
+            "crosswalk_assignment_sha256": "8" * 64,
+            "eligible_series_assignment_sha256": "e" * 64,
+            "fold_series_assignment_sha256": "f" * 64,
+            "authority": {"research_only": True, "deployment": False},
+        }
+        binding["receipt_sha256"] = fourway._sha256_bytes(
+            fourway._canonical_bytes(binding)
+        )
+        target = producers / f"fold-{fold}/scaling-v2"
+        target.mkdir(parents=True)
+        (target / "scaling-series-binding.json").write_bytes(
+            fourway._canonical_bytes(binding)
+        )
+    fourway._validate_scaling_series_bindings(config)
+
+    path = producers / "fold-2/scaling-v2/scaling-series-binding.json"
+    changed = json.loads(path.read_text(encoding="utf-8"))
+    changed["eligible_series_assignment_sha256"] = "9" * 64
+    body = dict(changed)
+    body.pop("receipt_sha256")
+    changed["receipt_sha256"] = fourway._sha256_bytes(
+        fourway._canonical_bytes(body)
+    )
+    path.write_bytes(fourway._canonical_bytes(changed))
+    with pytest.raises(fourway.FourwayRunError, match="different series assignments"):
+        fourway._validate_scaling_series_bindings(config)
