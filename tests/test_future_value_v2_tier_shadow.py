@@ -21,6 +21,10 @@ from lol_kills.research.future_value_v2_tier_shadow import (
     score_v2_design,
     write_v2_tier_offset_ledger,
 )
+from lol_kills.research.future_value_tier_shadow import (
+    TierShadowError,
+    score_variant_design,
+)
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
@@ -219,4 +223,148 @@ def test_ledger_rejects_row_mutation_and_wrong_source(tmp_path: Path) -> None:
             result.ledger_path,
             result.receipt_path,
             source_receipt=wrong_source,
+        )
+
+
+def _variant_parameters(variant: RatingVariant) -> dict[str, object]:
+    names = rating_variant_config(variant).feature_names
+    return {
+        "variant": variant.value,
+        "feature_names": list(names),
+        "fold_local_side_imputation": {name: 0.0 for name in names},
+        "feature_scales": {name: 1.0 for name in names},
+        "coefficients": {name: 1.0 for name in names},
+        "intercept": 0.0,
+    }
+
+
+def _variant_design(
+    variant: RatingVariant,
+    *,
+    form_shift: float = 0.0,
+    scaling_shift: float = 0.0,
+) -> pd.DataFrame:
+    config = rating_variant_config(variant)
+    rows: list[dict[str, object]] = []
+    for game_id, day, target, current in (
+        ("g1", "2026-02-01T00:00:00Z", 1, 0.2),
+        ("g2", "2026-02-02T00:00:00Z", 0, -0.4),
+    ):
+        row: dict[str, object] = {
+            "game_id": game_id,
+            "date": day,
+            "target": target,
+        }
+        for name in config.feature_names:
+            if name in config.signed_map_features:
+                if name in CURRENT_RATING_SIGNED_MAP_FEATURES:
+                    row[name] = current
+                else:
+                    row[name] = scaling_shift
+            else:
+                row[f"__blue_{name}"] = form_shift
+                row[f"__red_{name}"] = 0.0
+        rows.append(row)
+    frame = pd.DataFrame(rows)
+    frame.attrs["variant"] = variant.value
+    return frame
+
+
+def test_four_variant_scores_use_one_universe_and_neutral_offsets() -> None:
+    scored = {}
+    for variant in RatingVariant:
+        rows, offsets, _ = score_variant_design(
+            _variant_design(variant),
+            _variant_parameters(variant),
+            variant=variant,
+            expected_game_ids=["g1", "g2"],
+        )
+        scored[variant] = (rows, offsets)
+        assert {row["game_id"] for row in rows} == {"g1", "g2"}
+        assert {row["target"] for row in rows} == {0, 1}
+        assert all("offset_logit" in row for row in rows)
+        assert all("v2_offset_logit" not in row for row in rows)
+    assert set(scored[RatingVariant.CURRENT_ONLY][1]) == set(
+        scored[RatingVariant.BOTH][1]
+    )
+
+
+def test_form_mutation_changes_only_v2_and_v4() -> None:
+    baseline = {}
+    mutated = {}
+    for variant in RatingVariant:
+        parameters = _variant_parameters(variant)
+        baseline[variant] = score_variant_design(
+            _variant_design(variant),
+            parameters,
+            variant=variant,
+            expected_game_ids=["g1", "g2"],
+        )[1]
+        mutated[variant] = score_variant_design(
+            _variant_design(variant, form_shift=7.0),
+            parameters,
+            variant=variant,
+            expected_game_ids=["g1", "g2"],
+        )[1]
+    assert mutated[RatingVariant.CURRENT_ONLY] == pytest.approx(
+        baseline[RatingVariant.CURRENT_ONLY]
+    )
+    assert mutated[RatingVariant.SCALING_CURVE] == pytest.approx(
+        baseline[RatingVariant.SCALING_CURVE]
+    )
+    assert mutated[RatingVariant.FUTURE_PLAYER_FORM] != pytest.approx(
+        baseline[RatingVariant.FUTURE_PLAYER_FORM]
+    )
+    assert mutated[RatingVariant.BOTH] != pytest.approx(baseline[RatingVariant.BOTH])
+
+
+def test_scaling_mutation_changes_only_v3_and_v4() -> None:
+    baseline = {}
+    mutated = {}
+    for variant in RatingVariant:
+        parameters = _variant_parameters(variant)
+        baseline[variant] = score_variant_design(
+            _variant_design(variant),
+            parameters,
+            variant=variant,
+            expected_game_ids=["g1", "g2"],
+        )[1]
+        mutated[variant] = score_variant_design(
+            _variant_design(variant, scaling_shift=9.0),
+            parameters,
+            variant=variant,
+            expected_game_ids=["g1", "g2"],
+        )[1]
+    assert mutated[RatingVariant.CURRENT_ONLY] == pytest.approx(
+        baseline[RatingVariant.CURRENT_ONLY]
+    )
+    assert mutated[RatingVariant.FUTURE_PLAYER_FORM] == pytest.approx(
+        baseline[RatingVariant.FUTURE_PLAYER_FORM]
+    )
+    assert mutated[RatingVariant.SCALING_CURVE] != pytest.approx(
+        baseline[RatingVariant.SCALING_CURVE]
+    )
+    assert mutated[RatingVariant.BOTH] != pytest.approx(baseline[RatingVariant.BOTH])
+
+
+def test_variant_score_rejects_missing_or_extra_ids() -> None:
+    parameters = _variant_parameters(RatingVariant.CURRENT_ONLY)
+    with pytest.raises(TierShadowError, match="census"):
+        score_variant_design(
+            _variant_design(RatingVariant.CURRENT_ONLY).iloc[:1],
+            parameters,
+            variant=RatingVariant.CURRENT_ONLY,
+            expected_game_ids=["g1", "g2"],
+        )
+    extra = pd.concat(
+        [_variant_design(RatingVariant.CURRENT_ONLY), _variant_design(RatingVariant.CURRENT_ONLY).iloc[:1]],
+        ignore_index=True,
+    )
+    extra.loc[2, "game_id"] = "g3"
+    with pytest.raises(TierShadowError, match="census"):
+        score_variant_design(
+            extra,
+            parameters,
+            variant=RatingVariant.CURRENT_ONLY,
+            expected_game_ids=["g1", "g2"],
         )

@@ -9,11 +9,13 @@ import pytest
 from benchmarks.future_value_tierlist_full_census_diff import (
     FullCensusTierDiffError,
     audit_final_v2_full_census_scoreability,
+    build_full_census_fourway_diff,
     build_full_census_tier_diff,
     canonical_json_bytes,
     sha256_path,
     write_full_census_tier_diff,
 )
+from lol_kills.research.future_value_tierlist import VARIANTS, make_offset_provenance
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
@@ -316,3 +318,75 @@ def test_writes_report_and_receipt_with_input_bindings(tmp_path: Path) -> None:
     assert receipt["report"]["bytes"] == report_path.stat().st_size
     assert receipt["comparison"] == written_report["comparison"]
     assert receipt["inputs"] == written_report["inputs"]
+
+
+def _fourway_fixture(tmp_path: Path) -> dict[str, object]:
+    inputs = _fixture(tmp_path)
+    source = _source_receipt()
+    paths: dict[str, Path] = {}
+    hashes: dict[str, str] = {}
+    for variant in VARIANTS:
+        candidate = _candidate(
+            game_count=len(ELIGIBLE),
+            source_identity=identity_sha256(ELIGIBLE),
+            rows=[_row("a", "A", 1, "S"), _row("b", "B", 2, "A")],
+        )
+        provenance = make_offset_provenance(
+            variant=variant,
+            offsets={"g1": float(VARIANTS.index(variant))},
+            source_receipt_sha256=str(source["receipt_sha256"]),
+        )
+        candidate["pre_map_offset_override"] = {
+            "applied": True,
+            "game_count": len(ELIGIBLE),
+            "game_identity_sha256": identity_sha256(ELIGIBLE),
+            "offsets_sha256": provenance["offsets_sha256"],
+            "provenance": provenance,
+        }
+        candidate = _seal(candidate, "artifact_sha256")
+        path = tmp_path / f"{variant}.json"
+        hashes[variant] = _write_json(path, candidate)
+        paths[variant] = path
+    inputs["variant_candidate_paths"] = paths
+    inputs["expected_variant_candidate_sha256"] = hashes
+    return inputs
+
+
+def test_fourway_full_census_uses_identical_universe_and_keeps_baseline_unchanged(
+    tmp_path: Path,
+) -> None:
+    report = build_full_census_fourway_diff(**_fourway_fixture(tmp_path))
+
+    assert report["status"] == "research_only"
+    assert report["timing"] == {
+        "mode": "retrospective_full_model_eligible_census",
+        "chronological_evaluation_suitable": False,
+        "validation_offsets_used": False,
+    }
+    assert report["candidate_universe"]["identical"] is True
+    assert report["candidate_universe"]["variants"] == list(VARIANTS)
+    assert report["baseline_public_candidate"]["status"] == (
+        "unchanged_non_comparable_full_census_reference"
+    )
+    assert report["comparisons"]["current_only"]["changed_rank_count"] == 0
+    assert all(
+        report["comparisons"][variant]["row_count"] == 2 for variant in VARIANTS
+    )
+    assert "chronological_subset_evidence_not_used_for_full_census_offsets" in report[
+        "blockers"
+    ]
+
+
+def test_fourway_full_census_rejects_missing_or_extra_candidate_rows(
+    tmp_path: Path,
+) -> None:
+    inputs = _fourway_fixture(tmp_path)
+    path = Path(inputs["variant_candidate_paths"]["both"])
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["cells"][0]["rows"].pop()
+    payload = _seal(payload, "artifact_sha256")
+    path.write_bytes(canonical_json_bytes(payload) + b"\n")
+    inputs["expected_variant_candidate_sha256"]["both"] = sha256_path(path)
+
+    with pytest.raises(FullCensusTierDiffError, match="row universes differ"):
+        build_full_census_fourway_diff(**inputs)

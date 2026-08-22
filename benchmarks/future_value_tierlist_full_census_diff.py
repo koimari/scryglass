@@ -1,9 +1,10 @@
-"""Build a source-bound current versus V2 Tier List comparison.
+"""Build source-bound retrospective Tier List comparisons.
 
-This benchmark compares the frozen current Tier candidate with the frozen V2
-candidate on their exact common row universe.  It does not fit a model and it
-does not change a public Tier List.  Every input is checked against an
-external byte hash before any row is read.
+The legacy entry point compares the frozen current candidate with V2.  The
+four-way entry point compares all registered rating variants on one exact
+model-eligible row universe.  The benchmark does not fit a model or change a
+public Tier List.  Every input is checked against an external byte hash before
+any row is read.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from lol_kills.research.future_value_rating import (
 )
 from lol_kills.research.future_value_tierlist import (
     FutureValueTierListError,
+    VARIANTS as TIER_VARIANTS,
     _candidate_rows,
     canonical_json_bytes,
 )
@@ -236,6 +238,241 @@ def _build_rows(
     }
 
 
+def _verify_fourway_candidate(
+    candidate: Mapping[str, Any],
+    *,
+    variant: str,
+    expected_game_count: int,
+    expected_identity: str,
+    expected_source_as_of: str,
+    expected_source_receipt_sha256: str,
+) -> tuple[dict[tuple[str, str, str, str], dict[str, Any]], str]:
+    """Verify one retrospective candidate on the shared eligible census."""
+
+    rows, artifact_sha256 = _verify_candidate(
+        candidate,
+        label=f"{variant} candidate",
+        expected_game_count=expected_game_count,
+        expected_identity=expected_identity,
+        expected_source_as_of=expected_source_as_of,
+    )
+    override = candidate.get("pre_map_offset_override")
+    if not isinstance(override, Mapping) or override.get("applied") is not True:
+        raise FullCensusTierDiffError(f"{variant} candidate pre-map offset binding is missing")
+    if (
+        override.get("game_count") != expected_game_count
+        or override.get("game_identity_sha256") != expected_identity
+    ):
+        raise FullCensusTierDiffError(f"{variant} candidate offset universe changed")
+    provenance = override.get("provenance")
+    if not isinstance(provenance, Mapping):
+        # Older pooled artifacts used a sibling field.  Accept it for a
+        # compatibility read, while requiring the same strict-prior values.
+        provenance = candidate.get("pre_map_offset_provenance")
+    if not isinstance(provenance, Mapping):
+        raise FullCensusTierDiffError(f"{variant} candidate offset provenance is missing")
+    if provenance.get("timing") != "strict_prior_pre_map":
+        raise FullCensusTierDiffError(f"{variant} candidate offset timing changed")
+    if provenance.get("source_receipt_sha256") != expected_source_receipt_sha256:
+        raise FullCensusTierDiffError(f"{variant} candidate offset source receipt changed")
+    if provenance.get("source_identity_sha256") != expected_identity:
+        raise FullCensusTierDiffError(f"{variant} candidate offset source identity changed")
+    if provenance.get("source_game_count") != expected_game_count:
+        raise FullCensusTierDiffError(f"{variant} candidate offset count changed")
+    expected_producer = f"future_value_rating:{variant}"
+    if provenance.get("producer") != expected_producer:
+        raise FullCensusTierDiffError(f"{variant} candidate offset producer changed")
+    if provenance.get("authority") is not False:
+        raise FullCensusTierDiffError(f"{variant} candidate offset authority changed")
+    claimed_receipt = _require_hash(
+        provenance.get("receipt_sha256"), f"{variant} candidate offset receipt hash"
+    )
+    unsigned = dict(provenance)
+    unsigned.pop("receipt_sha256", None)
+    if _hash_bytes(canonical_json_bytes(unsigned)) != claimed_receipt:
+        raise FullCensusTierDiffError(f"{variant} candidate offset receipt changed")
+    return rows, artifact_sha256
+
+
+def _fourway_movement(
+    reference_rows: Mapping[tuple[str, str, str, str], Mapping[str, Any]],
+    selected_rows: Mapping[tuple[str, str, str, str], Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Pair one candidate with current-only rows after exact identity checks."""
+
+    reference_keys = set(reference_rows)
+    selected_keys = set(selected_rows)
+    if reference_keys != selected_keys:
+        missing = sorted(reference_keys - selected_keys)
+        extra = sorted(selected_keys - reference_keys)
+        raise FullCensusTierDiffError(
+            "four-way Tier row universes differ "
+            f"(missing={len(missing)}, extra={len(extra)})"
+        )
+    rows: list[dict[str, Any]] = []
+    movements: list[int] = []
+    changed_tiers = 0
+    for key in sorted(reference_keys):
+        reference = reference_rows[key]
+        selected = selected_rows[key]
+        rank_delta = int(reference["rank"]) - int(selected["rank"])
+        tier_changed = reference["tier_bucket"] != selected["tier_bucket"]
+        movements.append(rank_delta)
+        changed_tiers += int(tier_changed)
+        rows.append(
+            {
+                "key": _row_identity(key),
+                "reference": _row_values(reference),
+                "selected": _row_values(selected),
+                "delta": {
+                    "rank_delta": rank_delta,
+                    "tier_changed": tier_changed,
+                },
+            }
+        )
+    return rows, {
+        "row_count": len(rows),
+        "changed_rank_count": sum(value != 0 for value in movements),
+        "changed_tier_count": changed_tiers,
+        "mean_absolute_rank_movement": sum(abs(value) for value in movements) / len(movements),
+        "maximum_absolute_rank_movement": max(map(abs, movements), default=0),
+        "paired_rows_sha256": _hash_bytes(canonical_json_bytes(rows)),
+    }
+
+
+def build_full_census_fourway_diff(
+    *,
+    source_receipt_path: Path | str,
+    expected_source_receipt_file_sha256: str,
+    expected_source_receipt_sha256: str,
+    baseline_candidate_path: Path | str,
+    expected_baseline_candidate_sha256: str,
+    variant_candidate_paths: Mapping[str, Path | str] | None = None,
+    expected_variant_candidate_sha256: Mapping[str, str] | None = None,
+    candidate_paths: Mapping[str, Path | str] | None = None,
+    expected_candidate_sha256: Mapping[str, str] | None = None,
+    v2_candidate_path: Path | str | None = None,
+    expected_v2_candidate_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Build a retrospective four-variant diff on one exact eligible universe.
+
+    ``variant_candidate_paths`` is the preferred argument.  The two
+    ``candidate_*`` names are accepted as a short compatibility spelling for
+    callers that already use a candidate mapping.
+    """
+
+    paths = variant_candidate_paths if variant_candidate_paths is not None else candidate_paths
+    hashes = (
+        expected_variant_candidate_sha256
+        if expected_variant_candidate_sha256 is not None
+        else expected_candidate_sha256
+    )
+    if not isinstance(paths, Mapping) or set(paths) != set(TIER_VARIANTS):
+        raise FullCensusTierDiffError(
+            "four variant candidate paths must contain current_only, future_player_form, scaling_curve, and both"
+        )
+    if not isinstance(hashes, Mapping) or set(hashes) != set(TIER_VARIANTS):
+        raise FullCensusTierDiffError("four variant candidate hashes are incomplete")
+    source, source_file = _load_source(
+        source_receipt_path,
+        expected_source_receipt_file_sha256=expected_source_receipt_file_sha256,
+        expected_source_receipt_sha256=expected_source_receipt_sha256,
+    )
+    baseline_path = _safe_file(baseline_candidate_path, "baseline candidate")
+    baseline_file = _verify_file(
+        baseline_path,
+        expected_baseline_candidate_sha256,
+        "baseline candidate",
+    )
+    baseline = _load_json(baseline_path, "baseline candidate")
+    baseline_rows, baseline_artifact_sha256 = _verify_candidate(
+        baseline,
+        label="baseline candidate",
+        expected_game_count=source["accepted_game_count"],
+        expected_identity=source["accepted_identity_sha256"],
+        expected_source_as_of=source["source_as_of"],
+    )
+    candidate_rows: dict[str, dict[tuple[str, str, str, str], dict[str, Any]]] = {}
+    candidate_artifacts: dict[str, dict[str, Any]] = {}
+    for variant in TIER_VARIANTS:
+        path = _safe_file(paths[variant], f"{variant} candidate")
+        file_binding = _verify_file(path, hashes[variant], f"{variant} candidate")
+        candidate = _load_json(path, f"{variant} candidate")
+        rows, artifact_sha256 = _verify_fourway_candidate(
+            candidate,
+            variant=variant,
+            expected_game_count=source["model_eligible_game_count"],
+            expected_identity=source["model_eligible_identity_sha256"],
+            expected_source_as_of=source["source_as_of"],
+            expected_source_receipt_sha256=source["source_receipt_sha256"],
+        )
+        candidate_rows[variant] = rows
+        candidate_artifacts[variant] = {
+            **file_binding,
+            "artifact_sha256": artifact_sha256,
+            "source_game_count": source["model_eligible_game_count"],
+            "source_identity_sha256": source["model_eligible_identity_sha256"],
+        }
+    reference = candidate_rows["current_only"]
+    comparisons: dict[str, Any] = {}
+    paired_rows: dict[str, list[dict[str, Any]]] = {}
+    for variant in TIER_VARIANTS:
+        rows, movement = _fourway_movement(reference, candidate_rows[variant])
+        comparisons[variant] = {
+            "reference_variant": "current_only",
+            **movement,
+        }
+        paired_rows[variant] = rows
+    reference_keys = sorted(reference)
+    common_identity = _hash_bytes(
+        canonical_json_bytes([_row_identity(key) for key in reference_keys])
+    )
+    report: dict[str, Any] = {
+        "schema_version": "scryglass:future-value-tierlist-full-census-fourway:v1",
+        "status": "research_only",
+        "authority": dict(AUTHORITY),
+        "timing": {
+            "mode": "retrospective_full_model_eligible_census",
+            "chronological_evaluation_suitable": False,
+            "validation_offsets_used": False,
+        },
+        "source": source,
+        "baseline_public_candidate": {
+            "status": "unchanged_non_comparable_full_census_reference",
+            "path": baseline_file,
+            "artifact_sha256": baseline_artifact_sha256,
+            "source_game_count": source["accepted_game_count"],
+            "source_identity_sha256": source["accepted_identity_sha256"],
+        },
+        "candidate_universe": {
+            "variant_count": len(TIER_VARIANTS),
+            "variants": list(TIER_VARIANTS),
+            "game_count": source["model_eligible_game_count"],
+            "game_identity_sha256": source["model_eligible_identity_sha256"],
+            "target_rows_sha256": source.get("target_rows_sha256"),
+            "identical": True,
+            "row_identity_fields": ["scope_id", "patch", "role", "champion_id"],
+            "common_row_count": len(reference_keys),
+            "common_identity_sha256": common_identity,
+        },
+        "inputs": {
+            "source_receipt": source_file["source_receipt"],
+            "baseline_candidate": baseline_file,
+            "variant_candidates": candidate_artifacts,
+        },
+        "comparisons": comparisons,
+        "rows": paired_rows,
+        "blockers": [
+            "retrospective_full_census_model_fit_not_chronological_evaluation",
+            "model_eligible_census_differs_from_accepted_census",
+            "chronological_subset_evidence_not_used_for_full_census_offsets",
+            "public_tierlist_authority_missing",
+        ],
+    }
+    report["report_sha256"] = _hash_bytes(canonical_json_bytes(report))
+    return report
+
+
 def _load_source(
     source_receipt_path: Path | str,
     *,
@@ -414,10 +651,29 @@ def build_full_census_tier_diff(
     expected_source_receipt_sha256: str,
     baseline_candidate_path: Path | str,
     expected_baseline_candidate_sha256: str,
-    v2_candidate_path: Path | str,
-    expected_v2_candidate_sha256: str,
+    v2_candidate_path: Path | str | None = None,
+    expected_v2_candidate_sha256: str | None = None,
+    variant_candidate_paths: Mapping[str, Path | str] | None = None,
+    expected_variant_candidate_sha256: Mapping[str, str] | None = None,
+    candidate_paths: Mapping[str, Path | str] | None = None,
+    expected_candidate_sha256: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build a verified current versus V2 common-row Tier comparison."""
+
+    if variant_candidate_paths is not None or candidate_paths is not None:
+        return build_full_census_fourway_diff(
+            source_receipt_path=source_receipt_path,
+            expected_source_receipt_file_sha256=expected_source_receipt_file_sha256,
+            expected_source_receipt_sha256=expected_source_receipt_sha256,
+            baseline_candidate_path=baseline_candidate_path,
+            expected_baseline_candidate_sha256=expected_baseline_candidate_sha256,
+            variant_candidate_paths=variant_candidate_paths,
+            expected_variant_candidate_sha256=expected_variant_candidate_sha256,
+            candidate_paths=candidate_paths,
+            expected_candidate_sha256=expected_candidate_sha256,
+        )
+    if v2_candidate_path is None or expected_v2_candidate_sha256 is None:
+        raise FullCensusTierDiffError("V2 candidate inputs are required for the legacy diff")
 
     source, source_file = _load_source(
         source_receipt_path,
@@ -520,8 +776,10 @@ def write_full_census_tier_diff(
     if root.exists() and (root.is_symlink() or any(root.iterdir())):
         raise FullCensusTierDiffError("output root must be empty and safe")
     root.mkdir(parents=True, exist_ok=True)
-    report_path = root / "current-v2-full-census-tier-diff.json"
-    receipt_path = root / "current-v2-full-census-tier-diff-receipt.json"
+    is_fourway = report.get("schema_version") == "scryglass:future-value-tierlist-full-census-fourway:v1"
+    stem = "current-fourway-full-census-tier-diff" if is_fourway else "current-v2-full-census-tier-diff"
+    report_path = root / f"{stem}.json"
+    receipt_path = root / f"{stem}-receipt.json"
     report_raw = canonical_json_bytes(dict(report)) + b"\n"
     report_path.write_bytes(report_raw)
     receipt: dict[str, Any] = {
@@ -592,35 +850,94 @@ def main() -> int:
     parser.add_argument("--trust-manifest", type=Path, required=True)
     parser.add_argument("--expected-trust-manifest-sha256", required=True)
     parser.add_argument("--source-root", type=Path, required=True)
-    parser.add_argument("--v2-candidate", type=Path, required=True)
-    parser.add_argument("--expected-v2-candidate-sha256", required=True)
+    parser.add_argument("--v2-candidate", type=Path)
+    parser.add_argument("--expected-v2-candidate-sha256")
+    parser.add_argument(
+        "--variant-candidate",
+        action="append",
+        default=[],
+        metavar="VARIANT=PATH",
+        help="Four-way candidate path. Repeat once per registered variant.",
+    )
+    parser.add_argument(
+        "--expected-variant-candidate-sha256",
+        action="append",
+        default=[],
+        metavar="VARIANT=SHA256",
+        help="Four-way candidate hash. Repeat once per registered variant.",
+    )
     parser.add_argument("--output-root", type=Path, required=True)
     args = parser.parse_args()
-    inputs = _load_trust_manifest_inputs(
-        trust_manifest_path=args.trust_manifest.expanduser().resolve(),
-        expected_trust_manifest_sha256=args.expected_trust_manifest_sha256,
-        source_root=args.source_root,
-        v2_candidate_path=args.v2_candidate.expanduser().resolve(),
-        expected_v2_candidate_sha256=args.expected_v2_candidate_sha256,
-    )
-    report = build_full_census_tier_diff(**inputs)
+    if args.variant_candidate or args.expected_variant_candidate_sha256:
+        candidate_paths: dict[str, Path] = {}
+        candidate_hashes: dict[str, str] = {}
+        for item in args.variant_candidate:
+            if "=" not in item:
+                raise FullCensusTierDiffError("--variant-candidate must be VARIANT=PATH")
+            variant, value = item.split("=", 1)
+            candidate_paths[variant] = Path(value).expanduser().resolve()
+        for item in args.expected_variant_candidate_sha256:
+            if "=" not in item:
+                raise FullCensusTierDiffError(
+                    "--expected-variant-candidate-sha256 must be VARIANT=SHA256"
+                )
+            variant, value = item.split("=", 1)
+            candidate_hashes[variant] = value
+        trust_inputs = _load_trust_manifest_inputs(
+            trust_manifest_path=args.trust_manifest.expanduser().resolve(),
+            expected_trust_manifest_sha256=args.expected_trust_manifest_sha256,
+            source_root=args.source_root,
+            v2_candidate_path=args.v2_candidate or Path("/dev/null"),
+            expected_v2_candidate_sha256=args.expected_v2_candidate_sha256 or "0" * 64,
+        )
+        inputs = {
+            key: value
+            for key, value in trust_inputs.items()
+            if key not in {"v2_candidate_path", "expected_v2_candidate_sha256"}
+        }
+        inputs.update(
+            {
+                "variant_candidate_paths": candidate_paths,
+                "expected_variant_candidate_sha256": candidate_hashes,
+            }
+        )
+        report = build_full_census_fourway_diff(**inputs)
+    else:
+        if args.v2_candidate is None or args.expected_v2_candidate_sha256 is None:
+            raise FullCensusTierDiffError(
+                "V2 candidate arguments or four-way candidate arguments are required"
+            )
+        inputs = _load_trust_manifest_inputs(
+            trust_manifest_path=args.trust_manifest.expanduser().resolve(),
+            expected_trust_manifest_sha256=args.expected_trust_manifest_sha256,
+            source_root=args.source_root,
+            v2_candidate_path=args.v2_candidate.expanduser().resolve(),
+            expected_v2_candidate_sha256=args.expected_v2_candidate_sha256,
+        )
+        report = build_full_census_tier_diff(**inputs)
     report_path, receipt_path = write_full_census_tier_diff(
         report,
         output_root=args.output_root,
     )
-    print(
-        json.dumps(
-            {
-                "status": report["status"],
-                "report": str(report_path),
-                "receipt": str(receipt_path),
-                "common_row_count": report["comparison"]["common_row_count"],
-                "changed_rank_count": report["comparison"]["changed_rank_count"],
-                "changed_tier_count": report["comparison"]["changed_tier_count"],
-            },
-            sort_keys=True,
-        )
-    )
+    if "comparison" in report:
+        output = {
+            "status": report["status"],
+            "report": str(report_path),
+            "receipt": str(receipt_path),
+            "common_row_count": report["comparison"]["common_row_count"],
+            "changed_rank_count": report["comparison"]["changed_rank_count"],
+            "changed_tier_count": report["comparison"]["changed_tier_count"],
+        }
+    else:
+        output = {
+            "status": report["status"],
+            "report": str(report_path),
+            "receipt": str(receipt_path),
+            "variant_count": len(report["comparisons"]),
+            "common_row_count": report["candidate_universe"]["common_row_count"],
+            "identical_candidate_universe": report["candidate_universe"]["identical"],
+        }
+    print(json.dumps(output, sort_keys=True))
     return 0
 
 
@@ -630,6 +947,7 @@ __all__ = [
     "FullCensusTierDiffError",
     "RECEIPT_SCHEMA_VERSION",
     "SCHEMA_VERSION",
+    "build_full_census_fourway_diff",
     "build_full_census_tier_diff",
     "canonical_json_bytes",
     "audit_final_v2_full_census_scoreability",

@@ -807,3 +807,48 @@ __all__ = [
     "verify_target_parity",
     "write_v2_tier_offset_ledger",
 ]
+
+# The original import path remains stable for downstream V2 jobs.  New work
+# should use the variant-neutral names below.  Keep the legacy V2 functions
+# above unchanged because their sealed artifact schema is still readable.
+from lol_kills.research.future_value_tier_shadow import (  # noqa: E402
+    FORM_VARIANTS as VARIANT_FORM_VARIANTS,
+    SCALING_VARIANTS as VARIANT_SCALING_VARIANTS,
+    VARIANTS as TIER_SHADOW_VARIANTS,
+    TierShadowError,
+    TierShadowResult,
+    build_frozen_four_variant_tier_shadows,
+    build_frozen_fourway_tier_shadow,
+    build_frozen_variant_tier_shadow,
+    build_variant_design,
+    load_tier_offset_ledger,
+    score_variant_design,
+    verify_final_model,
+    verify_full_scaling_ledger,
+    verify_scaling_rating_ledger,
+    verify_variant_model_receipt,
+    write_tier_offset_ledger,
+)
+VARIANTS = TIER_SHADOW_VARIANTS
+
+__all__.extend(
+    [
+        "TierShadowError",
+        "TierShadowResult",
+        "TIER_SHADOW_VARIANTS",
+        "VARIANTS",
+        "VARIANT_FORM_VARIANTS",
+        "VARIANT_SCALING_VARIANTS",
+        "build_frozen_four_variant_tier_shadows",
+        "build_frozen_fourway_tier_shadow",
+        "build_frozen_variant_tier_shadow",
+        "build_variant_design",
+        "load_tier_offset_ledger",
+        "score_variant_design",
+        "verify_final_model",
+        "verify_full_scaling_ledger",
+        "verify_scaling_rating_ledger",
+        "verify_variant_model_receipt",
+        "write_tier_offset_ledger",
+    ]
+)
