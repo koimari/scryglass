@@ -1337,6 +1337,23 @@ def _apply_verified_leaguepedia_partition(
             for game_id in mapped_ids
         }
     )
+    tournament_by_game: dict[str, str] = {}
+    for game_id in mapped_ids:
+        tournament = str(
+            assignment_by_id[game_id].get("scoreboard_tournament") or ""
+        ).strip()
+        if not tournament:
+            raise FutureValueSourceError(
+                "Leaguepedia crosswalk tournament evidence is incomplete"
+            )
+        tournament_by_game[game_id] = tournament
+    if tournament_by_game:
+        tournament_mask = partition["game_id"].astype(str).isin(tournament_by_game)
+        partition.loc[tournament_mask, "tournament"] = (
+            partition.loc[tournament_mask, "game_id"].astype(str).map(
+                tournament_by_game
+            )
+        )
     if mapped_ids and team_columns is None:
         raise FutureValueSourceError("Leaguepedia crosswalk team columns are missing")
     if team_columns is not None:
@@ -1670,6 +1687,33 @@ def _scope_series_cluster_audit_to_frame(
     )
     result.attrs = attrs
     return result
+
+
+def _series_partition_is_authoritative(frame: pd.DataFrame) -> bool:
+    """Return true only for an exact source-bound series partition."""
+
+    source = str(frame.attrs.get("series_cluster_source") or "")
+    audit = frame.attrs.get("series_cluster_audit")
+    if not isinstance(audit, Mapping):
+        return False
+    if source.startswith("authoritative:"):
+        return audit.get("authoritative") is True
+    if source != LEAGUEPEDIA_CROSSWALK_SOURCE:
+        return False
+    if "series_id" not in frame.columns:
+        return False
+    series = frame["series_id"].astype("string").str.strip()
+    return bool(
+        audit.get("mapped_series_authoritative") is True
+        and audit.get("partial_series_blocker") is False
+        and int(audit.get("mapped_game_count") or 0) == len(frame)
+        and int(audit.get("promoted_game_count") or 0) == len(frame)
+        and int(audit.get("retained_proxy_game_count") or 0) == 0
+        and int(audit.get("retained_proxy_cluster_count") or 0) == 0
+        and series.notna().all()
+        and series.ne("").all()
+        and series.astype(str).str.startswith("leaguepedia:").all()
+    )
 
 
 def _team_history_features(
@@ -2468,20 +2512,9 @@ def _phase_partition_file_record(
 def _phase_reference_game_ids(
     source_receipt: Mapping[str, Any],
 ) -> tuple[str, ...]:
-    """Return the full mixed reference census bound by the source receipt."""
+    """Return the frozen accepted reference census bound by the source receipt."""
 
-    accepted = tuple(canonical_game_ids(source_receipt["accepted_game_ids"]))
-    extras_value = source_receipt.get("source_extra_game_ids")
-    if not isinstance(extras_value, Mapping):
-        extras_value = {}
-    raw_extra_ids = extras_value.get("maps") or ()
-    if not isinstance(raw_extra_ids, (list, tuple)):
-        raise FutureValueSourceError("phase reference extra game IDs are invalid")
-    extras = tuple(canonical_game_ids(raw_extra_ids))
-    result = tuple(canonical_game_ids((*accepted, *extras)))
-    if len(result) != len(accepted) + len(extras):
-        raise FutureValueSourceError("phase reference census contains duplicate IDs")
-    return result
+    return tuple(canonical_game_ids(source_receipt["accepted_game_ids"]))
 
 
 def _verify_phase_source_receipt_file(
@@ -8567,10 +8600,10 @@ def evaluate_future_value(
         phase_partition_report.get("status") == "verified"
         and phase_partition_report.get("cross_model_partition_status") == "comparable"
     )
-    if not str(cluster_source).startswith("authoritative:"):
+    if not _series_partition_is_authoritative(map_frame):
         blockers.append("authoritative_series_id_missing_proxy_cluster_used")
-        if not phase_partition_comparable:
-            blockers.append("phase_model_series_partition_non_comparable")
+    if not phase_partition_comparable:
+        blockers.append("phase_model_series_partition_non_comparable")
     blockers = sorted(set(blockers))
     pooled_candidate_paired_methods: dict[str, Any] = {}
     for method_name, targets in pooled_candidate_paired_targets.items():

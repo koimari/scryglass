@@ -24,6 +24,7 @@ from lol_kills.research.future_value_rating import (
     _current_rating_method_comparison,
     _required_current_rating_comparison_blockers,
     _scope_series_cluster_audit_to_frame,
+    _series_partition_is_authoritative,
     _sequential_current_rating_baseline,
     _fold_level_imputation_values,
     build_future_value_design,
@@ -1345,6 +1346,105 @@ def test_series_audit_uses_row_bound_crosswalk_assignments() -> None:
     assert audit["mapped_series_count"] == 2
     assert "_series_crosswalk_mapped" not in scoped.columns
     assert "_series_crosswalk_assignment" not in scoped.columns
+
+
+def test_exact_leaguepedia_partition_is_authoritative_only_after_scope() -> None:
+    frame = pd.DataFrame(
+        {
+            "game_id": ["g1", "g2"],
+            "series_id": ["leaguepedia:s1", "leaguepedia:s1"],
+        }
+    )
+    frame.attrs["series_cluster_source"] = LEAGUEPEDIA_CROSSWALK_SOURCE
+    frame.attrs["series_cluster_audit"] = {
+        "mapped_series_authoritative": True,
+        "mapped_game_count": 2,
+        "promoted_game_count": 2,
+        "retained_proxy_game_count": 0,
+        "retained_proxy_cluster_count": 0,
+        "partial_series_blocker": False,
+    }
+
+    assert _series_partition_is_authoritative(frame) is True
+
+    frame.attrs["series_cluster_audit"]["partial_series_blocker"] = True
+    assert _series_partition_is_authoritative(frame) is False
+
+    frame.attrs["series_cluster_audit"]["partial_series_blocker"] = False
+    frame.loc[1, "series_id"] = "proxy:league|tournament|teams"
+    assert _series_partition_is_authoritative(frame) is False
+
+
+def test_phase_reference_census_excludes_rejected_source_rows() -> None:
+    source = _source_receipt(["g1", "g2"])
+    source["source_extra_game_ids"] = {
+        "maps": ["rejected-map"],
+        "players": ["rejected-map"],
+        "teams": ["rejected-map"],
+    }
+
+    assert rating_module._phase_reference_game_ids(source) == ("g1", "g2")
+
+
+def test_leaguepedia_partition_uses_verified_scoreboard_tournament() -> None:
+    maps = pd.DataFrame(
+        {
+            "game_uid": ["g1", "g2"],
+            "date": pd.to_datetime(["2026-01-01", "2026-01-02"], utc=True),
+            "y_blue_win": [1, 0],
+            "league": ["LEC", "LEC"],
+            "blue_teamid": ["Team A", "Team A"],
+            "red_teamid": ["Team B", "Team B"],
+            "tournament": [pd.NA, pd.NA],
+        }
+    )
+    frame = maps.copy()
+    frame["game_id"] = frame["game_uid"]
+    frame["target"] = frame["y_blue_win"]
+    binding = {
+        "source_receipt_sha256": "a" * 64,
+        "artifact_sha256": "b" * 64,
+        "crosswalk_sha256": "c" * 64,
+        "receipt_sha256": "d" * 64,
+        "assignment_sha256": "e" * 64,
+        "assignments": [
+            {
+                "oe_game_id": game_id,
+                "series_id": "series-1",
+                "normalized_team_set": ["team a", "team b"],
+                "scoreboard_tournament": "LEC 2026 Winter",
+            }
+            for game_id in ("g1", "g2")
+        ],
+        "series_membership": {
+            "series-1": {"oe_game_ids": ["g1", "g2"]},
+        },
+    }
+
+    partition = rating_module._apply_verified_leaguepedia_partition(
+        maps,
+        frame,
+        binding,
+        verified_source_receipt_sha256="a" * 64,
+    )
+
+    assert partition["tournament"].tolist() == [
+        "LEC 2026 Winter",
+        "LEC 2026 Winter",
+    ]
+    assert partition["series_id"].tolist() == [
+        "leaguepedia:series-1",
+        "leaguepedia:series-1",
+    ]
+
+    binding["assignments"][0]["scoreboard_tournament"] = None
+    with pytest.raises(FutureValueSourceError, match="tournament evidence"):
+        rating_module._apply_verified_leaguepedia_partition(
+            maps,
+            frame,
+            binding,
+            verified_source_receipt_sha256="a" * 64,
+        )
 
 
 def test_series_audit_rejects_mixed_partition_without_row_binding() -> None:
