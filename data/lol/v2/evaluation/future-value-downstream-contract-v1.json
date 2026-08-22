@@ -1,0 +1,113 @@
+{
+  "schema_version": "scryglass:future-value-downstream-contract:v1",
+  "status": "development_only",
+  "purpose": "Compare current and future-value candidate downstream artifacts before any integration decision.",
+  "required_source_fields": [
+    "source_as_of",
+    "source_game_count",
+    "source_identity_sha256"
+  ],
+  "required_source_receipt_fields": [
+    "schema_version",
+    "status",
+    "source_as_of",
+    "source_game_count",
+    "source_identity_sha256",
+    "accepted_game_ids",
+    "source_files",
+    "authority",
+    "receipt_sha256"
+  ],
+  "source_receipt_schema_version": "scryglass:future-value-rating-source:v1",
+  "source_receipt_status": "accepted_source_bound_development_only",
+  "canonical_source_receipt_file": "future-value-source-receipt.json",
+  "required_artifacts": [
+    {
+      "name": "player_ratings",
+      "path": "features/player_ratings_snapshot.json",
+      "glob": false,
+      "consumers": ["player_profiles", "player_leaderboards", "match_context"],
+      "identity_groups": [["player_id", "player", "id", "name"]],
+      "value_fields": ["mu_total", "mu_effective", "mu_regional", "mu_meta", "sigma", "rating_p10"]
+    },
+    {
+      "name": "team_ratings",
+      "path": "features/ratings_snapshot.json",
+      "glob": false,
+      "consumers": ["team_profiles", "team_leaderboards", "match_context"],
+      "identity_groups": [["team_key", "team_id", "team", "id", "name"]],
+      "value_fields": ["mu_total", "mu_effective", "mu_regional", "mu_meta", "sigma", "rating_p10"]
+    },
+    {
+      "name": "tierlists",
+      "path": "rankings/tierlists.json",
+      "glob": false,
+      "consumers": ["tier_list_explorer", "draft_context"],
+      "identity_groups": [
+        ["champion_id", "champion", "name", "id"],
+        ["role", "position"],
+        ["league", "scope", "competition_tier"],
+        ["patch"]
+      ],
+      "value_fields": ["rank", "score", "rating", "win_rate", "delta", "games"]
+    },
+    {
+      "name": "draft_score",
+      "path": "features/draft_records.json",
+      "glob": false,
+      "consumers": ["draft_score", "match_explorer", "support_chat"],
+      "identity_groups": [["game_uid", "game_id", "match_id", "id"]],
+      "value_fields": ["draft_edge", "base", "synergy", "counter", "same_role", "score"]
+    },
+    {
+      "name": "profiles",
+      "path": "features/profile_records.json",
+      "glob": false,
+      "consumers": ["player_profiles", "team_profiles", "match_explorer"],
+      "identity_groups": [["game_uid", "game_id", "match_id", "player_id", "player", "team_key", "team", "id", "name"]],
+      "value_fields": ["mu_total", "mu_effective", "future_value", "team_value", "sigma", "games", "n_maps"]
+    },
+    {
+      "name": "matches",
+      "path": "features/match_records_*.json",
+      "glob": true,
+      "consumers": ["match_explorer", "match_profile_api", "support_chat"],
+      "identity_groups": [["game_uid", "game_id", "match_id", "id"]],
+      "value_fields": ["future_team_value", "future_player_value", "draft_edge", "blue_result", "red_result"]
+    },
+    {
+      "name": "public_manifest",
+      "path": "manifest.json",
+      "glob": false,
+      "consumers": ["public_pack", "runtime_release", "web_manifest_gate"],
+      "identity_groups": [["pack_id", "release_id", "id"]],
+      "value_fields": ["source_game_count", "team_rating_rows", "player_rating_rows", "total_files", "total_bytes"]
+    }
+  ],
+  "required_evaluation_gates": [
+    "fitted_metric_weights",
+    "fold_internal_rank_3_atoms",
+    "chronological_whole_series",
+    "paired_current_ratings",
+    "calibration_and_proper_scores",
+    "regional_transfer",
+    "patch_transfer",
+    "roster_change_and_tournament_boundary",
+    "missingness_censoring_sparse_support",
+    "side_swap_invariance"
+  ],
+  "evaluation_schema_version": "scryglass:future-value-evaluation:v1",
+  "report_fields": ["source", "artifacts", "coverage", "deltas", "blockers", "authority"],
+  "authority": {
+    "public_player_rating": false,
+    "public_team_rating": false,
+    "public_probability": false,
+    "odds": false,
+    "expected_value": false,
+    "recommendation": false,
+    "betting": false,
+    "promotion": false,
+    "deployment": false
+  },
+  "claim_ceiling": "source-bound research comparison only; no public rating or prediction authority"
+}

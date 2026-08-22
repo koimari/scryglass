@@ -1,0 +1,57 @@
+{
+  "authority": {
+    "betting": false,
+    "deployment": false,
+    "expected_value": false,
+    "odds": false,
+    "promotion": false,
+    "public_probability": false,
+    "public_tierlist": false,
+    "recommendation": false,
+    "research_only": true
+  },
+  "baseline_candidate": {
+    "locator": "baseline/tierlists/champion-elo-candidate-v1.json",
+    "raw_sha256": "0bb561a050a05305e6e7e25f91be845ccdedc596e06dba959f61c134d4a99a3f"
+  },
+  "evaluations": {
+    "both": {
+      "locator": "both/model.json",
+      "raw_sha256": "878b8fcc997142afdd95b2fd49ab8961a6ecfc81e4a266d493de1e528f275bdc"
+    },
+    "current_only": {
+      "locator": "current_only/model.json",
+      "raw_sha256": "4319b88b6a3c77d5381ea0296bcf60a168f2eea36c80f0026d70a15e0f57489a"
+    },
+    "future_player_form": {
+      "locator": "future_player_form/model.json",
+      "raw_sha256": "3ca40f47b83dbada3a74cac5bba6504a4ba92a3c66632189a7f186aea089e8ba"
+    },
+    "scaling_curve": {
+      "locator": "scaling_curve/model.json",
+      "raw_sha256": "4667b330868bdefe12b298abac2903054b2b7f7984e955f533d3c1b677d1d331"
+    }
+  },
+  "schema_version": "scryglass:future-value-tierlist-freeze:v1",
+  "source": {
+    "maps_source_sha256": "a3eb81029e91379a9fd58799c2bea9564ed74623cff76096dcba0e578b3c2914",
+    "model_eligible_game_count": 16553,
+    "model_eligible_identity_sha256": "c2804529b489ea68a05aef4bdc594ba6babb97c32fa19e2b90a589fba693a044",
+    "meta_source_sha256": "0ff554bfb9fe18f5816e21c7d4a8541eae68b0567a929c44e2238c9d111e1c12",
+    "player_source_sha256": "c6be73305b09116a9dbd840153dc345b547842eed441b12c7bf749bfd2336297",
+    "source_as_of": "2026-08-20T14:51:29Z",
+    "source_game_count": 17764,
+    "source_identity_sha256": "591820cb87bcb847da449af11349c9f75f4993a9295998cd46db17e1535c5cfb",
+    "source_receipt_file_sha256": "b7576d625f0ec0856abf4a104b462d5fbb010e61f9268fd363d8fd7c6dbfe70d",
+    "source_receipt_sha256": "41325d71332147347bf915798cf6d6c9e8d0b3db1796487d84e167a1056a0212"
+  },
+  "status": "research_only",
+  "tier_assets": {
+    "data/lol/v2/champions/champion-id-crosswalk-v1.json": "8a57b26bd33d27e6a81393bdffc450db0adeb9e4a9d2ee221a8244e2f6452555",
+    "data/lol/v2/champions/lcc-atom-bridge-26.16.json": "bff75179d93a6c5d9bf4bc3927e1ca7b12f31335cef9249449f2595093ed1942",
+    "data/lol/v2/champions/lcc-atom-bridge-v1.json": "8240c5806497230d58db9198859d104691a2b440c4066a36e4ff8149bd0248ab",
+    "data/lol/v2/champions/oe-atom-patch-map-v1.json": "4860a3f3982561956ba8e6b80bc24af716da224638218b2c909274e543e9bcd7",
+    "data/lol/v2/champions/sources/riot-champion-metadata-16.14.1.json": "19717cae1dd13aa448c6be423723ee57d787b34161e843a82c9ca03100dc9220"
+  },
+  "trust_root_sha256": "eac48a544e17399fae9e197ab1c109f8a311a9c7aa24d860784d3129848bc3a1"
+}

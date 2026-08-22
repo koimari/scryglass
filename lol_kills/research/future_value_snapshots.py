@@ -1,0 +1,3001 @@
+"""Research-only as-of player and team value snapshots.
+
+This module consumes the future-value model contract.  It keeps the public
+rating and Tier List artifacts unchanged.
+
+The snapshot is valid only when a final model receipt binds the complete
+model-eligible census and the source-bound current-rating feature ledger.
+Fold models remain useful for research, but they cannot silently become a
+final snapshot model.  In that case this module writes a blocked receipt with
+the exact blockers and no invented values.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import json
+import math
+from pathlib import Path
+import re
+from typing import Any, Iterable, Mapping, Sequence
+
+import numpy as np
+import pandas as pd
+
+from lol_kills.research.future_value_rating import (
+    CURRENT_RATING_SIGNED_MAP_FEATURES,
+    FORM_METRICS,
+    MODEL_FIT_SCHEMA_VERSION,
+    RANK_3,
+    SCALING_CURVE_SIGNED_MAP_FEATURES,
+    TEAM_CONTEXT_FEATURES,
+    RatingVariant,
+    FutureValueFoldModel,
+    FutureValueSourceError,
+    Rank3AtomModel,
+    _canonical_json_bytes,
+    _frame_game_ids,
+    _role,
+    rating_feature_values_sha256,
+    _stable_identity,
+    _team_history_features,
+    _utc_text,
+    _utc_timestamp,
+    build_strict_prior_player_form,
+    validate_future_value_source_receipt_payload,
+)
+from lol_kills.research.future_value_uncertainty import (
+    FutureValueUncertaintyError,
+    apply_strict_prior_support_calibration,
+    verify_support_calibration_artifact,
+)
+
+
+SCHEMA_VERSION = "scryglass:future-value-snapshot:v1"
+SNAPSHOT_RECEIPT_SCHEMA_VERSION = "scryglass:future-value-snapshot-receipt:v1"
+SNAPSHOT_CAPABILITY_SCHEMA_VERSION = "scryglass:future-value-snapshot-capability:v1"
+SNAPSHOT_AUTHORITY = {
+    "research_only": True,
+    "public_player_rating": False,
+    "public_team_rating": False,
+    "public_probability": False,
+    "promotion": False,
+    "merge": False,
+    "deployment": False,
+    "odds": False,
+    "expected_value": False,
+    "recommendation": False,
+    "betting": False,
+}
+RANK_UNIVERSE = "common_verified_finite_ids"
+RANK_ELIGIBILITY_FILTER = "verified_nonempty_id_and_finite_value"
+RANK_DIRECTION = "descending_value_rank_1_highest"
+FULL_SNAPSHOT_RANK_STATUS = "incomparable"
+
+# The snapshot consumer has four named inputs.  The names match the rating
+# runner, but the snapshot contract gives each one a smaller, explicit claim
+# surface.  In particular, a player-form component is not a replacement for
+# the full current rating.
+SNAPSHOT_VARIANTS = tuple(value.value for value in RatingVariant)
+CURRENT_MU_EFFECTIVE_SCOPE = "current_mu_effective"
+FORM_COMPONENT_SCOPE = "future_player_form_component"
+SCALING_CONTEXT_SCOPE = "scaling_curve_contextual"
+SCALING_CONTEXT_BLOCKER = "scaling_context_required"
+SCALING_CONTEXT_FIELDS = (
+    "champions",
+    "lineup",
+    "opponent",
+    "side",
+)
+
+
+def _capability_matrix() -> dict[str, dict[str, Any]]:
+    """Return the closed capability matrix for the four snapshot variants."""
+
+    form_player = {
+        "status": "available",
+        "scope": FORM_COMPONENT_SCOPE,
+        "value_field": "future_player_form_component_logit",
+        "full_composite_rating": False,
+        "row_policy": "stable_id_sorted",
+    }
+    form_team = {
+        "status": "available",
+        "scope": FORM_COMPONENT_SCOPE,
+        "value_field": "future_team_form_component_logit",
+        "full_composite_rating": False,
+        "row_policy": "exact_five_stable_role_roster",
+    }
+    current_player = {
+        "status": "available",
+        "scope": CURRENT_MU_EFFECTIVE_SCOPE,
+        "value_field": "mu_effective",
+        "source": "verified_current_snapshot",
+        "row_policy": "stable_id_sorted",
+    }
+    current_team = {
+        "status": "available",
+        "scope": CURRENT_MU_EFFECTIVE_SCOPE,
+        "value_field": "mu_effective",
+        "source": "verified_current_snapshot",
+        "row_policy": "stable_id_sorted",
+    }
+    current_rank = {
+        "status": "available",
+        "scope": "self_diff",
+        "rank_universe": RANK_UNIVERSE,
+        "self_diff": "exact_zero",
+        "row_policy": "common_verified_finite_ids",
+    }
+    form_rank = {
+        "status": "available",
+        "scope": FORM_COMPONENT_SCOPE,
+        "rank_universe": RANK_UNIVERSE,
+        "row_policy": "common_verified_finite_ids",
+    }
+    scaling_rank = {
+        "status": "not_applicable",
+        "scope": SCALING_CONTEXT_SCOPE,
+        "rank_universe": RANK_UNIVERSE,
+        "row_policy": "no_rows",
+        "required_context": list(SCALING_CONTEXT_FIELDS),
+        "reason": "scaling depends on champions, lineup, opponent, and side",
+    }
+    omitted_scaling = dict(scaling_rank)
+    omitted_scaling.update(
+        {
+            "status": "omitted",
+            "blocker": SCALING_CONTEXT_BLOCKER,
+        }
+    )
+    return {
+        RatingVariant.CURRENT_ONLY.value: {
+            "label": "V1",
+            "player": current_player,
+            "team": current_team,
+            "player_ranks": current_rank,
+            "team_ranks": current_rank,
+            "scaling_context": scaling_rank,
+        },
+        RatingVariant.FUTURE_PLAYER_FORM.value: {
+            "label": "V2",
+            "player": form_player,
+            "team": form_team,
+            "player_ranks": form_rank,
+            "team_ranks": form_rank,
+            "scaling_context": scaling_rank,
+        },
+        RatingVariant.SCALING_CURVE.value: {
+            "label": "V3",
+            "player": scaling_rank,
+            "team": scaling_rank,
+            "player_ranks": scaling_rank,
+            "team_ranks": scaling_rank,
+            "scaling_context": scaling_rank,
+        },
+        RatingVariant.BOTH.value: {
+            "label": "V4",
+            "player": form_player,
+            "team": form_team,
+            "player_ranks": form_rank,
+            "team_ranks": form_rank,
+            "scaling_context": omitted_scaling,
+        },
+    }
+
+
+SNAPSHOT_CAPABILITY_MATRIX = _capability_matrix()
+
+
+def snapshot_capability_matrix() -> dict[str, dict[str, Any]]:
+    """Return a JSON-safe copy of the all-variant snapshot capability matrix."""
+
+    return json.loads(json.dumps(SNAPSHOT_CAPABILITY_MATRIX, sort_keys=True))
+
+
+def _snapshot_variant(value: RatingVariant | str | None) -> str:
+    if value is None:
+        return RatingVariant.FUTURE_PLAYER_FORM.value
+    try:
+        return RatingVariant(value).value
+    except (TypeError, ValueError) as error:
+        raise FutureValueSnapshotError(f"unknown snapshot variant: {value!r}") from error
+
+PLAYER_VALUE_FEATURE_PREFIXES = (
+    "player_form_",
+    "rank_3_player_atom_",
+    "rank_3_champion_role_atom_",
+)
+TEAM_CONTEXT_BINDING_SCHEMA_VERSION = "scryglass:future-value-team-context:v1"
+# These are the only team-context terms that this snapshot consumer can
+# interpret.  A final model receipt must list the terms that it fitted.  The
+# regional-transfer term is optional because older OE source frames do not
+# carry a verified region column.
+TEAM_CONTEXT_MODEL_FEATURES = frozenset(
+    {
+        "team_prior_win_diff",
+        "roster_continuity_diff",
+        "regional_transfer_diff",
+    }
+)
+TEAM_CONTEXT_SOURCE_FIELDS = {
+    "team_prior_win_diff": "prior_team_win",
+    "roster_continuity_diff": "roster_continuity",
+    "regional_transfer_diff": "regional_transfer",
+}
+QUALITY_FEATURES = frozenset(
+    {
+        "player_form_missing_rate",
+        "rank_3_atom_missing_rate",
+        "rank_3_champion_role_atom_missing_rate",
+        "player_form_support_mean",
+        "player_form_effective_support_mean",
+    }
+)
+TEAM_FEATURES = frozenset({"team_prior_win_diff", "roster_continuity_diff"})
+IGNORED_SNAPSHOT_FEATURES = frozenset(
+    {
+        *CURRENT_RATING_SIGNED_MAP_FEATURES,
+        *SCALING_CURVE_SIGNED_MAP_FEATURES,
+        *TEAM_CONTEXT_FEATURES,
+        *TEAM_CONTEXT_MODEL_FEATURES,
+        *TEAM_FEATURES,
+    }
+)
+
+# These blockers describe promotion evidence.  They do not prevent a valid,
+# source-bound research calculation.  Unknown blockers remain computation
+# blockers and stop the snapshot.
+PROMOTION_ONLY_BLOCKERS = frozenset(
+    {
+        "authoritative_series_id_missing_proxy_cluster_used",
+        "current_player_team_rating_comparison_missing",
+        "current_rating_player_team_identity_missing_for_rank_diffs",
+        "final_calibration_receipt_missing",
+        "final_fit_status_not_authorized",
+        "nested_inner_feature_ledger_missing_fixed_c_used",
+        "patch_transfer_sparse_validation_support",
+        "patch_transfer_unseen_training_group",
+        "phase_model_series_partition_non_comparable",
+        "regional_transfer_sparse_validation_support",
+        "regional_transfer_unseen_training_group",
+        "roster_change_labels_missing",
+        "support_uncertainty_proxy_not_calibrated",
+        "team_context_not_in_final_model",
+        "tournament_boundary_field_missing",
+        "tournament_boundary_slice_missing",
+    }
+)
+RESEARCH_FIT_STATUSES = frozenset(
+    {"research_only", "research_only_blocked", "research_only_partial"}
+)
+
+
+class FutureValueSnapshotError(FutureValueSourceError):
+    """The research snapshot cannot be built safely."""
+
+
+@dataclass(frozen=True)
+class FinalFitAuthorization:
+    """The result of the final-fit gate."""
+
+    status: str
+    blockers: tuple[str, ...]
+    model_receipt_sha256: str | None
+    source_receipt_sha256: str
+
+    @property
+    def authorized(self) -> bool:
+        return self.status == "authorized" and not self.blockers
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "authorized": self.authorized,
+            "blockers": list(self.blockers),
+            "model_receipt_sha256": self.model_receipt_sha256,
+            "source_receipt_sha256": self.source_receipt_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class FutureValueSnapshotResult:
+    """Research snapshot rows and their source-bound receipt."""
+
+    status: str
+    blockers: tuple[str, ...]
+    player_rows: tuple[Mapping[str, Any], ...]
+    team_rows: tuple[Mapping[str, Any], ...]
+    player_rank_diffs: tuple[Mapping[str, Any], ...]
+    team_rank_diffs: tuple[Mapping[str, Any], ...]
+    receipt: Mapping[str, Any]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "blockers": list(self.blockers),
+            "variant": self.receipt.get("variant"),
+            "player_rows": [dict(row) for row in self.player_rows],
+            "team_rows": [dict(row) for row in self.team_rows],
+            "player_rank_diffs": [dict(row) for row in self.player_rank_diffs],
+            "team_rank_diffs": [dict(row) for row in self.team_rank_diffs],
+            "capability": dict(self.receipt.get("capability") or {}),
+            "capabilities": dict(self.receipt.get("capabilities") or {}),
+            "receipt": dict(self.receipt),
+        }
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _finite(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _canonical_ids(values: Iterable[Any]) -> tuple[str, ...]:
+    output = tuple(sorted({str(value) for value in values if str(value).strip()}))
+    if not output:
+        raise FutureValueSnapshotError("snapshot identity set is empty")
+    return output
+
+
+def _receipt_hash(receipt: Mapping[str, Any]) -> str:
+    payload = dict(receipt)
+    claimed = payload.pop("receipt_sha256", None)
+    if not isinstance(claimed, str) or re.fullmatch(r"[0-9a-f]{64}", claimed, re.I) is None:
+        raise FutureValueSnapshotError("snapshot receipt hash is invalid")
+    if _sha256_bytes(_canonical_json_bytes(payload)) != claimed.lower():
+        raise FutureValueSnapshotError("snapshot receipt hash does not match payload")
+    return claimed.lower()
+
+
+def _source_binding(source_receipt: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        validate_future_value_source_receipt_payload(source_receipt)
+    except Exception as error:
+        raise FutureValueSnapshotError(f"source receipt failed validation: {error}") from error
+    return {
+        "source_as_of": str(source_receipt["source_as_of"]),
+        "source_game_count": int(source_receipt["source_game_count"]),
+        "source_identity_sha256": str(source_receipt["source_identity_sha256"]),
+        "model_eligible_game_count": int(source_receipt["model_eligible_game_count"]),
+        "model_eligible_identity_sha256": str(
+            source_receipt["model_eligible_identity_sha256"]
+        ),
+        "model_eligible_game_ids": list(source_receipt["model_eligible_game_ids"]),
+        "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
+    }
+
+
+def _model_receipt_from(model: Any, model_receipt: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    if model_receipt is not None:
+        return model_receipt
+    if model is None or not hasattr(model, "receipt"):
+        return None
+    value = model.receipt()
+    return value if isinstance(value, Mapping) else None
+
+
+def _validated_team_context_binding(
+    model: Any,
+    model_receipt: Mapping[str, Any] | None,
+    source: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Return a final-fit team-context contract after strict validation.
+
+    Player form and exact-five aggregation can be inspected from the source
+    rows.  Team-context coefficients require a separate receipt declaration.
+    This helper accepts only a declaration that is part of the bound final
+    model receipt, uses the same source census, and names model features that
+    exist in the loaded parameter vector.  A model that merely contains a
+    similarly named feature cannot clear the team-context gate.
+    """
+
+    if not isinstance(model_receipt, Mapping):
+        return None
+    binding: Mapping[str, Any] | None = None
+    for key in ("team_context_binding", "team_context"):
+        candidate = model_receipt.get(key)
+        if isinstance(candidate, Mapping):
+            binding = candidate
+            break
+    if binding is None:
+        for parent_key in ("form_contract", "fit_contract", "model_contract"):
+            parent = model_receipt.get(parent_key)
+            if isinstance(parent, Mapping) and isinstance(
+                parent.get("team_context"), Mapping
+            ):
+                binding = parent["team_context"]
+                break
+    if binding is None:
+        return None
+
+    payload = dict(binding)
+    claimed_hash = payload.pop("receipt_sha256", None)
+    if not isinstance(claimed_hash, str) or re.fullmatch(
+        r"[0-9a-f]{64}", claimed_hash, re.I
+    ) is None:
+        raise FutureValueSnapshotError("team-context receipt hash is missing")
+    if _sha256_bytes(_canonical_json_bytes(payload)) != claimed_hash.lower():
+        raise FutureValueSnapshotError("team-context receipt hash changed")
+    if payload.get("schema_version") != TEAM_CONTEXT_BINDING_SCHEMA_VERSION:
+        raise FutureValueSnapshotError("team-context receipt schema changed")
+    if payload.get("status") != "available":
+        raise FutureValueSnapshotError("team-context receipt is not available")
+    if payload.get("source_receipt_sha256") != source["source_receipt_sha256"]:
+        raise FutureValueSnapshotError("team-context source receipt changed")
+    if payload.get("source_identity_sha256") != source["source_identity_sha256"]:
+        raise FutureValueSnapshotError("team-context source identity changed")
+    if payload.get("strict_prior_timing") != "fit_rows_strictly_before_cutoff":
+        raise FutureValueSnapshotError("team-context strict-prior timing is invalid")
+    if payload.get("same_timestamp_policy") != "batch_exclude_same_timestamp":
+        raise FutureValueSnapshotError("team-context timestamp policy is invalid")
+    if payload.get("series_safety") != "whole_series_disjoint":
+        raise FutureValueSnapshotError("team-context series safety is invalid")
+
+    model_fit_end = str(model_receipt.get("fit_window_end") or "")
+    if not model_fit_end or str(payload.get("fit_window_end") or "") != model_fit_end:
+        raise FutureValueSnapshotError("team-context fit window changed")
+    declared_fit_ids = tuple(str(value) for value in payload.get("fit_game_ids") or ())
+    model_fit_ids = tuple(str(value) for value in model_receipt.get("fit_game_ids") or ())
+    if not declared_fit_ids or tuple(sorted(set(declared_fit_ids))) != tuple(
+        sorted(set(model_fit_ids))
+    ):
+        raise FutureValueSnapshotError("team-context fit game identity changed")
+
+    feature_names_raw = payload.get("feature_names")
+    if not isinstance(feature_names_raw, (list, tuple)) or not feature_names_raw:
+        raise FutureValueSnapshotError("team-context feature names are missing")
+    feature_names = tuple(str(value) for value in feature_names_raw)
+    if len(set(feature_names)) != len(feature_names) or not set(feature_names).issubset(
+        TEAM_CONTEXT_MODEL_FEATURES
+    ):
+        raise FutureValueSnapshotError("team-context feature names are invalid")
+    model_feature_names = tuple(str(value) for value in getattr(model, "feature_names", ()))
+    if not set(feature_names).issubset(model_feature_names):
+        raise FutureValueSnapshotError(
+            "team-context features are missing from final model parameters"
+        )
+
+    authority = payload.get("authority")
+    if authority is not None:
+        if not isinstance(authority, Mapping) or authority.get("research_only") is not True:
+            raise FutureValueSnapshotError("team-context authority is invalid")
+        if authority.get("public_team_rating") is not False:
+            raise FutureValueSnapshotError("team-context public authority is invalid")
+
+    regional_source: dict[str, Any] | None = None
+    if "regional_transfer_diff" in feature_names:
+        candidate = payload.get("regional_transfer_source")
+        if not isinstance(candidate, Mapping):
+            raise FutureValueSnapshotError(
+                "team-context regional-transfer source is missing"
+            )
+        player_column = str(candidate.get("player_region_column") or "").strip()
+        if not player_column or player_column.startswith("_"):
+            raise FutureValueSnapshotError(
+                "team-context regional-transfer source column is invalid"
+            )
+        regional_source = {
+            "player_region_column": player_column,
+            "team_region_column": str(candidate.get("team_region_column") or player_column),
+        }
+
+    result = dict(payload)
+    result["receipt_sha256"] = claimed_hash.lower()
+    result["feature_names"] = list(feature_names)
+    if regional_source is not None:
+        result["regional_transfer_source"] = regional_source
+    return result
+
+
+def _validate_model_object_binding(
+    model: Any,
+    model_receipt: Mapping[str, Any] | None,
+) -> None:
+    """Bind an explicitly supplied receipt to the supplied model object."""
+
+    if model is None or model_receipt is None:
+        return
+    claimed_hash = _receipt_hash(model_receipt)
+    loaded_receipt_hash = str(
+        getattr(model, "_bound_final_fit_receipt_sha256", "") or ""
+    ).lower()
+    if loaded_receipt_hash and loaded_receipt_hash != claimed_hash:
+        raise FutureValueSnapshotError(
+            "explicit model receipt does not bind loaded model artifact"
+        )
+    parameter_receipt = getattr(model, "parameter_receipt", None)
+    if callable(parameter_receipt):
+        parameters = parameter_receipt()
+        if not isinstance(parameters, Mapping):
+            raise FutureValueSnapshotError("explicit model parameters are invalid")
+        if str(parameters.get("parameter_sha256") or "").lower() != str(
+            model_receipt.get("parameter_sha256") or ""
+        ).lower():
+            raise FutureValueSnapshotError("explicit model receipt does not bind model parameters")
+    object_receipt = _model_receipt_from(model, None)
+    if object_receipt is None:
+        raise FutureValueSnapshotError("explicit model receipt does not bind model object")
+
+    def _contains_model_fields(
+        explicit: Mapping[str, Any],
+        object_value: Mapping[str, Any],
+        *,
+        root: bool = False,
+    ) -> bool:
+        for key, value in object_value.items():
+            if root and key == "receipt_sha256":
+                if value and str(value).lower() != claimed_hash:
+                    return False
+                continue
+            if key not in explicit:
+                return False
+            explicit_value = explicit[key]
+            if isinstance(value, Mapping):
+                if not isinstance(explicit_value, Mapping) or not _contains_model_fields(
+                    explicit_value, value, root=False
+                ):
+                    return False
+            elif explicit_value != value:
+                return False
+        return True
+
+    if not _contains_model_fields(model_receipt, object_receipt, root=True):
+        raise FutureValueSnapshotError(
+            "explicit model receipt does not bind model metadata"
+        )
+
+
+def _current_rating_feature_binding(
+    model_receipt: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Return the exact current-rating producer binding from a fit receipt.
+
+    New final-fit receipts keep the producer artifact binding separate from
+    the aggregate feature-ledger design binding.  Older research fixtures
+    stored the producer binding under ``feature_ledger_binding``.  An
+    explicitly present malformed current binding fails closed and does not
+    fall back to the legacy field.
+    """
+
+    if "current_rating_feature_binding" in model_receipt:
+        value = model_receipt.get("current_rating_feature_binding")
+        return value if isinstance(value, Mapping) else None
+    value = model_receipt.get("feature_ledger_binding")
+    return value if isinstance(value, Mapping) else None
+
+
+def load_final_fit_model(
+    model_artifact_path: Path,
+    model_receipt_path: Path,
+    *,
+    source_receipt: Mapping[str, Any],
+) -> tuple[FutureValueFoldModel, Mapping[str, Any]]:
+    """Load a JSON final-fit model after checking its receipt bindings.
+
+    The loader accepts only the model artifact emitted by the final-fit
+    benchmark.  It uses no pickle or executable model state.  A sibling
+    ``final-fit-run.json`` receives an additional byte and receipt check when
+    present.
+    """
+
+    artifact_path = Path(model_artifact_path)
+    receipt_path = Path(model_receipt_path)
+    for path, label in ((artifact_path, "model artifact"), (receipt_path, "model receipt")):
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueSnapshotError(f"{label} is missing or unsafe: {path}")
+    try:
+        receipt_value = json.loads(receipt_path.read_text(encoding="utf-8"))
+        artifact_value = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueSnapshotError("final-fit model JSON cannot be read") from error
+    if not isinstance(receipt_value, Mapping) or not isinstance(artifact_value, Mapping):
+        raise FutureValueSnapshotError("final-fit model JSON must contain objects")
+    receipt = dict(receipt_value)
+    try:
+        receipt_hash = _receipt_hash(receipt)
+    except FutureValueSnapshotError as error:
+        raise FutureValueSnapshotError("final-fit model receipt is invalid") from error
+    if artifact_value.get("receipt_sha256") != receipt_hash:
+        raise FutureValueSnapshotError("final-fit model artifact receipt binding changed")
+    if artifact_value.get("status") != receipt.get("status"):
+        raise FutureValueSnapshotError("final-fit model status binding changed")
+    code_binding = receipt.get("code_binding")
+    if not isinstance(code_binding, Mapping):
+        raise FutureValueSnapshotError("final-fit code binding is missing")
+    if str(code_binding.get("snapshot_producer_sha256") or "").lower() != _sha256_file(
+        Path(__file__)
+    ):
+        raise FutureValueSnapshotError("final-fit snapshot producer binding changed")
+    run_path = receipt_path.parent / "final-fit-run.json"
+    if run_path.is_file() and not run_path.is_symlink():
+        try:
+            run_value = json.loads(run_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise FutureValueSnapshotError("final-fit run receipt cannot be read") from error
+        if not isinstance(run_value, Mapping):
+            raise FutureValueSnapshotError("final-fit run receipt is invalid")
+        if run_value.get("model_receipt_sha256") != receipt_hash:
+            raise FutureValueSnapshotError("final-fit run receipt hash changed")
+        if run_value.get("model_artifact_sha256") != _sha256_file(artifact_path):
+            raise FutureValueSnapshotError("final-fit model artifact hash changed")
+    parameters = artifact_value.get("parameters")
+    if not isinstance(parameters, Mapping):
+        raise FutureValueSnapshotError("final-fit model parameters are missing")
+    parameter_payload = dict(parameters)
+    claimed_parameter_hash = parameter_payload.pop("parameter_sha256", None)
+    if not isinstance(claimed_parameter_hash, str) or _sha256_bytes(
+        _canonical_json_bytes(parameter_payload)
+    ) != claimed_parameter_hash:
+        raise FutureValueSnapshotError("final-fit model parameter hash changed")
+    if claimed_parameter_hash != receipt.get("parameter_sha256"):
+        raise FutureValueSnapshotError("final-fit parameter receipt binding changed")
+    feature_binding = _current_rating_feature_binding(receipt)
+    if not isinstance(feature_binding, Mapping):
+        raise FutureValueSnapshotError("final-fit current-rating feature binding is missing")
+    artifact_record = feature_binding.get("artifact")
+    producer_receipt_record = feature_binding.get("producer_receipt_file")
+    feature_names_binding = tuple(str(value) for value in feature_binding.get("feature_names") or ())
+    if (
+        not isinstance(artifact_record, Mapping)
+        or not isinstance(producer_receipt_record, Mapping)
+        or not feature_names_binding
+    ):
+        raise FutureValueSnapshotError("final-fit current-rating artifact binding is invalid")
+    producer_receipt_path = Path(str(producer_receipt_record.get("path") or ""))
+    if (
+        not producer_receipt_path.is_absolute()
+        or ".." in producer_receipt_path.parts
+        or producer_receipt_path.is_symlink()
+        or not producer_receipt_path.is_file()
+        or int(producer_receipt_record.get("bytes") or -1)
+        != producer_receipt_path.stat().st_size
+        or str(producer_receipt_record.get("sha256") or "").lower()
+        != _sha256_file(producer_receipt_path)
+    ):
+        raise FutureValueSnapshotError(
+            "final-fit current-rating receipt file binding changed"
+        )
+    try:
+        producer_receipt_value = json.loads(
+            producer_receipt_path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueSnapshotError(
+            "final-fit current-rating receipt cannot be loaded"
+        ) from error
+    if not isinstance(producer_receipt_value, Mapping):
+        raise FutureValueSnapshotError("final-fit current-rating receipt is invalid")
+    producer_payload = dict(producer_receipt_value)
+    producer_claimed_hash = str(producer_payload.pop("receipt_sha256", "")).lower()
+    if (
+        producer_claimed_hash
+        != str(feature_binding.get("producer_receipt_sha256") or "").lower()
+        or _sha256_bytes(_canonical_json_bytes(producer_payload))
+        != producer_claimed_hash
+    ):
+        raise FutureValueSnapshotError(
+            "final-fit current-rating receipt payload changed"
+        )
+    if str(producer_receipt_value.get("feature_value_digest") or "").lower() != str(
+        feature_binding.get("feature_value_digest") or ""
+    ).lower():
+        raise FutureValueSnapshotError(
+            "final-fit current-rating receipt feature digest changed"
+        )
+    feature_artifact_path = Path(str(artifact_record.get("path") or ""))
+    if (
+        not feature_artifact_path.is_absolute()
+        or ".." in feature_artifact_path.parts
+        or feature_artifact_path.is_symlink()
+        or not feature_artifact_path.is_file()
+        or int(artifact_record.get("bytes") or -1) != feature_artifact_path.stat().st_size
+        or str(artifact_record.get("sha256") or "").lower() != _sha256_file(feature_artifact_path)
+    ):
+        raise FutureValueSnapshotError("final-fit current-rating artifact binding changed")
+    try:
+        feature_frame = pd.read_parquet(feature_artifact_path)
+    except Exception as error:
+        raise FutureValueSnapshotError("final-fit current-rating artifact cannot be loaded") from error
+    required_feature_columns = {"game_id", "date", "series_id", *feature_names_binding}
+    if not required_feature_columns.issubset(feature_frame.columns):
+        raise FutureValueSnapshotError("final-fit current-rating artifact schema changed")
+    if rating_feature_values_sha256(feature_frame, feature_names_binding) != str(
+        feature_binding.get("feature_value_digest") or ""
+    ).lower():
+        raise FutureValueSnapshotError("final-fit current-rating feature values changed")
+    feature_names = tuple(str(value) for value in parameters.get("feature_names") or ())
+    if not feature_names or len(set(feature_names)) != len(feature_names):
+        raise FutureValueSnapshotError("final-fit model feature names are invalid")
+
+    def _parameter_vector(name: str) -> np.ndarray:
+        values = parameters.get(name)
+        if not isinstance(values, Mapping):
+            raise FutureValueSnapshotError(f"final-fit parameter vector is missing: {name}")
+        try:
+            vector = np.asarray([float(values[feature]) for feature in feature_names], dtype=float)
+        except (KeyError, TypeError, ValueError) as error:
+            raise FutureValueSnapshotError(f"final-fit parameter vector is invalid: {name}") from error
+        if not np.isfinite(vector).all():
+            raise FutureValueSnapshotError(f"final-fit parameter vector is non-finite: {name}")
+        return vector
+
+    rank_payload = parameters.get("rank_3")
+    if not isinstance(rank_payload, Mapping):
+        raise FutureValueSnapshotError("final-fit rank-3 parameters are missing")
+    try:
+        rank = int(rank_payload["rank"])
+        metric_names = tuple(str(value) for value in rank_payload["metric_names"])
+        center = np.asarray(rank_payload["center"], dtype=float)
+        scale = np.asarray(rank_payload["scale"], dtype=float)
+        components = np.asarray(rank_payload["components"], dtype=float)
+        coordinates = {
+            str(key): tuple(float(value) for value in values)
+            for key, values in dict(rank_payload["champion_role_coordinates"]).items()
+        }
+        support = {
+            str(key): int(value)
+            for key, value in dict(rank_payload["champion_role_support"]).items()
+        }
+        atom_fit_ids = tuple(str(value) for value in rank_payload["fit_game_ids"])
+        atom_fit_window_end = str(rank_payload["fit_window_end"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise FutureValueSnapshotError("final-fit rank-3 parameters are invalid") from error
+    if rank != RANK_3 or len(metric_names) != len(center) or len(center) != len(scale):
+        raise FutureValueSnapshotError("final-fit rank-3 dimensions are invalid")
+    if components.shape != (rank, len(metric_names)):
+        raise FutureValueSnapshotError("final-fit rank-3 component shape is invalid")
+    if not np.isfinite(center).all() or not np.isfinite(scale).all() or not np.isfinite(components).all():
+        raise FutureValueSnapshotError("final-fit rank-3 parameters are non-finite")
+    atom_parameter_payload = dict(rank_payload)
+    claimed_atom_hash = atom_parameter_payload.pop("parameter_sha256", None)
+    if not isinstance(claimed_atom_hash, str) or _sha256_bytes(
+        _canonical_json_bytes(atom_parameter_payload)
+    ) != claimed_atom_hash:
+        raise FutureValueSnapshotError("final-fit rank-3 parameter hash changed")
+    atom_model = Rank3AtomModel(
+        metric_names=metric_names,
+        rank=rank,
+        center=center,
+        scale=scale,
+        components=components,
+        champion_role_coordinates=coordinates,
+        champion_role_support=support,
+        fit_game_ids=atom_fit_ids,
+        fit_window_end=atom_fit_window_end,
+    )
+    try:
+        variant = RatingVariant(str(parameters["variant"]))
+        coefficients = np.asarray(
+            [float(dict(parameters["coefficients"])[feature]) for feature in feature_names],
+            dtype=float,
+        )
+        intercept = float(parameters.get("intercept", 0.0))
+    except (KeyError, TypeError, ValueError) as error:
+        raise FutureValueSnapshotError("final-fit model coefficients are invalid") from error
+    if not np.isfinite(coefficients).all() or not math.isfinite(intercept):
+        raise FutureValueSnapshotError("final-fit model coefficients are non-finite")
+    model = FutureValueFoldModel(
+        feature_names=feature_names,
+        means=_parameter_vector("feature_means"),
+        scales=_parameter_vector("feature_scales"),
+        imputation_values=_parameter_vector("fold_local_side_imputation"),
+        coefficients=coefficients,
+        intercept=intercept,
+        regularization_selection=dict(parameters.get("regularization_selection") or {}),
+        optimizer_evidence=dict(parameters.get("optimizer_evidence") or {}),
+        atom_model=atom_model,
+        fit_game_ids=tuple(str(value) for value in receipt.get("fit_game_ids") or ()),
+        fit_window_end=str(receipt.get("fit_window_end") or ""),
+        train_rows=int(receipt.get("train_rows") or 0),
+        withheld_rows=int(receipt.get("withheld_rows") or 0),
+        source_receipt=dict(source_receipt),
+        variant=variant,
+        feature_ledger_binding=dict(receipt.get("feature_ledger_binding") or {}),
+    )
+    object.__setattr__(model, "_bound_final_fit_receipt_sha256", receipt_hash)
+    object.__setattr__(
+        model,
+        "_bound_final_fit_artifact_sha256",
+        _sha256_file(artifact_path),
+    )
+    return model, receipt
+
+
+def authorize_final_fit(
+    model_receipt: Mapping[str, Any] | None,
+    source_receipt: Mapping[str, Any],
+    *,
+    require_complete_census: bool = True,
+) -> FinalFitAuthorization:
+    """Check whether a model receipt can produce an as-of snapshot.
+
+    The gate is intentionally stricter than the fold-evaluation gate.  A
+    fold receipt cannot be promoted to a final source snapshot by inference.
+    """
+
+    source = _source_binding(source_receipt)
+    blockers: set[str] = set()
+    if model_receipt is None:
+        blockers.add("final_fit_receipt_missing")
+        return FinalFitAuthorization(
+            "blocked", tuple(sorted(blockers)), None, source["source_receipt_sha256"]
+        )
+
+    try:
+        model_hash = _receipt_hash(model_receipt)
+    except FutureValueSnapshotError:
+        model_hash = None
+        blockers.add("final_fit_receipt_hash_invalid")
+
+    if model_receipt.get("schema_version") != MODEL_FIT_SCHEMA_VERSION:
+        blockers.add("final_fit_receipt_schema_invalid")
+    model_status = str(model_receipt.get("status") or "")
+    if model_status != "final_fit_authorized":
+        blockers.add("final_fit_status_not_authorized")
+        if model_status not in RESEARCH_FIT_STATUSES:
+            blockers.add("final_fit_status_invalid")
+    declared_blockers = model_receipt.get("blockers")
+    if declared_blockers is not None:
+        if not isinstance(declared_blockers, (list, tuple)):
+            blockers.add("final_fit_blocker_list_invalid")
+        else:
+            blockers.update(str(value) for value in declared_blockers)
+    variant = str(model_receipt.get("variant") or "")
+    if variant not in {RatingVariant.FUTURE_PLAYER_FORM.value, RatingVariant.BOTH.value}:
+        blockers.add("final_fit_variant_not_future_player_form")
+
+    source_binding = model_receipt.get("source_binding")
+    if not isinstance(source_binding, Mapping):
+        blockers.add("final_fit_source_binding_missing")
+    else:
+        if source_binding.get("source_receipt_sha256") != source["source_receipt_sha256"]:
+            blockers.add("final_fit_source_receipt_mismatch")
+        if source_binding.get("source_identity_sha256") != source["source_identity_sha256"]:
+            blockers.add("final_fit_source_identity_mismatch")
+        if source_binding.get("source_as_of") != source["source_as_of"]:
+            blockers.add("final_fit_source_as_of_mismatch")
+        if source_binding.get("model_eligible_identity_sha256") != source[
+            "model_eligible_identity_sha256"
+        ]:
+            blockers.add("final_fit_eligible_identity_mismatch")
+
+    eligible_ids = set(str(value) for value in source["model_eligible_game_ids"])
+    fit_ids = tuple(str(value) for value in model_receipt.get("fit_game_ids") or ())
+    if not fit_ids:
+        blockers.add("final_fit_game_ids_missing")
+    elif not set(fit_ids).issubset(eligible_ids):
+        blockers.add("final_fit_contains_game_outside_eligible_census")
+    elif require_complete_census and set(fit_ids) != eligible_ids:
+        blockers.add("final_fit_not_bound_to_complete_model_eligible_census")
+
+    fit_end_value = model_receipt.get("fit_window_end")
+    try:
+        fit_end = _utc_timestamp(fit_end_value, "fit_window_end")
+        source_end = _utc_timestamp(source["source_as_of"], "source_as_of")
+        if fit_end > source_end:
+            blockers.add("final_fit_window_after_source_as_of")
+    except FutureValueSourceError:
+        blockers.add("final_fit_window_end_invalid")
+
+    feature_binding = _current_rating_feature_binding(model_receipt)
+    if not isinstance(feature_binding, Mapping):
+        blockers.add("current_rating_feature_ledger_binding_missing")
+    else:
+        if feature_binding.get("source_receipt_sha256") != source[
+            "source_receipt_sha256"
+        ]:
+            blockers.add("current_rating_feature_source_receipt_mismatch")
+        if feature_binding.get("source_identity_sha256") != source[
+            "source_identity_sha256"
+        ]:
+            blockers.add("current_rating_feature_source_identity_mismatch")
+        if not feature_binding.get("producer_receipt_sha256"):
+            blockers.add("current_rating_feature_producer_receipt_missing")
+        producer_names = feature_binding.get("producer_names")
+        if producer_names is not None and "current_sequential_rating" not in set(
+            str(value) for value in producer_names
+        ):
+            blockers.add("current_rating_feature_producer_missing")
+
+    regularization = model_receipt.get("regularization_selection")
+    if isinstance(regularization, Mapping) and regularization.get("blockers"):
+        blockers.update(str(value) for value in regularization["blockers"])
+    elif not isinstance(regularization, Mapping):
+        blockers.add("final_fit_regularization_evidence_missing")
+
+    optimizer = model_receipt.get("optimizer_evidence")
+    if not isinstance(optimizer, Mapping) or optimizer.get("success") is not True:
+        blockers.add("final_fit_optimizer_not_verified")
+    if not isinstance(optimizer, Mapping) or optimizer.get("finite_coefficients") is not True:
+        blockers.add("final_fit_coefficients_not_verified")
+
+    rank_three = model_receipt.get("rank_3")
+    if not isinstance(rank_three, Mapping) or not rank_three.get("parameter_sha256"):
+        blockers.add("final_fit_rank_3_parameters_missing")
+
+    return FinalFitAuthorization(
+        "authorized" if not blockers else "blocked",
+        tuple(sorted(blockers)),
+        model_hash,
+        source["source_receipt_sha256"],
+    )
+
+
+def _computation_blockers(
+    authorization: FinalFitAuthorization,
+) -> tuple[str, ...]:
+    """Return blockers that prevent a source-bound research calculation."""
+
+    return tuple(
+        sorted(
+            blocker
+            for blocker in authorization.blockers
+            if blocker not in PROMOTION_ONLY_BLOCKERS
+        )
+    )
+
+
+def _normalise_source_frames(
+    maps: pd.DataFrame,
+    players: pd.DataFrame,
+    teams: pd.DataFrame,
+    source_receipt: Mapping[str, Any],
+    as_of: Any | None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Timestamp]:
+    source = _source_binding(source_receipt)
+    cutoff = _utc_timestamp(as_of or source["source_as_of"], "snapshot_as_of")
+    eligible = set(str(value) for value in source["model_eligible_game_ids"])
+
+    map_frame = maps.copy()
+    if "date" not in map_frame.columns or "y_blue_win" not in map_frame.columns:
+        raise FutureValueSnapshotError("snapshot maps require date and y_blue_win")
+    map_frame["game_id"] = _frame_game_ids(map_frame, "maps").astype(str)
+    map_frame["date"] = pd.to_datetime(map_frame.get("date"), utc=True, errors="coerce")
+    map_frame["target"] = pd.to_numeric(map_frame.get("y_blue_win"), errors="coerce")
+    if map_frame["game_id"].duplicated().any() or map_frame["date"].isna().any():
+        raise FutureValueSnapshotError("snapshot maps have invalid identity or date")
+    if map_frame["date"].gt(cutoff).any():
+        raise FutureValueSnapshotError("snapshot maps contain rows after as_of")
+    map_frame = map_frame[map_frame["game_id"].isin(eligible)].copy()
+    if set(map_frame["game_id"]) != eligible:
+        raise FutureValueSnapshotError("snapshot maps do not match the eligible census")
+    if not map_frame["target"].isin({0, 1}).all():
+        raise FutureValueSnapshotError("snapshot maps contain an invalid result")
+
+    player_frame = players.copy()
+    player_frame["game_id"] = _frame_game_ids(player_frame, "players").astype(str)
+    team_frame = teams.copy()
+    team_frame["game_id"] = _frame_game_ids(team_frame, "teams").astype(str)
+    for frame, label in ((player_frame, "players"), (team_frame, "teams")):
+        frame.drop(frame.index[~frame["game_id"].isin(eligible)], inplace=True)
+        if "date" in frame:
+            frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+            if frame["date"].isna().any() or frame["date"].gt(cutoff).any():
+                raise FutureValueSnapshotError(f"snapshot {label} has invalid or future dates")
+            map_dates = map_frame.set_index("game_id")["date"]
+            expected_dates = frame["game_id"].map(map_dates)
+            if expected_dates.isna().any() or ~frame["date"].eq(expected_dates).all():
+                raise FutureValueSnapshotError(
+                    f"snapshot {label} duplicate or dates do not match source map dates"
+                )
+
+    player_required = {"playerid", "teamid", "playername", "side", "position", "champion"}
+    if not player_required.issubset(player_frame.columns):
+        raise FutureValueSnapshotError(
+            "snapshot players are missing: " + ", ".join(sorted(player_required - set(player_frame.columns)))
+        )
+    if not player_frame["playerid"].map(lambda value: _stable_identity(value, "oe:player:")).all():
+        raise FutureValueSnapshotError("snapshot players have unstable player identity")
+    if not player_frame["teamid"].map(lambda value: _stable_identity(value, "oe:team:")).all():
+        raise FutureValueSnapshotError("snapshot players have unstable team identity")
+    player_frame["player_id"] = player_frame["playerid"].astype(str)
+    player_frame["team_id"] = player_frame["teamid"].astype(str)
+    player_frame["side"] = player_frame["side"].map(lambda value: str(value).strip().casefold())
+    player_frame["role"] = player_frame["position"].map(_role)
+    if player_frame[["side", "role"]].isna().any().any() or not player_frame["side"].isin({"blue", "red"}).all():
+        raise FutureValueSnapshotError("snapshot players have an unknown side or role")
+    counts = player_frame.groupby("game_id", sort=False).size()
+    if not counts.eq(10).all() or set(counts.index) != eligible:
+        raise FutureValueSnapshotError("snapshot players require ten rows per eligible map")
+    slots = player_frame.groupby(["game_id", "side"], sort=False)["role"].agg(
+        lambda values: tuple(sorted(values))
+    )
+    expected_roles = tuple(sorted(("top", "jungle", "mid", "bot", "support")))
+    if not slots.map(lambda value: value == expected_roles).all():
+        raise FutureValueSnapshotError("snapshot players require exact five unique roles per side")
+    if player_frame.duplicated(["game_id", "player_id"]).any():
+        raise FutureValueSnapshotError("snapshot players contain duplicate player identities")
+
+    if "side" not in team_frame.columns or "teamid" not in team_frame.columns:
+        raise FutureValueSnapshotError("snapshot teams require side and teamid")
+    team_frame["side"] = team_frame["side"].map(lambda value: str(value).strip().casefold())
+    if not team_frame["side"].isin({"blue", "red"}).all():
+        raise FutureValueSnapshotError("snapshot teams have an unknown side")
+    team_counts = team_frame.groupby("game_id", sort=False).size()
+    if not team_counts.eq(2).all() or set(team_counts.index) != eligible:
+        raise FutureValueSnapshotError("snapshot teams require two rows per eligible map")
+    if not team_frame["teamid"].map(
+        lambda value: _stable_identity(value, "oe:team:")
+    ).all():
+        raise FutureValueSnapshotError("snapshot team rows have unstable team identity")
+    if team_frame.duplicated(["game_id", "side"]).any():
+        raise FutureValueSnapshotError("snapshot teams contain duplicate sides")
+    player_team_by_side = (
+        player_frame.groupby(["game_id", "side"], sort=False)["team_id"]
+        .agg(lambda values: tuple(sorted(set(values))))
+    )
+    team_team_by_side = team_frame.set_index(["game_id", "side"])["teamid"].astype(str)
+    for key, team_ids in player_team_by_side.items():
+        if len(team_ids) != 1 or team_team_by_side.get(key) != team_ids[0]:
+            raise FutureValueSnapshotError("snapshot player and team identities do not match")
+
+    return map_frame, player_frame, team_frame, cutoff
+
+
+def _latest_player_form(
+    maps: pd.DataFrame,
+    players: pd.DataFrame,
+    *,
+    baseline_cache: Any | None = None,
+    context_columns: Sequence[str] = (),
+) -> pd.DataFrame:
+    """Build strict-prior form and select one unambiguous row per player."""
+
+    strict = build_strict_prior_player_form(
+        maps,
+        players,
+        baseline_cache=baseline_cache,
+    )
+    identity_columns = [
+        "game_id",
+        "player_id",
+        "team_id",
+        "playername",
+        "champion",
+    ]
+    # Preserve source-bound context columns for the optional regional
+    # transfer component.  These columns remain descriptive metadata.  The
+    # strict-prior values still come only from ``strict``.
+    for column in (
+        "region",
+        "region_id",
+        "league",
+        "competition_scope",
+        "tournament",
+        *tuple(str(value) for value in context_columns),
+    ):
+        if column in players.columns and column not in identity_columns:
+            identity_columns.append(column)
+    identity = players[identity_columns].copy()
+    identity["role"] = players["role"]
+    identity["side"] = players["side"]
+    identity["date"] = players["date"]
+    identity = identity.drop_duplicates(
+        ["game_id", "player_id", "role", "side"], keep=False
+    )
+    if identity.empty:
+        raise FutureValueSnapshotError("snapshot player identity rows are ambiguous")
+    strict["game_id"] = strict["game_id"].astype(str)
+    strict["player_id"] = strict["player_id"].astype(str)
+    strict["side"] = strict["side"].astype(str).str.casefold()
+    strict["role"] = strict["role"].map(_role)
+    strict["date"] = pd.to_datetime(strict["date"], utc=True, errors="coerce")
+    joined = strict.merge(
+        identity,
+        on=["game_id", "player_id", "role", "side"],
+        how="left",
+        validate="one_to_one",
+        suffixes=("", "_source"),
+    )
+    if joined[["team_id", "champion", "playername"]].isna().any().any():
+        raise FutureValueSnapshotError("strict-prior form lost player identity")
+    if joined["date_source"].isna().any():
+        raise FutureValueSnapshotError("strict-prior form date is missing")
+    joined["date"] = pd.to_datetime(joined["date_source"], utc=True, errors="coerce")
+    return joined.drop(columns=["date_source"])
+
+
+def _latest_rows(form: pd.DataFrame, *, key: str, label: str) -> pd.DataFrame:
+    ordered = form.sort_values([key, "date", "game_id"], kind="stable")
+    last_dates = ordered.groupby(key, sort=False)["date"].transform("max")
+    latest = ordered[ordered["date"].eq(last_dates)].copy()
+    if latest.duplicated(key).any():
+        duplicates = sorted(set(latest.loc[latest.duplicated(key, keep=False), key].astype(str)))
+        raise FutureValueSnapshotError(
+            f"{label} has ambiguous latest timestamp rows: {', '.join(duplicates[:5])}"
+        )
+    return latest
+
+
+def _latest_team_roster(form: pd.DataFrame) -> pd.DataFrame:
+    """Select one exact five-player roster for each current team."""
+
+    ordered = form.sort_values(["team_id", "date", "game_id", "role", "player_id"], kind="stable")
+    last_dates = ordered.groupby("team_id", sort=False)["date"].transform("max")
+    latest = ordered[ordered["date"].eq(last_dates)].copy()
+    if latest.empty:
+        raise FutureValueSnapshotError("current team roster is empty")
+    for team_id, group in latest.groupby("team_id", sort=False):
+        if group[["game_id", "side"]].drop_duplicates().shape[0] != 1:
+            raise FutureValueSnapshotError(
+                f"team has ambiguous latest roster context: {team_id}"
+            )
+        if len(group) != 5 or group["player_id"].nunique() != 5:
+            raise FutureValueSnapshotError(
+                f"team requires exactly five current-roster players: {team_id}"
+            )
+        if set(group["role"].astype(str)) != {
+            "top",
+            "jungle",
+            "mid",
+            "bot",
+            "support",
+        }:
+            raise FutureValueSnapshotError(
+                f"team requires five current-roster roles: {team_id}"
+            )
+    return latest
+
+
+def _regional_transfer_by_team(
+    form: pd.DataFrame,
+    latest_roster: pd.DataFrame,
+    *,
+    region_column: str,
+) -> pd.DataFrame:
+    """Compute a strictly-prior regional transfer rate for each roster.
+
+    A player counts as transferred when the latest prior row with a finite
+    region belongs to a different region than the current roster row.  Rows
+    at the current timestamp are excluded.  An absent prior region remains
+    missing, so the team value can report its support accurately.
+    """
+
+    if region_column not in form.columns or region_column not in latest_roster.columns:
+        raise FutureValueSnapshotError(
+            f"regional-transfer source column is missing: {region_column}"
+        )
+    history = form[["player_id", "date", region_column]].copy()
+    history["player_id"] = history["player_id"].astype(str)
+    history["date"] = pd.to_datetime(history["date"], utc=True, errors="coerce")
+    if history["date"].isna().any():
+        raise FutureValueSnapshotError("regional-transfer history has an invalid date")
+    history["_region"] = history[region_column].astype("string").str.strip().str.casefold()
+    history.loc[history["_region"].isin({"", "<na>", "nan", "none"}), "_region"] = pd.NA
+    current = latest_roster[
+        ["team_id", "player_id", "date", region_column]
+    ].copy()
+    current["player_id"] = current["player_id"].astype(str)
+    current["date"] = pd.to_datetime(current["date"], utc=True, errors="coerce")
+    current["_current_region"] = (
+        current[region_column].astype("string").str.strip().str.casefold()
+    )
+    current.loc[
+        current["_current_region"].isin({"", "<na>", "nan", "none"}),
+        "_current_region",
+    ] = pd.NA
+    transfer = np.full(len(current), np.nan, dtype=float)
+    support = np.zeros(len(current), dtype=int)
+    for position, (_, row) in enumerate(current.iterrows()):
+        current_region = row["_current_region"]
+        if pd.isna(current_region):
+            continue
+        prior = history[
+            history["player_id"].eq(str(row["player_id"]))
+            & history["date"].lt(pd.Timestamp(row["date"]))
+            & history["_region"].notna()
+        ].sort_values(["date"], kind="stable")
+        if prior.empty:
+            continue
+        latest_date = prior["date"].max()
+        latest_prior = prior[prior["date"].eq(latest_date)]
+        prior_regions = set(latest_prior["_region"].astype(str))
+        if len(prior_regions) != 1:
+            raise FutureValueSnapshotError(
+                f"regional-transfer history is ambiguous for player {row['player_id']}"
+            )
+        transfer[position] = float(next(iter(prior_regions)) != str(current_region))
+        support[position] = int(len(prior))
+    current["regional_transfer"] = transfer
+    current["regional_transfer_support"] = support
+    grouped = current.groupby("team_id", sort=False, observed=True)
+    result = grouped["regional_transfer"].mean().to_frame()
+    result["regional_transfer_support"] = grouped["regional_transfer_support"].sum()
+    result["regional_transfer_coverage"] = grouped["regional_transfer"].count()
+    if result.index.duplicated().any():
+        raise FutureValueSnapshotError("regional-transfer team rows are ambiguous")
+    return result.reset_index()
+
+
+def _feature_column(feature: str) -> str | None:
+    if feature in QUALITY_FEATURES:
+        return feature
+    if feature.startswith("player_form_"):
+        return "prior_form_" + feature.removeprefix("player_form_")
+    if feature.startswith("rank_3_"):
+        return feature
+    return None
+
+
+def _player_contributions(
+    model: Any,
+    form: pd.DataFrame,
+    *,
+    support_source_frame: pd.DataFrame | None = None,
+    support_calibration: Mapping[str, Any] | None = None,
+    support_calibration_fold_id: Any | None = None,
+) -> pd.DataFrame:
+    if not hasattr(model, "atom_model"):
+        raise FutureValueSnapshotError("final model has no rank-3 atom model")
+    atoms = model.atom_model.transform(form)
+    work = pd.concat([form.reset_index(drop=True), atoms.reset_index(drop=True)], axis=1)
+    atom_player_available = atoms["rank_3_player_atom_available"].astype(bool)
+    atom_champion_available = atoms["rank_3_champion_role_atom_available"].astype(bool)
+    # ``form`` can retain the source frame's row labels after the latest-row
+    # selection.  ``work`` has a fresh range index, so assign atom flags by
+    # position.  Label-aligned assignment would turn almost every valid atom
+    # into NaN and mark the player as missing.
+    work["rank_3_atom_missing_rate"] = (
+        ~atom_player_available.to_numpy()
+    ).astype(float)
+    work["rank_3_champion_role_atom_missing_rate"] = (
+        ~atom_champion_available.to_numpy()
+    ).astype(float)
+    support_columns = [f"prior_form_{metric}_support" for metric in FORM_METRICS]
+    effective_columns = [f"prior_form_{metric}_effective_support" for metric in FORM_METRICS]
+    if not set(support_columns).issubset(work.columns):
+        raise FutureValueSnapshotError("final model form support columns are missing")
+    support = work[support_columns].apply(pd.to_numeric, errors="coerce")
+    effective_source = effective_columns if set(effective_columns).issubset(work.columns) else support_columns
+    effective = work[effective_source].apply(pd.to_numeric, errors="coerce")
+    work["player_form_missing_rate"] = work[
+        [f"prior_form_{metric}" for metric in FORM_METRICS]
+    ].apply(pd.to_numeric, errors="coerce").isna().mean(axis=1)
+    work["player_form_support_mean"] = support.mean(axis=1, skipna=True)
+    work["player_form_effective_support_mean"] = effective.mean(axis=1, skipna=True)
+    feature_names = tuple(str(value) for value in model.feature_names)
+    scales = np.asarray(model.scales, dtype=float)
+    coefficients = np.asarray(model.coefficients, dtype=float)
+    imputation = np.asarray(model.imputation_values, dtype=float)
+    if len(feature_names) != len(scales) or len(scales) != len(coefficients) or len(scales) != len(imputation):
+        raise FutureValueSnapshotError("final model parameter dimensions are invalid")
+    if not np.isfinite(scales).all() or not np.isfinite(coefficients).all() or not np.isfinite(imputation).all():
+        raise FutureValueSnapshotError("final model parameters are non-finite")
+    output = work[["game_id", "player_id", "team_id", "playername", "champion", "role", "side", "date"]].copy()
+    output["role_normalized_form_logit"] = 0.0
+    output["rank_3_player_atom_logit"] = 0.0
+    output["champion_role_atom_logit"] = 0.0
+    output["data_quality_logit"] = 0.0
+    for atom_index in range(1, RANK_3 + 1):
+        output[f"rank_3_player_atom_{atom_index}_logit"] = 0.0
+        output[f"rank_3_champion_role_atom_{atom_index}_logit"] = 0.0
+    output["model_feature_missing"] = False
+    for index, feature in enumerate(feature_names):
+        column = _feature_column(feature)
+        if column is None:
+            if feature not in IGNORED_SNAPSHOT_FEATURES:
+                raise FutureValueSnapshotError(f"final model feature is unsupported: {feature}")
+            continue
+        if column not in work.columns:
+            raise FutureValueSnapshotError(f"final model feature is missing from form: {column}")
+        values = pd.to_numeric(work[column], errors="coerce").to_numpy(dtype=float)
+        missing = ~np.isfinite(values)
+        values = np.where(missing, imputation[index], values)
+        contribution = values / scales[index] * coefficients[index]
+        if not np.isfinite(contribution).all():
+            raise FutureValueSnapshotError(f"final model contribution is non-finite: {feature}")
+        output["model_feature_missing"] |= missing
+        if feature.startswith("player_form_"):
+            output["role_normalized_form_logit"] += contribution
+        elif feature.startswith("rank_3_player_atom_"):
+            output["rank_3_player_atom_logit"] += contribution
+            atom_index = feature.removeprefix("rank_3_player_atom_")
+            if atom_index in {"1", "2", "3"}:
+                output[f"rank_3_player_atom_{atom_index}_logit"] += contribution
+        elif feature.startswith("rank_3_champion_role_atom_"):
+            output["champion_role_atom_logit"] += contribution
+            atom_index = feature.removeprefix("rank_3_champion_role_atom_")
+            if atom_index in {"1", "2", "3"}:
+                output[f"rank_3_champion_role_atom_{atom_index}_logit"] += contribution
+        elif feature in QUALITY_FEATURES:
+            output["data_quality_logit"] += contribution
+    output["role_normalized_player_value_logit"] = (
+        output["role_normalized_form_logit"]
+        + output["rank_3_player_atom_logit"]
+        + output["data_quality_logit"]
+    )
+    output["future_player_value_with_champion_logit"] = (
+        output["role_normalized_player_value_logit"]
+        + output["champion_role_atom_logit"]
+    )
+    output["minimum_metric_support"] = support.min(axis=1, skipna=True).fillna(0.0)
+    output["minimum_effective_support"] = effective.min(axis=1, skipna=True).fillna(0.0)
+    output["form_missing_rate"] = work["player_form_missing_rate"]
+    output["rank_3_champion_role_atom_support"] = pd.to_numeric(
+        work.get("rank_3_champion_role_support", 0), errors="coerce"
+    ).fillna(0).astype(int)
+    output["uncertainty_proxy_raw"] = 1.0 / np.sqrt(1.0 + output["minimum_effective_support"])
+    output["uncertainty_proxy"] = output["uncertainty_proxy_raw"]
+    output["uncertainty_proxy_calibrated"] = np.nan
+    output["support_uncertainty_status"] = "not_calibrated"
+    if support_calibration is not None:
+        if support_calibration_fold_id is None:
+            raise FutureValueSnapshotError(
+                "support calibration fold ID is required for snapshot application"
+            )
+        try:
+            calibrated = apply_strict_prior_support_calibration(
+                support_calibration,
+                output["minimum_effective_support"],
+                fold_id=support_calibration_fold_id,
+                source_frame=(
+                    support_source_frame
+                    if support_source_frame is not None
+                    else pd.DataFrame()
+                ),
+            )
+        except FutureValueUncertaintyError as error:
+            raise FutureValueSnapshotError(
+                f"support calibration cannot be applied: {error}"
+            ) from error
+        output["uncertainty_proxy_calibrated"] = calibrated.to_numpy(dtype=float)
+        output["uncertainty_proxy"] = output["uncertainty_proxy_calibrated"]
+        output["support_uncertainty_status"] = "calibrated_strict_prior"
+    output["support_status"] = np.select(
+        [
+            output["model_feature_missing"],
+            output["minimum_effective_support"].lt(5.0)
+            | output["rank_3_champion_role_atom_support"].lt(1),
+        ],
+        ["missing_features", "sparse"],
+        default="adequate",
+    )
+    output["champion_dependent_status"] = np.where(
+        work["champion"].notna() & work["role"].notna(), "available", "missing"
+    )
+    return output
+
+
+def _json_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    output: dict[str, Any] = {}
+    for key, value in row.items():
+        if isinstance(value, (np.generic,)):
+            value = value.item()
+        if value is pd.NA:
+            value = None
+        if isinstance(value, pd.Timestamp):
+            value = _utc_text(value)
+        if isinstance(value, float) and not math.isfinite(value):
+            value = None
+        output[str(key)] = value
+    return output
+
+
+def _capability_for_variant(variant: RatingVariant | str) -> dict[str, Any]:
+    name = _snapshot_variant(variant)
+    return snapshot_capability_matrix()[name]
+
+
+def _current_rating_frame(
+    frame: pd.DataFrame | None,
+    *,
+    kind: str,
+) -> pd.DataFrame:
+    """Keep only finite, stable-ID rows from an independently verified table.
+
+    The command-line builder verifies the parquet bytes and receipt before it
+    calls this function.  This second check keeps the Python API fail-closed
+    when callers pass frames directly.
+    """
+
+    if kind == "player":
+        identity = "player_id"
+        required = {"player_id", "mu_effective"}
+        prefix = "oe:player:"
+    elif kind == "team":
+        identity = "team_id"
+        required = {"team_id", "mu_effective"}
+        prefix = "oe:team:"
+    else:
+        raise FutureValueSnapshotError(f"unknown current rating kind: {kind}")
+    if frame is None or not isinstance(frame, pd.DataFrame):
+        raise FutureValueSnapshotError(f"current {kind} rating snapshot is missing")
+    if not required.issubset(frame.columns):
+        raise FutureValueSnapshotError(
+            f"current {kind} rating snapshot requires {sorted(required)}"
+        )
+    work = frame.copy()
+    work[identity] = work[identity].astype("string")
+    verified = work[identity].notna() & work[identity].str.strip().ne("")
+    if not work.loc[verified, identity].map(
+        lambda value: _stable_identity(value, prefix)
+    ).all():
+        raise FutureValueSnapshotError(f"current {kind} rating snapshot has unstable IDs")
+    if kind == "player" and "team_id" in work.columns:
+        team_ids = work["team_id"].astype("string")
+        team_present = team_ids.notna() & team_ids.str.strip().ne("")
+        if not team_ids[team_present].map(
+            lambda value: _stable_identity(value, "oe:team:")
+        ).all():
+            raise FutureValueSnapshotError(
+                "current player rating snapshot has unstable team IDs"
+            )
+    work["mu_effective"] = pd.to_numeric(work["mu_effective"], errors="coerce")
+    finite = work["mu_effective"].map(lambda value: _finite(value) is not None)
+    work = work.loc[verified & finite].copy()
+    if work[identity].duplicated().any():
+        raise FutureValueSnapshotError(
+            f"current {kind} rating snapshot has duplicate verified IDs"
+        )
+    if work.empty:
+        raise FutureValueSnapshotError(
+            f"current {kind} rating snapshot has no verified finite rows"
+        )
+    work[identity] = work[identity].astype(str)
+    work = work.sort_values(identity, kind="mergesort").reset_index(drop=True)
+    return work
+
+
+def _validate_current_rating_input_binding(
+    binding: Mapping[str, Any] | None,
+    source: Mapping[str, Any],
+) -> None:
+    """Check source fields when a current snapshot binding is supplied."""
+
+    if binding is None:
+        return
+    if not isinstance(binding, Mapping):
+        raise FutureValueSnapshotError("current rating input binding is invalid")
+    expected = {
+        "source_receipt_sha256": source["source_receipt_sha256"],
+        "source_identity_sha256": source["source_identity_sha256"],
+        "source_as_of": source["source_as_of"],
+        "source_game_count": source["source_game_count"],
+    }
+    for key, expected_value in expected.items():
+        if key in binding and binding.get(key) != expected_value:
+            raise FutureValueSnapshotError(
+                f"current rating input {key} changed"
+            )
+
+
+def _current_snapshot_rows(
+    frame: pd.DataFrame,
+    *,
+    kind: str,
+) -> list[dict[str, Any]]:
+    identity = "player_id" if kind == "player" else "team_id"
+    name_column = "player" if kind == "player" else "team"
+    rows: list[dict[str, Any]] = []
+    for raw in frame.to_dict("records"):
+        identity_value = str(raw[identity])
+        value = float(raw["mu_effective"])
+        name = raw.get(name_column)
+        if name is None:
+            name = identity_value
+        row = {
+            identity: identity_value,
+            name_column: str(name),
+            "mu_effective": value,
+            "current_mu_effective": value,
+            "rating_scope": CURRENT_MU_EFFECTIVE_SCOPE,
+            "component_scope": CURRENT_MU_EFFECTIVE_SCOPE,
+            "value_field": "mu_effective",
+            "full_composite_rating": True,
+            "status": "research_only",
+            "blockers": [],
+            "rank_join_status": "pending",
+        }
+        if kind == "player":
+            raw_team_id = raw.get("team_id")
+            row["team_id"] = (
+                str(raw_team_id)
+                if raw_team_id is not None
+                and raw_team_id is not pd.NA
+                and _stable_identity(raw_team_id, "oe:team:")
+                else None
+            )
+        rows.append(_json_row(row))
+    return rows
+
+
+def _current_self_rank_diffs(
+    rows: Sequence[Mapping[str, Any]],
+    current: pd.DataFrame,
+    *,
+    identity: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    diffs, blockers, coverage, _assignments = _rank_diffs(
+        rows,
+        current,
+        identity=identity,
+        future_value="mu_effective",
+        current_value_candidates=("mu_effective",),
+    )
+    if blockers:
+        raise FutureValueSnapshotError(
+            "current-only self-diff cannot join verified current rows: "
+            + ", ".join(blockers)
+        )
+    if any(int(row["rank_delta"]) != 0 for row in diffs):
+        raise FutureValueSnapshotError("current-only self-diff is not exactly zero")
+    for row in diffs:
+        row.update(
+            {
+                "variant": RatingVariant.CURRENT_ONLY.value,
+                "rating_scope": CURRENT_MU_EFFECTIVE_SCOPE,
+                "component_scope": CURRENT_MU_EFFECTIVE_SCOPE,
+                "value_field": "mu_effective",
+                "self_diff": "exact_zero",
+                "full_composite_rating": True,
+                "full_snapshot_rank_status": "comparable",
+            }
+        )
+    coverage = dict(coverage)
+    coverage.update(
+        {
+            "variant": RatingVariant.CURRENT_ONLY.value,
+            "scope": CURRENT_MU_EFFECTIVE_SCOPE,
+            "self_diff": "exact_zero",
+            "full_snapshot_ranks": {
+                "status": "comparable",
+                "reason": "current-only compares the verified snapshot to itself",
+                "current_universe_size": int(coverage.get("current_rows", 0)),
+                "future_universe_size": int(coverage.get("future_rows", 0)),
+                "current_value_field": "mu_effective",
+                "future_value_field": "mu_effective",
+                "rank_direction": RANK_DIRECTION,
+            },
+        }
+    )
+    return diffs, coverage
+
+
+def _not_applicable_rank_coverage(
+    *,
+    variant: str,
+    identity: str,
+) -> dict[str, Any]:
+    return {
+        "variant": variant,
+        "status": "not_applicable",
+        "scope": SCALING_CONTEXT_SCOPE,
+        "reason": "scaling depends on champions, lineup, opponent, and side",
+        "required_context": list(SCALING_CONTEXT_FIELDS),
+        "rank_universe": RANK_UNIVERSE,
+        "eligibility_filter": RANK_ELIGIBILITY_FILTER,
+        "identity": identity,
+        "row_policy": "no_rows",
+        "future_rows": 0,
+        "current_rows": 0,
+        "matched_rows": 0,
+        "join_rate": None,
+        "full_snapshot_rank_status": "not_applicable",
+        "future_value_field": None,
+        "current_value_field": None,
+    }
+
+
+def _not_applicable_snapshot_result(
+    source_receipt: Mapping[str, Any],
+    *,
+    variant: RatingVariant | str,
+    current_rating_inputs: Mapping[str, Any] | None = None,
+) -> FutureValueSnapshotResult:
+    name = _snapshot_variant(variant)
+    source = _source_binding(source_receipt)
+    capability = _capability_for_variant(name)
+    payload: dict[str, Any] = {
+        "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+        "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+        "status": "research_only",
+        "authority": dict(SNAPSHOT_AUTHORITY),
+        "variant": name,
+        "source": source,
+        "as_of": source["source_as_of"],
+        "model": {
+            "schema_version": MODEL_FIT_SCHEMA_VERSION,
+            "variant": name,
+            "receipt_sha256": None,
+            "status": "not_applicable",
+        },
+        "fit": {
+            "status": "not_applicable",
+            "authorized": False,
+            "blockers": [],
+            "model_receipt_sha256": None,
+            "source_receipt_sha256": source["source_receipt_sha256"],
+        },
+        "player_row_count": 0,
+        "team_row_count": 0,
+        "player_rank_diff_count": 0,
+        "team_rank_diff_count": 0,
+        "rank_coverage": {
+            "player": _not_applicable_rank_coverage(
+                variant=name, identity="player_id"
+            ),
+            "team": _not_applicable_rank_coverage(
+                variant=name, identity="team_id"
+            ),
+        },
+        "capability": capability,
+        "capabilities": snapshot_capability_matrix(),
+        "exact_five": {
+            "source_map_rows": True,
+            "source_player_rows": True,
+            "team_aggregation": "not_applicable",
+        },
+        "blockers": [],
+        "tierlists": {"recalculated": False, "status": "unchanged"},
+    }
+    if current_rating_inputs is not None:
+        payload["current_rating_inputs"] = dict(current_rating_inputs)
+    payload["receipt_sha256"] = _sha256_bytes(_canonical_json_bytes(payload))
+    return FutureValueSnapshotResult(
+        "research_only", (), (), (), (), (), payload
+    )
+
+
+def _annotate_form_component_rows(
+    player_rows: list[dict[str, Any]],
+    team_rows: list[dict[str, Any]],
+) -> None:
+    """Add explicit component names while retaining old internal aliases."""
+
+    for row in player_rows:
+        value = _finite(row.get("future_player_value_logit"))
+        row["future_player_form_component_logit"] = value
+        row["rating_scope"] = FORM_COMPONENT_SCOPE
+        row["component_scope"] = FORM_COMPONENT_SCOPE
+        row["value_field"] = "future_player_form_component_logit"
+        row["rating_label"] = FORM_COMPONENT_SCOPE
+        row["full_composite_rating"] = False
+    for row in team_rows:
+        value = _finite(row.get("role_normalized_player_value_logit"))
+        row["future_team_form_component_logit"] = value
+        row["rating_scope"] = FORM_COMPONENT_SCOPE
+        row["component_scope"] = FORM_COMPONENT_SCOPE
+        row["value_field"] = "future_team_form_component_logit"
+        row["rating_label"] = FORM_COMPONENT_SCOPE
+        row["full_composite_rating"] = False
+
+
+def _component_rank_diffs(
+    rows: Sequence[Mapping[str, Any]],
+    current: pd.DataFrame | None,
+    *,
+    identity: str,
+    value_field: str,
+    current_value_candidates: Sequence[str],
+    variant: str,
+) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+    diffs, blockers, coverage, _assignments = _rank_diffs(
+        rows,
+        current,
+        identity=identity,
+        future_value=value_field,
+        current_value_candidates=current_value_candidates,
+    )
+    for row in diffs:
+        row.update(
+            {
+                "variant": variant,
+                "rating_scope": FORM_COMPONENT_SCOPE,
+                "component_scope": FORM_COMPONENT_SCOPE,
+                "value_field": value_field,
+                "rating_label": FORM_COMPONENT_SCOPE,
+                "full_composite_rating": False,
+            }
+        )
+    coverage = dict(coverage)
+    coverage.update(
+        {
+            "variant": variant,
+            "scope": FORM_COMPONENT_SCOPE,
+            "value_field": value_field,
+            "full_composite_rating": False,
+        }
+    )
+    return diffs, blockers, coverage
+
+
+def build_snapshot_capability_manifest(
+    source_receipt: Mapping[str, Any],
+    *,
+    results: Mapping[str, FutureValueSnapshotResult | Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build the source-bound manifest for all four snapshot capabilities."""
+
+    source = _source_binding(source_receipt)
+    supplied = results or {}
+    variants: dict[str, Any] = {}
+    for name in SNAPSHOT_VARIANTS:
+        capability = _capability_for_variant(name)
+        raw_result = supplied.get(name)
+        if isinstance(raw_result, FutureValueSnapshotResult):
+            receipt = raw_result.receipt
+            result_status = raw_result.status
+            blockers = list(raw_result.blockers)
+            output = {
+                "status": result_status,
+                "blockers": blockers,
+                "player_rows": len(raw_result.player_rows),
+                "team_rows": len(raw_result.team_rows),
+                "player_rank_rows": len(raw_result.player_rank_diffs),
+                "team_rank_rows": len(raw_result.team_rank_diffs),
+                "receipt_sha256": receipt.get("receipt_sha256"),
+            }
+        elif isinstance(raw_result, Mapping):
+            receipt = raw_result.get("receipt")
+            output = {
+                "status": raw_result.get("status"),
+                "blockers": list(raw_result.get("blockers") or ()),
+                "player_rows": len(raw_result.get("player_rows") or ()),
+                "team_rows": len(raw_result.get("team_rows") or ()),
+                "player_rank_rows": len(raw_result.get("player_rank_diffs") or ()),
+                "team_rank_rows": len(raw_result.get("team_rank_diffs") or ()),
+                "receipt_sha256": (
+                    receipt.get("receipt_sha256")
+                    if isinstance(receipt, Mapping)
+                    else None
+                ),
+            }
+        else:
+            receipt = None
+            output = {
+                "status": "declared_capability",
+                "blockers": [],
+                "player_rows": None,
+                "team_rows": None,
+                "player_rank_rows": None,
+                "team_rank_rows": None,
+                "receipt_sha256": None,
+            }
+        if isinstance(receipt, Mapping):
+            receipt_source = receipt.get("source")
+            if isinstance(receipt_source, Mapping) and receipt_source.get(
+                "source_receipt_sha256"
+            ) != source["source_receipt_sha256"]:
+                raise FutureValueSnapshotError(
+                    f"{name} capability result source binding changed"
+                )
+        variants[name] = {
+            "capability": capability,
+            "output": output,
+        }
+    manifest: dict[str, Any] = {
+        "schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+        "authority": dict(SNAPSHOT_AUTHORITY),
+        "source": source,
+        "variants": variants,
+        "capability_matrix": snapshot_capability_matrix(),
+    }
+    manifest["manifest_sha256"] = _sha256_bytes(_canonical_json_bytes(manifest))
+    return manifest
+
+
+# Keep the longer name available to callers that use the research namespace
+# wording in their pipeline manifests.
+build_future_value_snapshot_capability_manifest = build_snapshot_capability_manifest
+
+
+def _current_only_snapshot_result(
+    source_receipt: Mapping[str, Any],
+    *,
+    current_player_ratings: pd.DataFrame | None,
+    current_team_ratings: pd.DataFrame | None,
+    current_rating_inputs: Mapping[str, Any] | None,
+) -> FutureValueSnapshotResult:
+    """Build V1 by comparing each verified current table with itself."""
+
+    source = _source_binding(source_receipt)
+    _validate_current_rating_input_binding(current_rating_inputs, source)
+    player_frame = _current_rating_frame(current_player_ratings, kind="player")
+    team_frame = _current_rating_frame(current_team_ratings, kind="team")
+    player_rows = _current_snapshot_rows(player_frame, kind="player")
+    team_rows = _current_snapshot_rows(team_frame, kind="team")
+    player_rank_diffs, player_coverage = _current_self_rank_diffs(
+        player_rows,
+        player_frame,
+        identity="player_id",
+    )
+    team_rank_diffs, team_coverage = _current_self_rank_diffs(
+        team_rows,
+        team_frame,
+        identity="team_id",
+    )
+    capability = _capability_for_variant(RatingVariant.CURRENT_ONLY.value)
+    payload: dict[str, Any] = {
+        "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+        "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+        "status": "research_only",
+        "authority": dict(SNAPSHOT_AUTHORITY),
+        "variant": RatingVariant.CURRENT_ONLY.value,
+        "source": source,
+        "as_of": source["source_as_of"],
+        "model": {
+            "schema_version": MODEL_FIT_SCHEMA_VERSION,
+            "variant": RatingVariant.CURRENT_ONLY.value,
+            "receipt_sha256": None,
+            "status": "not_applicable",
+        },
+        "fit": {
+            "status": "not_applicable",
+            "authorized": False,
+            "blockers": [],
+            "model_receipt_sha256": None,
+            "source_receipt_sha256": source["source_receipt_sha256"],
+        },
+        "player_row_count": len(player_rows),
+        "team_row_count": len(team_rows),
+        "player_rank_diff_count": len(player_rank_diffs),
+        "team_rank_diff_count": len(team_rank_diffs),
+        "rank_coverage": {
+            "player": player_coverage,
+            "team": team_coverage,
+        },
+        "capability": capability,
+        "capabilities": snapshot_capability_matrix(),
+        "current_rating_inputs": dict(current_rating_inputs or {}),
+        "exact_five": {
+            "source_map_rows": True,
+            "source_player_rows": True,
+            "team_aggregation": "reused_verified_current_snapshot",
+        },
+        "blockers": [],
+        "tierlists": {"recalculated": False, "status": "unchanged"},
+    }
+    payload["receipt_sha256"] = _sha256_bytes(_canonical_json_bytes(payload))
+    return FutureValueSnapshotResult(
+        "research_only",
+        (),
+        tuple(player_rows),
+        tuple(team_rows),
+        tuple(player_rank_diffs),
+        tuple(team_rank_diffs),
+        payload,
+    )
+
+
+def _rank_diffs(
+    future_rows: Sequence[Mapping[str, Any]],
+    current: pd.DataFrame | None,
+    *,
+    identity: str,
+    future_value: str,
+    current_value_candidates: Sequence[str],
+) -> tuple[list[dict[str, Any]], list[str], dict[str, Any], dict[str, dict[str, Any]]]:
+    blockers: list[str] = []
+    futures = pd.DataFrame(list(future_rows))
+    total_future = int(len(futures))
+    assignments: dict[str, dict[str, Any]] = {}
+
+    def _identity_digest(values: Iterable[Any]) -> str:
+        ids = sorted({str(value) for value in values if str(value).strip()})
+        return _sha256_bytes(
+            _canonical_json_bytes({"identity": identity, "ids": ids})
+        )
+
+    def _full_rank_contract(
+        *,
+        current_size: int,
+        future_size: int,
+        current_field: str | None,
+        future_field: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "status": FULL_SNAPSHOT_RANK_STATUS,
+            "reason": "full snapshot ranks use separate universes",
+            "current_universe_size": int(current_size),
+            "future_universe_size": int(future_size),
+            "current_value_field": current_field,
+            "future_value_field": future_field,
+            "rank_direction": RANK_DIRECTION,
+        }
+
+    coverage: dict[str, Any] = {
+        "future_rows": total_future,
+        "current_rows": 0,
+        "matched_rows": 0,
+        "unmatched_rows": total_future,
+        "join_rate": 0.0 if total_future else None,
+        "status": "unavailable",
+        "rank_universe": RANK_UNIVERSE,
+        "eligibility_filter": RANK_ELIGIBILITY_FILTER,
+        "common_universe_size": 0,
+        "common_identity_sha256": _identity_digest(()),
+        "identity_sha256": _identity_digest(()),
+        "current_value_field": None,
+        "future_value_field": future_value,
+        "rank_direction": RANK_DIRECTION,
+        "paired_row_digest_sha256": _sha256_bytes(_canonical_json_bytes([])),
+        "paired_row_digest": _sha256_bytes(_canonical_json_bytes([])),
+        "finite_current_rows": 0,
+        "finite_future_rows": 0,
+        "full_snapshot_ranks": _full_rank_contract(
+            current_size=0,
+            future_size=0,
+            current_field=None,
+            future_field=future_value,
+        ),
+    }
+
+    if futures.empty or identity not in futures.columns or future_value not in futures.columns:
+        return [], [f"future_{identity}_snapshot_missing"], coverage, assignments
+
+    futures[identity] = futures[identity].astype("string")
+    futures[future_value] = pd.to_numeric(futures[future_value], errors="coerce")
+    future_with_identity = futures[
+        futures[identity].notna() & futures[identity].str.strip().ne("")
+    ].copy()
+    if future_with_identity[identity].duplicated().any():
+        return [], [f"future_{identity}_snapshot_identity_or_value_ambiguous"], coverage, assignments
+    future_finite = future_with_identity[
+        future_with_identity[future_value].map(lambda value: _finite(value) is not None)
+    ].copy()
+    coverage["finite_future_rows"] = int(len(future_finite))
+
+    if current is None:
+        coverage["full_snapshot_ranks"] = _full_rank_contract(
+            current_size=0,
+            future_size=len(future_finite),
+            current_field=None,
+            future_field=future_value,
+        )
+        return [], [f"current_{identity}_rating_snapshot_missing"], coverage, assignments
+    if identity not in current.columns:
+        coverage["full_snapshot_ranks"] = _full_rank_contract(
+            current_size=0,
+            future_size=len(future_finite),
+            current_field=None,
+            future_field=future_value,
+        )
+        return [], [f"current_{identity}_rating_identity_missing"], coverage, assignments
+    value_column = next((name for name in current_value_candidates if name in current.columns), None)
+    if value_column is None:
+        coverage["full_snapshot_ranks"] = _full_rank_contract(
+            current_size=0,
+            future_size=len(future_finite),
+            current_field=None,
+            future_field=future_value,
+        )
+        return [], [f"current_{identity}_rating_value_missing"], coverage, assignments
+
+    frame = current[[identity, value_column]].copy()
+    frame[identity] = frame[identity].astype("string")
+    frame[value_column] = pd.to_numeric(frame[value_column], errors="coerce")
+    current_with_identity = frame[
+        frame[identity].notna() & frame[identity].str.strip().ne("")
+    ].copy()
+    if current_with_identity[identity].duplicated().any():
+        return [], [f"current_{identity}_rating_identity_or_value_ambiguous"], coverage, assignments
+    frame = current_with_identity[
+        current_with_identity[value_column].map(lambda value: _finite(value) is not None)
+    ].copy()
+    coverage["current_rows"] = int(len(frame))
+    coverage["finite_current_rows"] = int(len(frame))
+    coverage["current_value_field"] = value_column
+    coverage["full_snapshot_ranks"] = _full_rank_contract(
+        current_size=len(frame),
+        future_size=len(future_finite),
+        current_field=value_column,
+        future_field=future_value,
+    )
+    if future_finite.empty:
+        coverage["status"] = "no_finite_future_values"
+        return [], [], coverage, assignments
+
+    current_ids = set(frame[identity].astype(str))
+    future_ids = set(future_finite[identity].astype(str))
+    common_ids = tuple(sorted(current_ids & future_ids))
+    common_id_set = set(common_ids)
+    coverage["common_universe_size"] = len(common_ids)
+    coverage["common_identity_sha256"] = _identity_digest(common_ids)
+    coverage["identity_sha256"] = coverage["common_identity_sha256"]
+    if not common_ids:
+        coverage["status"] = "partial"
+        coverage["unmatched_rows"] = total_future
+        coverage["join_rate"] = 0.0 if total_future else None
+        return [], [], coverage, assignments
+
+    common_current = frame[frame[identity].astype(str).isin(common_id_set)].copy()
+    common_future = future_finite[future_finite[identity].astype(str).isin(common_id_set)].copy()
+    common_current["__rank"] = common_current[value_column].rank(
+        method="min", ascending=False
+    )
+    common_future["__rank"] = common_future[future_value].rank(
+        method="min", ascending=False
+    )
+    current_rank = dict(zip(common_current[identity].astype(str), common_current["__rank"]))
+    current_value = dict(zip(common_current[identity].astype(str), common_current[value_column]))
+    future_rank = dict(zip(common_future[identity].astype(str), common_future["__rank"]))
+    future_value_by_id = dict(zip(common_future[identity].astype(str), common_future[future_value]))
+
+    paired_rows: list[dict[str, Any]] = []
+    for key in common_ids:
+        current_rank_value = int(current_rank[key])
+        future_rank_value = int(future_rank[key])
+        rank_delta = int(current_rank_value - future_rank_value)
+        paired_rows.append(
+            {
+                identity: key,
+                "current_rank": current_rank_value,
+                "future_rank": future_rank_value,
+                "rank_delta": rank_delta,
+                "current_value": float(current_value[key]),
+                "future_value": float(future_value_by_id[key]),
+            }
+        )
+    paired_digest = _sha256_bytes(_canonical_json_bytes(paired_rows))
+    coverage["paired_row_digest_sha256"] = paired_digest
+    coverage["paired_row_digest"] = paired_digest
+
+    output: list[dict[str, Any]] = []
+    for row in common_future.to_dict("records"):
+        key = str(row[identity])
+        current_rank_value = int(current_rank[key])
+        future_rank_value = int(future_rank[key])
+        rank_delta = int(current_rank_value - future_rank_value)
+        assignment = {
+            "future_rank": future_rank_value,
+            "current_rank": current_rank_value,
+            "rank_delta": rank_delta,
+            "rank_universe": RANK_UNIVERSE,
+            "rank_comparability": "comparable",
+            "full_snapshot_rank_status": FULL_SNAPSHOT_RANK_STATUS,
+        }
+        assignments[key] = assignment
+        output.append(
+            {
+                identity: key,
+                "current_rank": current_rank_value,
+                "future_rank": future_rank_value,
+                "rank_delta": rank_delta,
+                "current_value": float(current_value[key]),
+                "future_value": float(future_value_by_id[key]),
+                "rank_universe": RANK_UNIVERSE,
+                "rank_comparability": "comparable",
+                "full_snapshot_rank_status": FULL_SNAPSHOT_RANK_STATUS,
+            }
+        )
+    matched = len(output)
+    coverage.update(
+        {
+            "matched_rows": matched,
+            "unmatched_rows": max(0, total_future - matched),
+            "join_rate": float(matched / total_future) if total_future else None,
+            "status": "complete" if matched == total_future else "partial",
+        }
+    )
+    return output, blockers, coverage, assignments
+
+
+def _rank_extremes(rows: Sequence[Mapping[str, Any]], *, limit: int = 10) -> dict[str, list[dict[str, Any]]]:
+    """Return only matched rank changes for research inspection."""
+
+    frame = pd.DataFrame(list(rows))
+    if frame.empty or "rank_delta" not in frame.columns:
+        return {"largest_positive": [], "largest_negative": []}
+    frame["rank_delta"] = pd.to_numeric(frame["rank_delta"], errors="coerce")
+    frame = frame[frame["rank_delta"].notna()].copy()
+    if frame.empty:
+        return {"largest_positive": [], "largest_negative": []}
+    columns = [
+        column
+        for column in ("player_id", "team_id", "current_rank", "future_rank", "rank_delta")
+        if column in frame.columns
+    ]
+    positive = frame.sort_values(["rank_delta"], ascending=False, kind="stable").head(limit)
+    negative = frame.sort_values(["rank_delta"], ascending=True, kind="stable").head(limit)
+    return {
+        "largest_positive": positive[columns].to_dict("records"),
+        "largest_negative": negative[columns].to_dict("records"),
+    }
+
+
+def _blocked_result(
+    source: Mapping[str, Any],
+    authorization: FinalFitAuthorization,
+    *,
+    extra_blockers: Iterable[str] = (),
+    current_rating_inputs: Mapping[str, Any] | None = None,
+    variant: RatingVariant | str | None = None,
+) -> FutureValueSnapshotResult:
+    blockers = tuple(sorted(set(authorization.blockers) | set(extra_blockers)))
+    variant_name = _snapshot_variant(variant)
+    capability = _capability_for_variant(variant_name)
+    payload: dict[str, Any] = {
+        "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+        "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+        "status": "blocked",
+        "authority": dict(SNAPSHOT_AUTHORITY),
+        "variant": variant_name,
+        "source": _source_binding(source),
+        "fit": authorization.as_dict(),
+        "as_of": source["source_as_of"],
+        "player_row_count": 0,
+        "team_row_count": 0,
+        "player_rank_diff_count": 0,
+        "team_rank_diff_count": 0,
+        "capability": capability,
+        "capabilities": snapshot_capability_matrix(),
+        "rank_coverage": {
+            "player": {"status": "blocked", "variant": variant_name},
+            "team": {"status": "blocked", "variant": variant_name},
+        },
+        "blockers": list(blockers),
+        "tierlists": {"recalculated": False, "status": "unchanged"},
+    }
+    if current_rating_inputs is not None:
+        payload["current_rating_inputs"] = dict(current_rating_inputs)
+    payload["receipt_sha256"] = _sha256_bytes(_canonical_json_bytes(payload))
+    return FutureValueSnapshotResult(
+        "blocked", blockers, (), (), (), (), payload
+    )
+
+
+def build_future_value_snapshots(
+    maps: pd.DataFrame,
+    players: pd.DataFrame,
+    teams: pd.DataFrame,
+    *,
+    source_receipt: Mapping[str, Any],
+    model: FutureValueFoldModel | Any | None = None,
+    model_receipt: Mapping[str, Any] | None = None,
+    current_player_ratings: pd.DataFrame | None = None,
+    current_team_ratings: pd.DataFrame | None = None,
+    current_rating_inputs: Mapping[str, Any] | None = None,
+    as_of: Any | None = None,
+    baseline_cache: Any | None = None,
+    support_calibration: Mapping[str, Any] | None = None,
+    support_calibration_fold_id: Any | None = None,
+    variant: RatingVariant | str | None = None,
+) -> FutureValueSnapshotResult:
+    """Build one source-bound, research-only player/team snapshot.
+
+    A missing or unapproved final fit produces a blocked result.  The source
+    and lineup checks still run before scoring, so a malformed source never
+    produces a plausible empty snapshot.
+    """
+
+    source = _source_binding(source_receipt)
+    _validate_current_rating_input_binding(current_rating_inputs, source)
+    bound_model_receipt = _model_receipt_from(model, model_receipt)
+    variant_name = _snapshot_variant(variant)
+    if variant is None and isinstance(bound_model_receipt, Mapping):
+        declared_variant = bound_model_receipt.get("variant")
+        if declared_variant in SNAPSHOT_VARIANTS:
+            variant_name = str(declared_variant)
+    _validate_model_object_binding(model, model_receipt)
+    # Validate the source before the fit gate result is returned.  A blocked
+    # model must not hide a malformed or future-dated accepted source.
+    map_frame, player_frame, team_frame, cutoff = _normalise_source_frames(
+        maps, players, teams, source_receipt, as_of
+    )
+    if variant_name == RatingVariant.CURRENT_ONLY.value:
+        return _current_only_snapshot_result(
+            source_receipt,
+            current_player_ratings=current_player_ratings,
+            current_team_ratings=current_team_ratings,
+            current_rating_inputs=current_rating_inputs,
+        )
+    if variant_name == RatingVariant.SCALING_CURVE.value:
+        # A phase curve is a contextual map feature.  This endpoint has no
+        # opponent, lineup, side, or champion-state request, so it emits a
+        # typed N/A contract with no fabricated player or team ranks.
+        return _not_applicable_snapshot_result(
+            source_receipt,
+            variant=variant_name,
+            current_rating_inputs=current_rating_inputs,
+        )
+
+    auth = authorize_final_fit(bound_model_receipt, source_receipt)
+    declared_variant = (
+        str(bound_model_receipt.get("variant"))
+        if isinstance(bound_model_receipt, Mapping)
+        else None
+    )
+    if declared_variant and declared_variant != variant_name:
+        auth = FinalFitAuthorization(
+            auth.status,
+            tuple(sorted(set(auth.blockers) | {"snapshot_variant_model_receipt_mismatch"})),
+            auth.model_receipt_sha256,
+            auth.source_receipt_sha256,
+        )
+    computation_blockers = _computation_blockers(auth)
+    if computation_blockers:
+        return _blocked_result(
+            source_receipt,
+            auth,
+            extra_blockers=computation_blockers,
+            current_rating_inputs=current_rating_inputs,
+            variant=variant_name,
+        )
+    support_calibration_applied = False
+    if support_calibration is not None:
+        try:
+            expected_variant = (
+                str(bound_model_receipt.get("variant"))
+                if isinstance(bound_model_receipt, Mapping)
+                else None
+            )
+            verify_support_calibration_artifact(
+                support_calibration,
+                source_frame=map_frame,
+                expected_source_receipt_sha256=str(source["source_receipt_sha256"]),
+                expected_variant=expected_variant,
+            )
+            if support_calibration_fold_id is None:
+                raise FutureValueSnapshotError(
+                    "support calibration fold ID is required for snapshot application"
+                )
+            support_calibration_applied = True
+        except (FutureValueUncertaintyError, FutureValueSnapshotError) as error:
+            return _blocked_result(
+                source_receipt,
+                auth,
+                extra_blockers=("support_calibration_invalid", str(error)),
+                current_rating_inputs=current_rating_inputs,
+                variant=variant_name,
+            )
+    if model is None:
+        return _blocked_result(
+            source_receipt,
+            auth,
+            extra_blockers=("final_fit_model_object_missing",),
+            current_rating_inputs=current_rating_inputs,
+            variant=variant_name,
+        )
+
+    team_context_binding: dict[str, Any] | None = None
+    team_context_contract_error: str | None = None
+    try:
+        team_context_binding = _validated_team_context_binding(
+            model,
+            bound_model_receipt,
+            source,
+        )
+    except FutureValueSnapshotError as error:
+        # Player values remain usable as a research calculation.  Team
+        # context stays null and the receipt records the exact contract
+        # failure.
+        team_context_contract_error = str(error)
+
+    regional_transfer_column: str | None = None
+    if team_context_binding is not None and "regional_transfer_diff" in set(
+        team_context_binding.get("feature_names") or ()
+    ):
+        regional_source = team_context_binding.get("regional_transfer_source")
+        if isinstance(regional_source, Mapping):
+            regional_transfer_column = str(
+                regional_source.get("player_region_column") or ""
+            ).strip()
+    form = _latest_player_form(
+        map_frame,
+        player_frame,
+        baseline_cache=baseline_cache,
+        context_columns=(regional_transfer_column,) if regional_transfer_column else (),
+    )
+    form = form[form["date"].le(cutoff)].copy()
+    latest = _latest_rows(form, key="player_id", label="player")
+    if len(latest) != form["player_id"].nunique():
+        raise FutureValueSnapshotError("latest player snapshot is incomplete")
+    latest_roster = _latest_team_roster(form)
+    contributions = _player_contributions(
+        model,
+        latest,
+        support_source_frame=map_frame,
+        support_calibration=support_calibration if support_calibration_applied else None,
+        support_calibration_fold_id=support_calibration_fold_id,
+    )
+    roster_contributions = _player_contributions(
+        model,
+        latest_roster,
+        support_source_frame=map_frame,
+        support_calibration=support_calibration if support_calibration_applied else None,
+        support_calibration_fold_id=support_calibration_fold_id,
+    )
+    player_rows: list[dict[str, Any]] = []
+    for row in contributions.to_dict("records"):
+        row_status = str(row["support_status"])
+        row_has_missing = bool(row["model_feature_missing"])
+        row_blockers: list[str] = []
+        if row_status == "missing_features":
+            row_blockers.append("missing_model_feature_value")
+        elif row_status == "sparse":
+            row_blockers.append("sparse_player_support")
+        if (
+            "support_uncertainty_proxy_not_calibrated" in auth.blockers
+            and not support_calibration_applied
+        ):
+            row_blockers.append("support_uncertainty_proxy_not_calibrated")
+        player_rows.append(
+            _json_row(
+                {
+                    "player_id": row["player_id"],
+                    "player": row["playername"],
+                    "team_id": row["team_id"],
+                    "role": row["role"],
+                    "champion": row["champion"],
+                    "last_game_id": row.get("game_id"),
+                    "last_game_date": row["date"],
+                    "role_normalized_form_logit": None
+                    if row_has_missing
+                    else row["role_normalized_form_logit"],
+                    "rank_3_player_atom_logit": None
+                    if row_has_missing
+                    else row["rank_3_player_atom_logit"],
+                    "champion_role_atom_logit": None
+                    if row_has_missing
+                    else row["champion_role_atom_logit"],
+                    **{
+                        f"rank_3_player_atom_{index}_logit": None
+                        if row_has_missing
+                        else row[f"rank_3_player_atom_{index}_logit"]
+                        for index in range(1, RANK_3 + 1)
+                    },
+                    **{
+                        f"rank_3_champion_role_atom_{index}_logit": None
+                        if row_has_missing
+                        else row[f"rank_3_champion_role_atom_{index}_logit"]
+                        for index in range(1, RANK_3 + 1)
+                    },
+                    "future_player_value_logit": None
+                    if row_has_missing
+                    else row["role_normalized_player_value_logit"],
+                    "future_player_value_with_champion_logit": None
+                    if row_has_missing
+                    else row["future_player_value_with_champion_logit"],
+                    "minimum_metric_support": row["minimum_metric_support"],
+                    "minimum_effective_support": row["minimum_effective_support"],
+                    "rank_3_champion_role_atom_support": row[
+                        "rank_3_champion_role_atom_support"
+                    ],
+                    "uncertainty_proxy_raw": row["uncertainty_proxy_raw"],
+                    "uncertainty_proxy_calibrated": row[
+                        "uncertainty_proxy_calibrated"
+                    ],
+                    "uncertainty_proxy": row["uncertainty_proxy"],
+                    "support_uncertainty_status": row[
+                        "support_uncertainty_status"
+                    ],
+                    "model_feature_missing": bool(row["model_feature_missing"]),
+                    "champion_dependent_status": row["champion_dependent_status"],
+                    "support_status": row_status,
+                    "status": "research_only" if row_status == "adequate" else f"research_only_{row_status}",
+                    "blockers": sorted(set(row_blockers)),
+                    "current_rank": None,
+                    "future_rank": None,
+                    "rank_delta": None,
+                    "rank_join_status": "pending",
+                }
+            )
+        )
+
+    contribution_frame = roster_contributions.copy()
+    contribution_frame["game_id"] = latest_roster["game_id"].to_numpy()
+    contribution_frame["team_id"] = latest_roster["team_id"].to_numpy()
+    contribution_frame["side"] = latest_roster["side"].to_numpy()
+    contribution_frame["role"] = latest_roster["role"].to_numpy()
+    team_counts = contribution_frame.groupby("team_id", sort=False)["player_id"].nunique()
+    if not team_counts.eq(5).all():
+        raise FutureValueSnapshotError("future team value requires exact five current-roster players")
+    role_counts = contribution_frame.groupby("team_id", sort=False)["role"].nunique()
+    if not role_counts.eq(5).all():
+        raise FutureValueSnapshotError("future team value requires five unique current-roster roles")
+    team_context = _team_history_features(map_frame, form)
+    team_identity = form[["game_id", "side", "team_id"]].drop_duplicates()
+    if team_identity.duplicated(["game_id", "side"]).any():
+        raise FutureValueSnapshotError("team context has ambiguous team identity")
+    team_context = team_context.merge(
+        team_identity,
+        on=["game_id", "side"],
+        how="left",
+        validate="one_to_one",
+    )
+    if team_context["team_id"].isna().any():
+        raise FutureValueSnapshotError("team context lost stable team identity")
+    team_context = team_context.sort_values(["side", "game_id"], kind="stable")
+    regional_context: pd.DataFrame | None = None
+    if (
+        team_context_binding is not None
+        and "regional_transfer_diff"
+        in set(team_context_binding.get("feature_names") or ())
+    ):
+        if not regional_transfer_column:
+            team_context_contract_error = (
+                "team-context regional-transfer source column is missing"
+            )
+        else:
+            try:
+                regional_context = _regional_transfer_by_team(
+                    form,
+                    latest_roster,
+                    region_column=regional_transfer_column,
+                )
+            except FutureValueSnapshotError as error:
+                team_context_contract_error = str(error)
+    # Use the latest context row by team.  The historical helper is strict
+    # about roster shape and keeps the side-specific continuity state separate.
+    context_rows: list[dict[str, Any]] = []
+    for team_id, group in latest_roster.groupby("team_id", sort=False):
+        dates = pd.to_datetime(group["date"], utc=True)
+        latest_date = dates.max()
+        latest_group = group[dates.eq(latest_date)]
+        if latest_group[["game_id", "side"]].drop_duplicates().shape[0] != 1:
+            raise FutureValueSnapshotError("team has ambiguous latest roster context")
+        game_id = str(latest_group["game_id"].iloc[0])
+        side = str(latest_group["side"].iloc[0])
+        context_match = team_context[team_context["game_id"].astype(str).eq(game_id) & team_context["side"].astype(str).eq(side)]
+        if len(context_match) != 1:
+            raise FutureValueSnapshotError("team context is incomplete or ambiguous")
+        context_rows.append(
+            {
+                "team_id": str(team_id),
+                "side": side,
+                "last_game_id": game_id,
+                "last_game_date": latest_date,
+                "prior_team_win": context_match["prior_team_win"].iloc[0],
+                "prior_team_support": context_match["prior_team_support"].iloc[0],
+                "roster_continuity": context_match["roster_continuity"].iloc[0],
+                "regional_transfer": (
+                    np.nan
+                    if regional_context is None
+                    else regional_context.loc[
+                        regional_context["team_id"].astype(str).eq(str(team_id)),
+                        "regional_transfer",
+                    ].iloc[0]
+                    if len(
+                        regional_context.loc[
+                            regional_context["team_id"].astype(str).eq(str(team_id))
+                        ]
+                    )
+                    == 1
+                    else np.nan
+                ),
+                "regional_transfer_support": (
+                    0
+                    if regional_context is None
+                    else int(
+                        regional_context.loc[
+                            regional_context["team_id"].astype(str).eq(str(team_id)),
+                            "regional_transfer_support",
+                        ].iloc[0]
+                    )
+                    if len(
+                        regional_context.loc[
+                            regional_context["team_id"].astype(str).eq(str(team_id))
+                        ]
+                    )
+                    == 1
+                    else 0
+                ),
+            }
+        )
+    context_frame = pd.DataFrame(context_rows)
+    team_rows: list[dict[str, Any]] = []
+    team_feature_names = (
+        set(str(value) for value in team_context_binding.get("feature_names") or ())
+        if team_context_binding is not None and not team_context_contract_error
+        else set()
+    )
+    if team_context_contract_error:
+        team_blocker = ("team_context_contract_invalid",)
+    elif team_context_binding is None:
+        team_blocker = ("team_context_not_in_final_model",)
+    else:
+        team_blocker = ()
+    for team_id, group in contribution_frame.groupby("team_id", sort=True):
+        context = context_frame[context_frame["team_id"].astype(str).eq(str(team_id))]
+        if len(context) != 1:
+            raise FutureValueSnapshotError("team context rows are ambiguous")
+        player_value = float(group["role_normalized_player_value_logit"].sum())
+        champion_value = float(group["champion_role_atom_logit"].sum())
+        team_context_value: float | None = None
+        context_missing = False
+        if team_feature_names:
+            team_context_value = 0.0
+            side_sign = 1.0 if str(group["side"].iloc[0]).casefold() == "blue" else -1.0
+            for feature_index, feature in enumerate(str(value) for value in model.feature_names):
+                if feature not in team_feature_names:
+                    continue
+                source_name = TEAM_CONTEXT_SOURCE_FIELDS[feature]
+                raw_value = _finite(context[source_name].iloc[0])
+                if raw_value is None:
+                    context_missing = True
+                    continue
+                scale = _finite(np.asarray(model.scales, dtype=float)[feature_index])
+                coefficient = _finite(np.asarray(model.coefficients, dtype=float)[feature_index])
+                if scale is None or coefficient is None or scale == 0:
+                    raise FutureValueSnapshotError("team context model parameter is invalid")
+                # The fitted feature is blue-minus-red.  Store a signed
+                # per-team contribution so the two rows sum to the model
+                # component and preserve side-swap symmetry.
+                team_context_value += side_sign * raw_value / scale * coefficient
+            if context_missing:
+                team_context_value = None
+        player_missing = bool(group["model_feature_missing"].any())
+        player_sparse = bool(group["support_status"].astype(str).ne("adequate").any())
+        team_has_missing = player_missing or player_sparse or context_missing
+        team_status = (
+            "missing_features"
+            if team_has_missing
+            else "adequate"
+        )
+        team_context_status = (
+            "invalid_contract"
+            if team_context_contract_error
+            else "missing_model_feature"
+            if team_context_binding is None
+            else "missing_value"
+            if team_context_value is None
+            else "available"
+        )
+        team_blockers: list[str] = []
+        if player_missing or context_missing:
+            team_blockers.append("missing_model_feature_value")
+        if player_sparse:
+            team_blockers.append("sparse_player_support")
+        if team_blocker:
+            team_blockers.extend(team_blocker)
+        if (
+            "support_uncertainty_proxy_not_calibrated" in auth.blockers
+            and not support_calibration_applied
+        ):
+            team_blockers.append("support_uncertainty_proxy_not_calibrated")
+        team_rows.append(
+            _json_row(
+                {
+                    "team_id": str(team_id),
+                    "side": str(group["side"].iloc[0]),
+                    "last_game_id": str(context["last_game_id"].iloc[0]),
+                    "last_game_date": context["last_game_date"].iloc[0],
+                    "roster_player_count": int(len(group)),
+                    "roster_player_ids": sorted(str(value) for value in group["player_id"]),
+                    "role_normalized_player_value_logit": None
+                    if team_has_missing
+                    else player_value,
+                    "champion_role_atom_logit": None
+                    if team_has_missing
+                    else champion_value,
+                    "team_context_logit": team_context_value,
+                    "future_team_value_logit": None
+                    if team_has_missing
+                    else (
+                        player_value + team_context_value
+                        if team_context_value is not None
+                        else player_value
+                    ),
+                    "team_context_status": team_context_status,
+                    "prior_team_win": context["prior_team_win"].iloc[0],
+                    "prior_team_support": context["prior_team_support"].iloc[0],
+                    "roster_continuity": context["roster_continuity"].iloc[0],
+                    "roster_continuity_support": 5
+                    if _finite(context["roster_continuity"].iloc[0]) is not None
+                    else 0,
+                    "regional_transfer": context["regional_transfer"].iloc[0],
+                    "regional_transfer_support": int(
+                        context["regional_transfer_support"].iloc[0]
+                    ),
+                    "minimum_metric_support": float(
+                        pd.to_numeric(group["minimum_metric_support"], errors="coerce").min()
+                    ),
+                    "minimum_effective_support": float(
+                        pd.to_numeric(
+                            group["minimum_effective_support"], errors="coerce"
+                        ).min()
+                    ),
+                    "uncertainty_proxy_raw": float(
+                        pd.to_numeric(group["uncertainty_proxy_raw"], errors="coerce").mean()
+                    ),
+                    "uncertainty_proxy_calibrated": (
+                        float(
+                            pd.to_numeric(
+                                group["uncertainty_proxy_calibrated"], errors="coerce"
+                            ).mean()
+                        )
+                        if pd.to_numeric(
+                            group["uncertainty_proxy_calibrated"], errors="coerce"
+                        ).notna().all()
+                        else None
+                    ),
+                    "uncertainty_proxy": float(
+                        pd.to_numeric(group["uncertainty_proxy"], errors="coerce").mean()
+                    ),
+                    "support_uncertainty_status": (
+                        "calibrated_strict_prior"
+                        if str(group["support_uncertainty_status"].iloc[0])
+                        == "calibrated_strict_prior"
+                        and group["support_uncertainty_status"].astype(str).eq(
+                            "calibrated_strict_prior"
+                        ).all()
+                        else "not_calibrated"
+                    ),
+                    "model_feature_missing": bool(team_has_missing),
+                    "missing_feature_count": int(
+                        pd.to_numeric(
+                            group["model_feature_missing"], errors="coerce"
+                        ).sum()
+                    ),
+                    "support_status": team_status,
+                    "status": "research_only" if team_status == "adequate" else "research_only_missing_features",
+                    "blockers": sorted(set(team_blockers)),
+                    "current_rank": None,
+                    "future_rank": None,
+                    "rank_delta": None,
+                    "rank_join_status": "pending",
+                }
+            )
+        )
+
+    player_rank_diffs, player_rank_blockers, player_rank_coverage, player_rank_assignments = _rank_diffs(
+        player_rows,
+        current_player_ratings,
+        identity="player_id",
+        future_value="future_player_value_logit",
+        current_value_candidates=("mu_effective", "mu_total", "rating"),
+    )
+    team_rank_diffs, team_rank_blockers, team_rank_coverage, team_rank_assignments = _rank_diffs(
+        team_rows,
+        current_team_ratings,
+        identity="team_id",
+        future_value="future_team_value_logit",
+        current_value_candidates=("mu_effective", "mu_total", "rating"),
+    )
+    for row in player_rows:
+        assignment = player_rank_assignments.get(str(row["player_id"]))
+        if assignment is not None:
+            row.update(assignment)
+            row["rank_join_status"] = (
+                "current_rating_unavailable"
+                if player_rank_coverage["status"] == "unavailable"
+                else "matched"
+                if assignment["current_rank"] is not None
+                else "current_rating_unmatched"
+            )
+        else:
+            row["rank_join_status"] = (
+                "future_value_unavailable"
+                if _finite(row.get("future_player_value_logit")) is None
+                else "current_rating_unavailable"
+                if player_rank_coverage["status"] == "unavailable"
+                else "current_rating_unmatched"
+            )
+    for row in team_rows:
+        assignment = team_rank_assignments.get(str(row["team_id"]))
+        if assignment is not None:
+            row.update(assignment)
+            row["rank_join_status"] = (
+                "current_rating_unavailable"
+                if team_rank_coverage["status"] == "unavailable"
+                else "matched"
+                if assignment["current_rank"] is not None
+                else "current_rating_unmatched"
+            )
+        else:
+            row["rank_join_status"] = (
+                "future_value_unavailable"
+                if _finite(row.get("future_team_value_logit")) is None
+                else "current_rating_unavailable"
+                if team_rank_coverage["status"] == "unavailable"
+                else "current_rating_unmatched"
+            )
+
+    # The snapshot contract exposes only the form component for V2 and V4.
+    # Keep the older internal aliases above for downstream research readers,
+    # then rank the explicitly named component field.
+    _annotate_form_component_rows(player_rows, team_rows)
+    legacy_player_rank_coverage = dict(player_rank_coverage)
+    legacy_team_rank_coverage = dict(team_rank_coverage)
+    component_player_rank_diffs, component_player_rank_blockers, component_player_rank_coverage = _component_rank_diffs(
+        player_rows,
+        current_player_ratings,
+        identity="player_id",
+        value_field="future_player_form_component_logit",
+        current_value_candidates=("mu_effective", "mu_total", "rating"),
+        variant=variant_name,
+    )
+    component_team_rank_diffs, component_team_rank_blockers, component_team_rank_coverage = _component_rank_diffs(
+        team_rows,
+        current_team_ratings,
+        identity="team_id",
+        value_field="future_team_form_component_logit",
+        current_value_candidates=("mu_effective", "mu_total", "rating"),
+        variant=variant_name,
+    )
+    player_assignment_by_id = {
+        str(row["player_id"]): row for row in component_player_rank_diffs
+    }
+    team_assignment_by_id = {
+        str(row["team_id"]): row for row in component_team_rank_diffs
+    }
+    for row in player_rows:
+        assignment = player_assignment_by_id.get(str(row["player_id"]))
+        if assignment is not None:
+            row.update(
+                {
+                    key: assignment[key]
+                    for key in (
+                        "current_rank",
+                        "future_rank",
+                        "rank_delta",
+                        "rank_universe",
+                        "rank_comparability",
+                        "full_snapshot_rank_status",
+                    )
+                    if key in assignment
+                }
+            )
+            row["rank_join_status"] = "matched"
+    for row in team_rows:
+        assignment = team_assignment_by_id.get(str(row["team_id"]))
+        if assignment is not None:
+            row.update(
+                {
+                    key: assignment[key]
+                    for key in (
+                        "current_rank",
+                        "future_rank",
+                        "rank_delta",
+                        "rank_universe",
+                        "rank_comparability",
+                        "full_snapshot_rank_status",
+                    )
+                    if key in assignment
+                }
+            )
+            row["rank_join_status"] = "matched"
+    # Component rank coverage is the public shape for this research output.
+    # The legacy rank coverage is retained under an explicit diagnostic key.
+    player_rank_diffs = component_player_rank_diffs
+    team_rank_diffs = component_team_rank_diffs
+    player_rank_blockers = component_player_rank_blockers
+    team_rank_blockers = component_team_rank_blockers
+    player_rank_coverage = component_player_rank_coverage
+    team_rank_coverage = component_team_rank_coverage
+    scaling_blockers: tuple[str, ...] = (
+        (SCALING_CONTEXT_BLOCKER,)
+        if variant_name == RatingVariant.BOTH.value
+        else ()
+    )
+    effective_auth_blockers = tuple(
+        blocker
+        for blocker in auth.blockers
+        if not (
+            blocker == "support_uncertainty_proxy_not_calibrated"
+            and support_calibration_applied
+        )
+        and not (
+            blocker == "team_context_not_in_final_model"
+            and team_context_binding is not None
+            and team_context_contract_error is None
+        )
+    )
+    blockers = tuple(
+        sorted(
+            set(
+                (
+                    *effective_auth_blockers,
+                    *team_blocker,
+                    *player_rank_blockers,
+                    *team_rank_blockers,
+                    *scaling_blockers,
+                )
+            )
+        )
+    )
+    rank_extremes = {
+        "player": _rank_extremes(player_rank_diffs),
+        "team": _rank_extremes(team_rank_diffs),
+    }
+    payload: dict[str, Any] = {
+        "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+        "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+        "status": "research_only" if not blockers else "research_only_partial",
+        "authority": dict(SNAPSHOT_AUTHORITY),
+        "variant": variant_name,
+        "source": source,
+        "as_of": _utc_text(cutoff),
+        "model": {
+            "schema_version": MODEL_FIT_SCHEMA_VERSION,
+            "variant": str(bound_model_receipt.get("variant"))
+            if bound_model_receipt is not None
+            else None,
+            "receipt_sha256": auth.model_receipt_sha256,
+        },
+        "fit": auth.as_dict(),
+        "player_row_count": len(player_rows),
+        "team_row_count": len(team_rows),
+        "player_rank_diff_count": len(player_rank_diffs),
+        "team_rank_diff_count": len(team_rank_diffs),
+        "rank_coverage": {
+            "player": player_rank_coverage,
+            "team": team_rank_coverage,
+        },
+        "legacy_rank_coverage": {
+            "player": legacy_player_rank_coverage,
+            "team": legacy_team_rank_coverage,
+        },
+        "capability": _capability_for_variant(variant_name),
+        "capabilities": snapshot_capability_matrix(),
+        "exact_five": {
+            "source_map_rows": True,
+            "source_player_rows": True,
+            "team_aggregation": "verified_latest_exact_five",
+        },
+        "scaling_context": (
+            {
+                "status": "omitted",
+                "blocker": SCALING_CONTEXT_BLOCKER,
+                "required_context": list(SCALING_CONTEXT_FIELDS),
+                "reason": "scaling depends on champions, lineup, opponent, and side",
+            }
+            if variant_name == RatingVariant.BOTH.value
+            else {
+                "status": "not_applicable",
+                "required_context": list(SCALING_CONTEXT_FIELDS),
+            }
+        ),
+        "rank_diff_extremes": rank_extremes,
+        "team_context": {
+            "status": (
+                "available"
+                if team_context_binding is not None and team_context_contract_error is None
+                else "invalid_contract"
+                if team_context_contract_error
+                else "missing_model_feature"
+            ),
+            "binding": dict(team_context_binding)
+            if team_context_binding is not None
+            else None,
+            "error": team_context_contract_error,
+            "feature_names": sorted(team_feature_names),
+        },
+        "blockers": list(blockers),
+        "tierlists": {"recalculated": False, "status": "unchanged"},
+    }
+    if current_rating_inputs is not None:
+        payload["current_rating_inputs"] = dict(current_rating_inputs)
+    if support_calibration is not None:
+        payload["support_calibration"] = {
+            "artifact_sha256": support_calibration.get("artifact_sha256"),
+            "receipt_sha256": support_calibration.get("receipt_sha256"),
+            "fold": str(support_calibration_fold_id),
+            "applied": bool(support_calibration_applied),
+            "complete_enough": bool(
+                isinstance(support_calibration.get("coverage"), Mapping)
+                and support_calibration["coverage"].get("complete_enough") is True
+            ),
+        }
+    payload["receipt_sha256"] = _sha256_bytes(_canonical_json_bytes(payload))
+    return FutureValueSnapshotResult(
+        "research_only" if not blockers else "research_only_partial",
+        blockers,
+        tuple(player_rows),
+        tuple(team_rows),
+        tuple(player_rank_diffs),
+        tuple(team_rank_diffs),
+        payload,
+    )
+
+
+def write_snapshot_bundle(destination: Path, result: FutureValueSnapshotResult) -> dict[str, Any]:
+    """Write a research-only snapshot bundle to a new directory."""
+
+    if destination.exists():
+        raise FutureValueSnapshotError(f"snapshot output already exists: {destination}")
+    destination.mkdir(parents=True)
+    paths = {
+        "player_snapshot": destination / "future-player-value-snapshot.json",
+        "team_snapshot": destination / "future-team-value-snapshot.json",
+        "player_rank_diffs": destination / "future-player-rank-diffs.json",
+        "team_rank_diffs": destination / "future-team-rank-diffs.json",
+        "receipt": destination / "future-value-snapshot-receipt.json",
+    }
+    rows = {
+        "player_snapshot": list(result.player_rows),
+        "team_snapshot": list(result.team_rows),
+        "player_rank_diffs": list(result.player_rank_diffs),
+        "team_rank_diffs": list(result.team_rank_diffs),
+    }
+    for key, path in paths.items():
+        if key in rows:
+            payload = {
+                "schema_version": SCHEMA_VERSION,
+                "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+                "status": result.status,
+                "authority": dict(SNAPSHOT_AUTHORITY),
+                "variant": result.receipt.get("variant"),
+                "capability": dict(result.receipt.get("capability") or {}),
+                "source_receipt_sha256": result.receipt["source"]["source_receipt_sha256"],
+                "rows": rows[key],
+                "blockers": list(result.blockers),
+            }
+            if key in {"player_rank_diffs", "team_rank_diffs"}:
+                scope = "player" if key.startswith("player") else "team"
+                payload["rank_coverage"] = dict(
+                    result.receipt.get("rank_coverage", {}).get(scope, {})
+                )
+                if result.receipt.get("current_rating_inputs") is not None:
+                    payload["current_rating_inputs"] = dict(
+                        result.receipt["current_rating_inputs"]
+                    )
+        else:
+            payload = dict(result.receipt)
+        path.write_text(
+            json.dumps(payload, ensure_ascii=True, sort_keys=True, allow_nan=False, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+        "status": result.status,
+        "authority": dict(SNAPSHOT_AUTHORITY),
+        "variant": result.receipt.get("variant"),
+        "capability": dict(result.receipt.get("capability") or {}),
+        "capability_matrix": snapshot_capability_matrix(),
+        "source_receipt_sha256": result.receipt["source"]["source_receipt_sha256"],
+        "team_context": dict(result.receipt.get("team_context") or {}),
+        "files": {
+            key: {
+                "path": str(path),
+                "bytes": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            }
+            for key, path in paths.items()
+        },
+        "blockers": list(result.blockers),
+    }
+    manifest["manifest_sha256"] = _sha256_bytes(_canonical_json_bytes(manifest))
+    (destination / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=True, sort_keys=True, allow_nan=False, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+__all__ = [
+    "FinalFitAuthorization",
+    "FutureValueSnapshotError",
+    "FutureValueSnapshotResult",
+    "SNAPSHOT_CAPABILITY_MATRIX",
+    "SNAPSHOT_CAPABILITY_SCHEMA_VERSION",
+    "SNAPSHOT_AUTHORITY",
+    "SNAPSHOT_VARIANTS",
+    "SNAPSHOT_RECEIPT_SCHEMA_VERSION",
+    "SCHEMA_VERSION",
+    "CURRENT_MU_EFFECTIVE_SCOPE",
+    "FORM_COMPONENT_SCOPE",
+    "SCALING_CONTEXT_BLOCKER",
+    "SCALING_CONTEXT_FIELDS",
+    "SCALING_CONTEXT_SCOPE",
+    "TEAM_CONTEXT_BINDING_SCHEMA_VERSION",
+    "TEAM_CONTEXT_MODEL_FEATURES",
+    "authorize_final_fit",
+    "build_future_value_snapshots",
+    "build_future_value_snapshot_capability_manifest",
+    "build_snapshot_capability_manifest",
+    "load_final_fit_model",
+    "snapshot_capability_matrix",
+    "write_snapshot_bundle",
+]

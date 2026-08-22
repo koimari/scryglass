@@ -26,6 +26,14 @@ from lol_kills.ratings.player_elo import (
     build_player_weekly_ranks,
     weekly_replay_checkpoint_dates,
 )
+from lol_kills.ratings.source_identity import (
+    attach_player_ids,
+    attach_player_rating_ids,
+    attach_sequential_team_ids,
+    attach_team_ids,
+    attach_weekly_ids,
+    build_rating_identity_maps,
+)
 from lol_kills.ratings.momentum_config import (
     DEFAULT_MOMENTUM_SCALE,
     DEFAULT_MOMENTUM_WINDOW_GAMES,
@@ -193,6 +201,12 @@ def refresh_ratings(
         expected_rows_per_game=10,
         label="player",
     )
+    identity_maps = build_rating_identity_maps(
+        players,
+        team_games,
+        source_identity_sha256=rating_source_identity,
+        source_game_count=len(map_ids),
+    )
 
     # ``FEATURES_DIR`` is resolved when the worker imports the ETL path
     # module.  It can point at the code checkout, so use the runtime-relative
@@ -232,6 +246,30 @@ def refresh_ratings(
         checkpoint_dates=weekly_replay_checkpoint_dates(cutoff, previous_as_of),
         replay_out=player_replay,
     )
+    ratings_path = features_dir / "ratings.parquet"
+    if ratings_path.exists():
+        ratings = pd.read_parquet(ratings_path)
+        attach_sequential_team_ids(ratings, identity_maps).to_parquet(
+            ratings_path, index=False
+        )
+    player_ratings_path = features_dir / "player_ratings.parquet"
+    if player_ratings_path.exists():
+        player_ratings = pd.read_parquet(player_ratings_path)
+        attach_player_rating_ids(
+            player_ratings, players, identity_maps
+        ).to_parquet(player_ratings_path, index=False)
+    dual_snapshot_path = features_dir / "ratings_dual_snapshot.parquet"
+    if dual_snapshot_path.exists():
+        dual_snapshot = pd.read_parquet(dual_snapshot_path)
+        attach_team_ids(dual_snapshot, identity_maps).to_parquet(
+            dual_snapshot_path, index=False
+        )
+    player_snapshot_path = features_dir / "player_ratings_snapshot.parquet"
+    if player_snapshot_path.exists():
+        player_snapshot = pd.read_parquet(player_snapshot_path)
+        attach_player_ids(player_snapshot, identity_maps).to_parquet(
+            player_snapshot_path, index=False
+        )
     team_snapshot, team_meta = fit_hierarchical_bt(
         maps,
         write=True,
@@ -245,11 +283,13 @@ def refresh_ratings(
         sequential_team_snapshot,
         team_rating_cfg,
     )
+    team_snapshot = attach_team_ids(team_snapshot, identity_maps)
     team_snapshot.to_parquet(features_dir / "ratings_snapshot.parquet", index=False)
     team_meta["momentum"] = momentum_manifest_metadata(
         window_games=momentum_window_games,
         scale=momentum_scale,
     )
+    team_meta["identity_mapping"] = identity_maps.coverage
     (features_dir / "ratings_meta.json").write_text(
         json.dumps(team_meta, indent=2),
         encoding="utf-8",
@@ -263,6 +303,7 @@ def refresh_ratings(
         cache_dir=features_dir,
         source_identity_sha256=rating_source_identity,
     )
+    team_weekly = attach_weekly_ids(team_weekly, identity_maps, kind="team")
     player_weekly = build_player_weekly_ranks(
         player_maps,
         players,
@@ -273,6 +314,12 @@ def refresh_ratings(
         previous_as_of=previous_as_of,
         replay=player_replay,
     )
+    player_weekly = attach_weekly_ids(player_weekly, identity_maps, kind="player")
+    player_meta_path = features_dir / "player_ratings_meta.json"
+    if player_meta_path.exists():
+        player_meta = json.loads(player_meta_path.read_text(encoding="utf-8"))
+        player_meta["identity_mapping"] = identity_maps.coverage
+        player_meta_path.write_text(json.dumps(player_meta, indent=2), encoding="utf-8")
     (features_dir / "team_weekly_ranks.json").write_text(
         json.dumps(team_weekly, indent=2) + "\n",
         encoding="utf-8",
@@ -314,6 +361,7 @@ def refresh_ratings(
             "team_rows": int(len(team_games)),
             "player_rows": int(len(players)),
             "player_rows_by_year": player_rows_by_year,
+            "identity_mapping": identity_maps.coverage,
         },
         "team": {
             "snapshot_rows": int(len(team_snapshot)),
@@ -333,6 +381,18 @@ def refresh_ratings(
             scale=momentum_scale,
         ),
         "artifacts": {
+            "team_sequential": _artifact_meta(
+                features_dir / "ratings.parquet", repo_root,
+                rows=len(pd.read_parquet(features_dir / "ratings.parquet")),
+            ),
+            "player_ratings": _artifact_meta(
+                features_dir / "player_ratings.parquet", repo_root,
+                rows=len(pd.read_parquet(features_dir / "player_ratings.parquet")),
+            ),
+            "team_dual_snapshot": _artifact_meta(
+                features_dir / "ratings_dual_snapshot.parquet", repo_root,
+                rows=len(pd.read_parquet(features_dir / "ratings_dual_snapshot.parquet")),
+            ),
             "team_snapshot": _artifact_meta(
                 features_dir / "ratings_snapshot.parquet",
                 repo_root,
@@ -358,6 +418,7 @@ def refresh_ratings(
             "team": team_weekly,
             "player": player_weekly,
         },
+        "identity_mapping": identity_maps.coverage,
         "claim_ceiling": "These are source-bound descriptive rating refresh artifacts. They do not grant predictive, recommendation, or betting authority.",
     }
     output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

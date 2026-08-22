@@ -1,0 +1,420 @@
+{
+  "authority": "development_only",
+  "source_receipt_sha256": "71379924eaf4731a88de463d4abf26607bd465a8dd13b2d42789d6d1eb354134",
+  "source_receipt_artifact": {
+    "bytes": 1020795,
+    "locator": "data/lol/v2/evaluation/future-value-source-receipt-20260820.json",
+    "sha256": "549c6143e78c0a218b47d05b6de4eb62925427abc11d13df7b5bae3b784eaf8f",
+    "source_receipt_sha256": "71379924eaf4731a88de463d4abf26607bd465a8dd13b2d42789d6d1eb354134",
+    "verification": "read the durable receipt, verify its file hash, recompute receipt_sha256, and verify source-file hashes"
+  },
+  "blockers": [
+    "fold-internal fitted weights have no independent promotion receipt",
+    "808 accepted maps have incomplete stable team identity and retain explicit missing pregame team-form features",
+    "the requested three chronological folds produce two valid folds because the first block has no earlier training rows",
+    "regional transfer has one unavailable group, LFL2, and patch transfer has one unavailable group, 15.01",
+    "authoritative whole-series identity is unavailable for 16,407 team_tournament_proxy rows; the proxy keeps cross-date matchups together but can merge separate series",
+    "phase and future-value evaluation partitions are non-comparable until they share a stable team crosswalk",
+    "current output is not wired into public ratings or public phase forecasts"
+  ],
+  "curve_definitions": {
+    "comeback_resilience": "share of early-behind maps with a smaller later gold deficit",
+    "scaling_index": "(xp25 - xp20) - (xp15 - xp10)",
+    "snowball_index": "(gold15 - gold10) - (gold25 - gold20)"
+  },
+  "evaluation_scope": {
+    "accepted_phase_rows": 17756,
+    "authoritative_series_identity": false,
+    "cluster_safe": false,
+    "cross_model_partition": {
+      "other_model_key_fields": [
+        "league",
+        "tournament",
+        "unordered_team_pair_alias_key"
+      ],
+      "phase_key_fields": [
+        "league",
+        "tournament",
+        "unordered_stable_oe_team_pair"
+      ],
+      "reason": "phase and future-value evaluation must use one shared team crosswalk before their cluster metrics can be compared",
+      "status": "non_comparable"
+    },
+    "date_end": "2026-08-20T11:31:37Z",
+    "date_start": "2025-01-11T11:11:24Z",
+    "patches": 40,
+    "population": "all accepted phase rows",
+    "regions": 50,
+    "series_cluster_column": "series_id",
+    "series_cluster_provenance": {
+      "cross_date_proxy_clusters": 1658,
+      "cross_date_proxy_rows": 12902,
+      "exact_id_proxy_rows": 1349,
+      "game_fallback_rows": 0,
+      "oe_bridge_rows": 524,
+      "oe_bridge_team_tournament_proxy_rows": 524,
+      "possible_collision_clusters": 2721,
+      "possible_collision_rows": 15644,
+      "team_tournament_proxy_clusters": 3484,
+      "team_tournament_proxy_rows": 16407,
+      "unique_clusters": 4003
+    },
+    "series_identity_blocker": "team_tournament_proxy identities keep cross-date matchup events together but can merge separate series"
+  },
+  "feature_columns": [
+    "prior_form_earnedgold_diff",
+    "prior_form_dpm_diff",
+    "prior_form_visionscore_diff"
+  ],
+  "feature_family": "checkpoint_forecasts",
+  "fit": {
+    "comeback_resilience": {
+      "by_window": {
+        "10_to_15": {
+          "support": 7788,
+          "value": 0.37442218798151
+        },
+        "10_to_20": {
+          "support": 7766,
+          "value": 0.3655678599021375
+        },
+        "10_to_25": {
+          "support": 7215,
+          "value": 0.386001386001386
+        },
+        "15_to_20": {
+          "support": 7836,
+          "value": 0.3594946401225115
+        },
+        "15_to_25": {
+          "support": 7299,
+          "value": 0.36100835730922043
+        }
+      },
+      "definition": "share of early-behind maps with a smaller late gold deficit",
+      "support": 7215,
+      "value": 0.386001386001386
+    },
+    "complete_team_maps": 16948,
+    "coverage": {
+      "gold": {
+        "10": {
+          "at_risk_coverage": 0.948073890515882,
+          "at_risk_rows": 17756,
+          "censored_rows": 0,
+          "coverage": 0.948073890515882,
+          "missing_rows": 922,
+          "observed_rows": 16834,
+          "rows": 17756,
+          "uncensored_missing_rows": 922
+        },
+        "15": {
+          "at_risk_coverage": 0.948073890515882,
+          "at_risk_rows": 17756,
+          "censored_rows": 0,
+          "coverage": 0.948073890515882,
+          "missing_rows": 922,
+          "observed_rows": 16834,
+          "rows": 17756,
+          "uncensored_missing_rows": 922
+        },
+        "20": {
+          "at_risk_coverage": 0.9478531073446328,
+          "at_risk_rows": 17700,
+          "censored_rows": 56,
+          "coverage": 0.9448637080423519,
+          "missing_rows": 979,
+          "observed_rows": 16777,
+          "rows": 17756,
+          "uncensored_missing_rows": 923
+        },
+        "25": {
+          "at_risk_coverage": 0.9453148814241298,
+          "at_risk_rows": 16403,
+          "censored_rows": 1353,
+          "coverage": 0.8732822707817076,
+          "missing_rows": 2250,
+          "observed_rows": 15506,
+          "rows": 17756,
+          "uncensored_missing_rows": 897
+        }
+      },
+      "xp": {
+        "10": {
+          "at_risk_coverage": 0.948073890515882,
+          "at_risk_rows": 17756,
+          "censored_rows": 0,
+          "coverage": 0.948073890515882,
+          "missing_rows": 922,
+          "observed_rows": 16834,
+          "rows": 17756,
+          "uncensored_missing_rows": 922
+        },
+        "15": {
+          "at_risk_coverage": 0.948073890515882,
+          "at_risk_rows": 17756,
+          "censored_rows": 0,
+          "coverage": 0.948073890515882,
+          "missing_rows": 922,
+          "observed_rows": 16834,
+          "rows": 17756,
+          "uncensored_missing_rows": 922
+        },
+        "20": {
+          "at_risk_coverage": 0.9478531073446328,
+          "at_risk_rows": 17700,
+          "censored_rows": 56,
+          "coverage": 0.9448637080423519,
+          "missing_rows": 979,
+          "observed_rows": 16777,
+          "rows": 17756,
+          "uncensored_missing_rows": 923
+        },
+        "25": {
+          "at_risk_coverage": 0.9453148814241298,
+          "at_risk_rows": 16403,
+          "censored_rows": 1353,
+          "coverage": 0.8732822707817076,
+          "missing_rows": 2250,
+          "observed_rows": 15506,
+          "rows": 17756,
+          "uncensored_missing_rows": 897
+        }
+      }
+    },
+    "incomplete_team_identity_maps": 808,
+    "model_rows": 16948,
+    "models": {
+      "gold": {
+        "10": {
+          "coefficients": [
+            372.86139285915135,
+            32.80928592418451,
+            416.63426972469557,
+            32.80928592418451,
+            164.0680821199573,
+            32.80928592418451
+          ],
+          "intercept": 0.0,
+          "mae": 1082.8941581809631,
+          "residual_sd": 1397.9175806473054,
+          "rmse": 1402.7295343142332,
+          "train_rows": 16834
+        },
+        "15": {
+          "coefficients": [
+            950.3371610938118,
+            54.94945636203348,
+            912.3839097863113,
+            54.94945636203348,
+            271.8961640281678,
+            54.94945636203348
+          ],
+          "intercept": 0.0,
+          "mae": 2113.1144003389945,
+          "residual_sd": 2754.9195097463016,
+          "rmse": 2766.4197457426603,
+          "train_rows": 16834
+        },
+        "20": {
+          "coefficients": [
+            1807.3870968065,
+            123.23997623997637,
+            1624.536653450966,
+            123.23997623997637,
+            293.8876458734947,
+            123.23997623997637
+          ],
+          "intercept": 0.0,
+          "mae": 3474.853258951605,
+          "residual_sd": 4431.8434967616595,
+          "rmse": 4454.523415990066,
+          "train_rows": 16777
+        },
+        "25": {
+          "coefficients": [
+            2489.73658723887,
+            97.72128899554329,
+            1777.2208552900306,
+            97.72128899554329,
+            -57.499456540476984,
+            97.72128899554329
+          ],
+          "intercept": 0.0,
+          "mae": 4682.703010604416,
+          "residual_sd": 5802.764115141017,
+          "rmse": 5825.289326312075,
+          "train_rows": 15506
+        }
+      },
+      "xp": {
+        "10": {
+          "coefficients": [
+            365.79068581075006,
+            0.018948578583793084,
+            251.91541117705293,
+            0.018948578583793084,
+            55.67134335967566,
+            0.018948578583793084
+          ],
+          "intercept": 0.0,
+          "mae": 802.3276348763312,
+          "residual_sd": 1035.048318352702,
+          "rmse": 1037.3447005560154,
+          "train_rows": 16834
+        },
+        "15": {
+          "coefficients": [
+            842.9345433280337,
+            -12.339406406112253,
+            571.9287012071152,
+            -12.339406406112253,
+            100.1617187983879,
+            -12.339406406112253
+          ],
+          "intercept": 0.0,
+          "mae": 1683.8060071698962,
+          "residual_sd": 2186.646282601284,
+          "rmse": 2190.1810103713515,
+          "train_rows": 16834
+        },
+        "20": {
+          "coefficients": [
+            1717.5156962561798,
+            23.24740124740124,
+            1077.2718274826032,
+            23.24740124740124,
+            7.650842197335805,
+            23.24740124740124
+          ],
+          "intercept": 0.0,
+          "mae": 2907.4713274794535,
+          "residual_sd": 3722.88835783061,
+          "rmse": 3726.357417591367,
+          "train_rows": 16777
+        },
+        "25": {
+          "coefficients": [
+            2779.0921060765686,
+            -24.67398011655812,
+            1745.3578065361457,
+            -24.67398011655812,
+            -125.39903829909971,
+            -24.67398011655812
+          ],
+          "intercept": 0.0,
+          "mae": 5472.635130022878,
+          "residual_sd": 6694.30108914845,
+          "rmse": 6700.864612293169,
+          "train_rows": 15506
+        }
+      }
+    },
+    "observed_curve_measures": {
+      "scaling_index": 65.74618627862571,
+      "snowball_index": 86.30134272956616
+    },
+    "support": {
+      "gold": {
+        "10": 16834,
+        "15": 16834,
+        "20": 16777,
+        "25": 15506
+      },
+      "xp": {
+        "10": 16834,
+        "15": 16834,
+        "20": 16777,
+        "25": 15506
+      }
+    },
+    "uncertainty": {
+      "gold": {
+        "10": 1397.9175806473054,
+        "15": 2754.9195097463016,
+        "20": 4431.8434967616595,
+        "25": 5802.764115141017
+      },
+      "xp": {
+        "10": 1035.048318352702,
+        "15": 2186.646282601284,
+        "20": 3722.88835783061,
+        "25": 6694.30108914845
+      }
+    }
+  },
+  "model_version": "future-phase-curve-v1",
+  "schema_version": "scryglass:future-phase-curve:v1",
+  "series_identity": {
+    "authoritative": false,
+    "blockers": [
+      "team_tournament_proxy identities keep cross-date matchup events together but can merge separate series"
+    ],
+    "cluster_counts": {
+      "exact_id_proxy": 519,
+      "team_tournament_proxy": 3484
+    },
+    "cross_model_partition": {
+      "other_model_key_fields": [
+        "league",
+        "tournament",
+        "unordered_team_pair_alias_key"
+      ],
+      "phase_key_fields": [
+        "league",
+        "tournament",
+        "unordered_stable_oe_team_pair"
+      ],
+      "reason": "phase and future-value evaluation must use one shared team crosswalk before their cluster metrics can be compared",
+      "status": "non_comparable"
+    },
+    "possible_collisions": {
+      "clusters": 2721,
+      "cross_date_clusters": 1658,
+      "cross_date_rows": 12902,
+      "definition": "proxy clusters with multiple maps may contain separate series because authoritative series IDs are unavailable",
+      "rows": 15644,
+      "source": "team_tournament_proxy"
+    },
+    "source_counts": {
+      "exact_id_proxy": 1349,
+      "team_tournament_proxy": 16407
+    },
+    "status": "blocked",
+    "unique_clusters": 4003
+  },
+  "source": {
+    "accepted_game_count": 17756,
+    "accepted_game_ids_artifact": {
+      "bytes": 441354,
+      "game_ids_field": "game_ids",
+      "locator": "data/lol/v2/evaluation/future-phase-accepted-census.json",
+      "schema_version": "scryglass:accepted-game-census:v1",
+      "sha256": "aa38b8a4eb9eee71406c834536bbdd200ca0fd2e6402acf0121defc0fb076227",
+      "verification": "read game_ids, canonicalize them, then compare source_game_count and source_identity_sha256",
+      "verified": {
+        "bytes": 441354,
+        "game_count": 17756,
+        "sha256": "aa38b8a4eb9eee71406c834536bbdd200ca0fd2e6402acf0121defc0fb076227",
+        "source_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1",
+        "status": "verified"
+      }
+    },
+    "accepted_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1",
+    "source_as_of": "2026-08-20T11:31:37Z",
+    "source_game_count": 17756,
+    "source_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1",
+    "source_receipt_sha256": "71379924eaf4731a88de463d4abf26607bd465a8dd13b2d42789d6d1eb354134",
+    "transport": "official_public_oracles_elixir_annual_exports_plus_oe_api_bridge",
+    "lineage": {
+      "annual_exports": ["annual_2025", "annual_2026"],
+      "oe_api_bridge": [
+        "bridge_oe_api_meta.json",
+        "bridge_oe_api_player_games.parquet",
+        "bridge_oe_api_team_games.parquet"
+      ],
+      "identity_binding": "accepted_game_ids and source-file hashes",
+      "research_only": true
+    }
+  }
+}

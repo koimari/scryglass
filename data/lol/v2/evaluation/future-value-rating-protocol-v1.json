@@ -1,0 +1,97 @@
+{
+  "authority": {
+    "betting": false,
+    "deployment": false,
+    "expected_value": false,
+    "merge": false,
+    "odds": false,
+    "promotion": false,
+    "public_player_rating": false,
+    "public_probability": false,
+    "public_team_rating": false,
+    "recommendation": false
+  },
+  "evaluation": [
+    "non-overlapping chronological intervals with whole clusters and boundary-cluster exclusion",
+    "intercept baseline and proper scores",
+    "conservative series-superset clusters with collision audit",
+    "validation calibration bins and pooled proper scores",
+    "regional and patch transfer slices with training-support checks",
+    "roster-change and tournament-boundary slices",
+    "separate complete and imputed-row proper scores with imputed-only blockers",
+    "fold-local equal-side imputation with signed missingness and support indicators",
+    "minimum and per-metric support diagnostics with named missing features",
+    "structural side-swap probability-complement identity",
+    "serialized player, team-context, and data-quality logit reconstruction with per-player support evidence"
+  ],
+  "estimands": {
+    "future_player_value": "Development-only marginal map-win logit contribution for one player in the next eligible map, using strictly prior form, role, champion-role atoms, and explicit support diagnostics.",
+    "future_team_value": "Development-only exact-five roster map-win logit difference before the next eligible map. It uses roster player-form aggregates, prior team win state, and roster continuity."
+  },
+  "fit_contract": {
+    "metric_weights": "fit inside development folds; no hand-assigned performance weights",
+    "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red; allow neutral zero only for all-missing centered atom coordinates and fail closed otherwise",
+    "optimizer": "require finite converged zero-intercept L-BFGS evidence for every nested candidate and final fold fit",
+    "player_state": "strictly prior time-decayed form and fold-local rank-3 atoms summed across each exact five-player side",
+    "regularization": "select L2 strength inside each outer training fold with a nested chronological whole-series log-loss comparison",
+    "representation": "atom-derived rank-3 champion embedding refit inside each chronological fold",
+    "role_identity": "normalize top, jungle, mid, bot, and support aliases before every atom fit and transform lookup",
+    "side_symmetry": "zero-intercept linear logit over blue-minus-red features after equal fold-local side imputation",
+    "team_state": "blue-minus-red difference of exact five-player side sums plus strictly prior team win state and roster continuity"
+  },
+  "future_scope_blockers": [
+    "current_player_team_rating_comparison",
+    "composition_specific_phase_curve",
+    "calibrated_uncertainty",
+    "authoritative_series_identity",
+    "authoritative_series_cluster_evaluation",
+    "phase_model_series_partition_comparability"
+  ],
+  "information_boundary": {
+    "current_checkpoint_targets": "target only; forbidden from the same map pregame vector",
+    "current_final_metrics": "update future history only after the map",
+    "future_rows": "forbidden from baselines, embeddings, loadings, and hyperparameter selection",
+    "same_timestamp_maps": "independent batch; updates become available after the full timestamp block"
+  },
+  "lineage": {
+    "atomized_feature_builder": {
+      "locator": "lol_kills/research/atomized_rf_composite.py",
+      "raw_sha256": "dddc44fb5f7e00716d2d84db306f7064915811bab71f040a31e13cfc05e160e5"
+    },
+    "descriptive_player_rating_protocol": {
+      "locator": "data/lol/v2/evaluation/player-rating-atom-archetype-protocol-v6.json",
+      "raw_sha256": "39000bb5f76900c8f05a899b44c6de4284de297a2aad6655a33776fd8a7f5c2e",
+      "relationship": "The future-value model extends the deferred atom direction. It does not replace or amend the descriptive v6 rating."
+    },
+    "future_value_model_builder": {
+      "locator": "lol_kills/research/future_value_rating.py",
+      "raw_sha256": "e7816a451a99276745f227a818c1d46a8283826899049f471c42db962279f84d"
+    },
+    "phase_curve_builder": {
+      "locator": "lol_kills/research/future_phase_curve.py",
+      "raw_sha256": "69595423051603744251c418bd7a519cd402d33c799820cc3902d8ba9f6c1f69"
+    }
+  },
+  "phase_outputs": [
+    "expected_gold_curve_10_15_20_25",
+    "expected_xp_curve_10_15_20_25",
+    "scaling_index",
+    "snowball_index",
+    "comeback_resilience"
+  ],
+  "player_components": [
+    "strictly_prior_time_decayed_performance_form",
+    "fitted_metric_weights",
+    "fold_local_rank_3_player_atom",
+    "fold_local_rank_3_champion_role_atom",
+    "support_and_missingness_diagnostics"
+  ],
+  "schema_version": "scryglass:future-value-rating-contract:v1",
+  "status": "development_only",
+  "team_components": [
+    "exact_roster_player_sum",
+    "strictly_prior_team_win_state",
+    "roster_continuity",
+    "support_and_missingness_diagnostics"
+  ]
+}

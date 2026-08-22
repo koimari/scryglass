@@ -52,6 +52,43 @@ def _with_receipt_paths(config: public_refresh.RefreshConfig) -> public_refresh.
     )
 
 
+def test_future_value_shadow_failure_cannot_interrupt_public_refresh(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    state_path = config.sync.state_path
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps({"published_game_ids": ["game-1", "game-2"]}),
+        encoding="utf-8",
+    )
+    ratings = {
+        "status": "published",
+        "pack_id": "v2026.08.21.120000",
+        "source_game_count": 2,
+        "source_identity_sha256": source_identity_sha256(["game-1", "game-2"]),
+        "source_observed_through": "2026-08-21T12:00:00Z",
+    }
+
+    with patch.object(
+        public_refresh,
+        "run_future_value_refresh_shadow",
+        side_effect=RuntimeError("fixture shadow failure"),
+    ):
+        result = public_refresh._run_future_value_shadow(
+            config,
+            ratings=ratings,
+            accepted_inputs=None,
+            checked_at=NOW,
+        )
+
+    assert result["status"] == "research_only_blocked"
+    assert result["blockers"] == ["shadow_adapter_failed"]
+    assert result["authority"]["promotion"] is False
+    assert result["writes_public_artifacts"] is False
+    assert result["stage_or_activation"] is False
+
+
 def test_tier_publication_binds_runtime_payload_to_accepted_source(tmp_path: Path) -> None:
     config = replace(_config(tmp_path), publication_backend="supabase")
     payload_path = (
@@ -241,6 +278,53 @@ def test_tier_failure_keeps_a_smoke_verified_ratings_release(tmp_path: Path) -> 
     assert health["status"] == "error"
     result = json.loads(config.state_path.read_text(encoding="utf-8"))
     assert result["status"] == "partial"
+
+
+def test_future_value_shadow_runs_after_ratings_and_stays_out_of_public_pack(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)
+    game_ids = ["game-1"]
+    config.sync.state_path.write_text(
+        json.dumps({"published_game_ids": game_ids}),
+        encoding="utf-8",
+    )
+    config.state_path.write_text(
+        json.dumps({"tier": {"status": "available"}}),
+        encoding="utf-8",
+    )
+    ratings = {
+        "status": "no_change",
+        "pack_id": "old",
+        "source_observed_through": "2026-08-09T17:00:00Z",
+        "source_identity_sha256": source_identity_sha256(game_ids),
+    }
+    with patch.object(public_refresh, "_preflight"), patch.object(
+        public_refresh, "_run_with_source_retries", return_value=ratings
+    ), patch.object(
+        public_refresh,
+        "verify_public_release",
+        return_value={"pack_id": "old", "files": 1, "tier_status": "available"},
+    ):
+        result = public_refresh.run_once(config, now=NOW)
+
+    shadow = result["future_value_shadow"]
+    assert shadow["status"] == "research_only_blocked"
+    assert shadow["source"]["accepted_game_ids"] == game_ids
+    assert shadow["writes_public_artifacts"] is False
+    assert Path(str(shadow["receipt_path"])).is_file()
+    assert not (config.public_root / "future-value-shadow").exists()
+
+
+def test_future_value_shadow_promotion_request_fails_before_ratings_stage(
+    tmp_path: Path,
+) -> None:
+    config = replace(_config(tmp_path), future_value_shadow_promote_variant="both")
+    with patch.object(public_refresh, "_run_with_source_retries") as ratings:
+        with pytest.raises(public_refresh.PublicRefreshError, match="independent authorization"):
+            public_refresh.run_once(config, now=NOW)
+    ratings.assert_not_called()
 
 
 def test_failed_public_smoke_restores_the_previous_pack(tmp_path: Path) -> None:

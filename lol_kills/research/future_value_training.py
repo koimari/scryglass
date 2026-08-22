@@ -1,0 +1,2470 @@
+"""Verify the frozen future-value source on an isolated research runner.
+
+This entry point prepares source receipts only. It does not fit, promote, or
+publish a player or team model. A later training stage must consume the
+verified source receipt and satisfy the frozen evaluation protocol.
+"""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+import platform
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any, Mapping, Sequence
+
+import pandas as pd
+
+from lol_kills.etl.source_keys import canonical_source_game_key
+from lol_kills.research.future_value_rating import (
+    FutureValueSourceError,
+    RATING_VARIANT_ORDER,
+    RatingVariant,
+    bind_accepted_future_value_source,
+    bind_verified_leaguepedia_series_crosswalk,
+    evaluate_future_value,
+    _map_model_frame,
+    _phase_partition_evidence,
+    rating_variant_config_receipt,
+    validate_future_value_source_receipt_payload,
+    write_source_receipt,
+)
+from lol_kills.v2.tierlists.accepted_census import (
+    canonical_game_ids,
+    census_payload,
+    identity_sha256,
+)
+
+
+SCHEMA_VERSION = "scryglass:future-value-research-run:v1"
+MODEL_RUNTIME_SCHEMA_VERSION = "scryglass:future-value-model-runtime:v1"
+FREEZE_SCHEMA_VERSION = "scryglass:future-value-source-freeze:v1"
+FREEZE_SCHEMA_V2_VERSION = "scryglass:future-value-source-freeze:v2"
+DUPLICATE_RESOLUTION_SCHEMA_VERSION = (
+    "scryglass:future-value-duplicate-resolution:v1"
+)
+CALIBRATION_PRIOR_SCHEMA_VERSION = "scryglass:future-value-calibration-prior-folds:v1"
+DEFAULT_FREEZE = Path(
+    "data/lol/v2/evaluation/future-value-source-freeze-20260820.json"
+)
+
+
+class FutureValueTrainingError(RuntimeError):
+    """The cloud research source does not match the frozen contract."""
+
+
+# These six bridge identities are the duplicate rows identified in the
+# Leaguepedia crosswalk audit. A v1 freeze from before that audit remains
+# valid. A later freeze which excludes one of these identities must carry
+# the source-row resolution block below.
+KNOWN_DUPLICATE_BRIDGE_GAME_IDS = frozenset(
+    {
+        "oe:game:89609382968cd2df470ef4045dc46ec6",
+        "oe:game:9016fd21e40958f2f16f2ddbb98189bc",
+        "oe:game:97451d300f5da565f5d47389b3d2013d",
+        "oe:game:c27543b86f23fbbc7a6653449b24ffda",
+        "oe:game:c30f963f1ab69d6618fbcfce8529359a",
+        "oe:game:d4a6c7a5ff332510ca4cb6741274b7ad",
+    }
+)
+_SUPPORTED_FREEZE_SCHEMA_VERSIONS = frozenset(
+    {FREEZE_SCHEMA_VERSION, FREEZE_SCHEMA_V2_VERSION}
+)
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+_DUPLICATE_ROW_ID_FIELDS = (
+    "game_uid",
+    "game_id",
+    "gameid",
+    "oe_gameid",
+    "oe_game_id",
+)
+_DUPLICATE_SEMANTIC_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "date": ("date", "DateTime UTC", "DateTime_UTC", "datetime_utc"),
+    "league": ("league", "League"),
+    "tournament": ("tournament", "Tournament"),
+    "patch": ("patch", "Patch"),
+    "blue_team": ("blue_team", "blue_teamname", "Team1", "team1"),
+    "red_team": ("red_team", "red_teamname", "Team2", "team2"),
+    "blue_team_key": ("blue_team_key", "BlueTeamKey", "team1_key"),
+    "red_team_key": ("red_team_key", "RedTeamKey", "team2_key"),
+    "y_blue_win": ("y_blue_win", "blue_result", "result_blue"),
+}
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _canonical_bytes(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise FutureValueTrainingError("research receipt is not canonical JSON") from error
+
+
+def _duplicate_json_safe(value: object) -> object:
+    """Convert parquet scalars to strict JSON for the mapping digest.
+
+    Source-row snapshots can contain pandas timestamps, nullable values, and
+    NumPy scalar objects.  The freeze digest must cover those values without
+    allowing JSON NaN tokens or process-specific scalar representations.
+    """
+
+    if isinstance(value, Mapping):
+        return {str(key): _duplicate_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_duplicate_json_safe(item) for item in value]
+    if isinstance(value, (pd.Timestamp, datetime)):
+        parsed = pd.to_datetime(value, errors="coerce", utc=True)
+        return None if pd.isna(parsed) else pd.Timestamp(parsed).isoformat()
+    try:
+        missing = pd.isna(value)
+        if isinstance(missing, bool) and missing:
+            return None
+    except (TypeError, ValueError):
+        pass
+    item = getattr(value, "item", None)
+    if callable(item) and not isinstance(value, (str, bytes, bytearray)):
+        try:
+            scalar = item()
+        except (TypeError, ValueError):
+            scalar = value
+        if scalar is not value:
+            return _duplicate_json_safe(scalar)
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).hex()
+    return value
+
+
+def _canonical_mapping_sha256(mappings: Sequence[Mapping[str, Any]]) -> str:
+    """Hash duplicate mappings in a stable bridge-ID order."""
+
+    try:
+        rows = [_duplicate_json_safe(dict(row)) for row in mappings]
+        rows.sort(key=lambda row: str(row.get("bridge_game_id") or ""))
+    except (TypeError, ValueError) as error:
+        raise FutureValueTrainingError("duplicate resolution mappings are not canonical") from error
+    return hashlib.sha256(_canonical_bytes(rows)).hexdigest()
+
+
+def duplicate_resolution_mapping_sha256(
+    mappings: Sequence[Mapping[str, Any]],
+) -> str:
+    """Return the digest required by a source-freeze resolution block."""
+
+    return _canonical_mapping_sha256(mappings)
+
+
+def _duplicate_resolution_block(freeze: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Return the one supported duplicate block, rejecting two copies."""
+
+    top_level = freeze.get("duplicate_resolution")
+    accepted = freeze.get("accepted_census")
+    nested = accepted.get("duplicate_resolution") if isinstance(accepted, Mapping) else None
+    if top_level is not None and nested is not None:
+        if not isinstance(top_level, Mapping) or not isinstance(nested, Mapping):
+            raise FutureValueTrainingError("duplicate resolution block is invalid")
+        if _canonical_bytes(top_level) != _canonical_bytes(nested):
+            raise FutureValueTrainingError("duplicate resolution block is duplicated inconsistently")
+    block = top_level if top_level is not None else nested
+    if block is None:
+        return None
+    if not isinstance(block, Mapping):
+        raise FutureValueTrainingError("duplicate resolution block is invalid")
+    return block
+
+
+def _required_duplicate_bridge_ids(freeze: Mapping[str, Any]) -> set[str]:
+    """Return IDs that require a duplicate block in a migrated freeze."""
+
+    accepted = freeze.get("accepted_census")
+    excluded = set()
+    if isinstance(accepted, Mapping):
+        excluded = set(canonical_game_ids(accepted.get("excluded_game_ids") or ()))
+    explicit = freeze.get("duplicate_resolution_required_bridge_game_ids")
+    if explicit is not None:
+        if not isinstance(explicit, list):
+            raise FutureValueTrainingError(
+                "duplicate resolution required IDs are invalid"
+            )
+        explicit_ids = set(canonical_game_ids(explicit))
+        if len(explicit_ids) != len(explicit):
+            raise FutureValueTrainingError(
+                "duplicate resolution required IDs are not canonical and unique"
+            )
+    else:
+        explicit_ids = set()
+    return (excluded & KNOWN_DUPLICATE_BRIDGE_GAME_IDS) | explicit_ids
+
+
+def _validate_duplicate_resolution_structure(
+    freeze: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Validate block shape and digest before source rows are available."""
+
+    block = _duplicate_resolution_block(freeze)
+    required_ids = _required_duplicate_bridge_ids(freeze)
+    if block is None:
+        if required_ids:
+            raise FutureValueTrainingError(
+                "duplicate resolution block is required for excluded bridge IDs"
+            )
+        return None
+    if block.get("schema_version") != DUPLICATE_RESOLUTION_SCHEMA_VERSION:
+        raise FutureValueTrainingError("duplicate resolution schema is invalid")
+    survivor_rule = block.get("survivor_rule")
+    if not isinstance(survivor_rule, str) or not survivor_rule.strip():
+        raise FutureValueTrainingError("duplicate resolution survivor rule is missing")
+    mappings = block.get("mappings")
+    if not isinstance(mappings, list) or not mappings or any(
+        not isinstance(row, Mapping) for row in mappings
+    ):
+        raise FutureValueTrainingError("duplicate resolution mappings are invalid")
+    claimed = block.get("mapping_sha256")
+    if not isinstance(claimed, str) or _SHA256_RE.fullmatch(claimed) is None:
+        raise FutureValueTrainingError("duplicate resolution mapping digest is invalid")
+    if claimed.lower() != _canonical_mapping_sha256(mappings):
+        raise FutureValueTrainingError("duplicate resolution mapping digest changed")
+    bridge_ids: list[str] = []
+    survivor_ids: list[str] = []
+    for row in mappings:
+        bridge = row.get("bridge_game_id")
+        survivor = row.get("annual_survivor_game_id")
+        if not isinstance(bridge, str) or not bridge.strip():
+            raise FutureValueTrainingError("duplicate resolution bridge ID is missing")
+        if not isinstance(survivor, str) or not survivor.strip():
+            raise FutureValueTrainingError("duplicate resolution annual survivor is missing")
+        bridge_id = canonical_source_game_key(bridge)
+        survivor_id = canonical_source_game_key(survivor)
+        if bridge_id != bridge or survivor_id != survivor:
+            raise FutureValueTrainingError(
+                "duplicate resolution IDs are not canonical"
+            )
+        if row.get("survivor_rule") != survivor_rule:
+            raise FutureValueTrainingError(
+                "duplicate resolution mapping survivor rule does not match block"
+            )
+        bridge_ids.append(bridge_id)
+        survivor_ids.append(survivor_id)
+    if len(set(bridge_ids)) != len(bridge_ids):
+        raise FutureValueTrainingError("duplicate resolution bridge IDs are duplicated")
+    if len(set(survivor_ids)) != len(survivor_ids):
+        raise FutureValueTrainingError("duplicate resolution survivors are duplicated")
+    if required_ids and set(bridge_ids) != required_ids:
+        raise FutureValueTrainingError(
+            "duplicate resolution mappings do not cover required bridge IDs"
+        )
+    return block
+
+
+def _duplicate_value(value: object) -> object:
+    """Normalize JSON and parquet scalar values for semantic equality."""
+
+    if value is None:
+        return None
+    if isinstance(value, (pd.Timestamp, datetime)):
+        parsed = pd.to_datetime(value, errors="coerce", utc=True)
+        return None if pd.isna(parsed) else pd.Timestamp(parsed).isoformat()
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
+    return str(value).strip()
+
+
+def _duplicate_row_id(row: Mapping[str, Any]) -> str:
+    for field in _DUPLICATE_ROW_ID_FIELDS:
+        if field in row:
+            value = canonical_source_game_key(row.get(field))
+            if value:
+                return value
+    return ""
+
+
+def _duplicate_field_value(row: Mapping[str, Any], field: str) -> tuple[bool, object]:
+    aliases = _DUPLICATE_SEMANTIC_FIELD_ALIASES.get(field, (field,))
+    for alias in aliases:
+        if alias in row:
+            value = row.get(alias)
+            if field == "date" and value is not None:
+                parsed = pd.to_datetime(value, errors="coerce", utc=True)
+                if not pd.isna(parsed):
+                    return True, pd.Timestamp(parsed).isoformat()
+            return True, _duplicate_value(value)
+    return False, None
+
+
+def _duplicate_semantic_fields(
+    mapping: Mapping[str, Any],
+    bridge_row: Mapping[str, Any],
+    survivor_row: Mapping[str, Any],
+    bridge_actual: Mapping[str, Any],
+    survivor_actual: Mapping[str, Any],
+) -> None:
+    evidence = mapping.get("evidence")
+    if not isinstance(evidence, Mapping):
+        raise FutureValueTrainingError("duplicate resolution evidence is missing")
+    fields = evidence.get("semantic_fields", evidence.get("fields"))
+    if not isinstance(fields, list) or not fields or any(
+        not isinstance(field, str) or field not in _DUPLICATE_SEMANTIC_FIELD_ALIASES
+        for field in fields
+    ):
+        raise FutureValueTrainingError("duplicate resolution semantic fields are invalid")
+    if list(dict.fromkeys(fields)) != fields:
+        raise FutureValueTrainingError("duplicate resolution semantic fields are duplicated")
+    field_values = evidence.get("field_values")
+    if field_values is not None and not isinstance(field_values, Mapping):
+        raise FutureValueTrainingError("duplicate resolution evidence values are invalid")
+    for field in fields:
+        row_values: list[object] = []
+        for label, row in (
+            ("bridge source", bridge_row),
+            ("annual source", survivor_row),
+            ("bridge raw", bridge_actual),
+            ("annual raw", survivor_actual),
+        ):
+            present, value = _duplicate_field_value(row, field)
+            if not present:
+                raise FutureValueTrainingError(
+                    f"duplicate resolution {label} field is missing: {field}"
+                )
+            row_values.append(value)
+        if any(value != row_values[0] for value in row_values[1:]):
+            raise FutureValueTrainingError(
+                f"duplicate resolution semantic field changed: {field}"
+            )
+        if isinstance(field_values, Mapping):
+            expected = field_values.get(field)
+            _, normalized_expected = _duplicate_field_value({field: expected}, field)
+            if normalized_expected != row_values[0]:
+                raise FutureValueTrainingError(
+                    f"duplicate resolution evidence field changed: {field}"
+                )
+
+
+def _duplicate_file_record(
+    record: Any,
+    *,
+    label: str,
+) -> tuple[Path, bytes, dict[str, Any]]:
+    """Read one durable JSON artifact named by duplicate evidence."""
+
+    if not isinstance(record, Mapping):
+        raise FutureValueTrainingError(f"{label} file binding is missing")
+    raw_path = record.get("path", record.get("locator"))
+    expected_bytes = record.get("bytes")
+    expected_sha = record.get("sha256")
+    if (
+        not isinstance(raw_path, str)
+        or not raw_path.strip()
+        or not Path(raw_path).is_absolute()
+        or not isinstance(expected_bytes, int)
+        or isinstance(expected_bytes, bool)
+        or expected_bytes <= 0
+        or not isinstance(expected_sha, str)
+        or _SHA256_RE.fullmatch(expected_sha) is None
+    ):
+        raise FutureValueTrainingError(f"{label} file binding is invalid")
+    candidate = Path(raw_path)
+    if candidate.is_symlink():
+        raise FutureValueTrainingError(f"{label} file is a symlink")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise FutureValueTrainingError(f"{label} file is missing") from error
+    if resolved.is_symlink() or not resolved.is_file():
+        raise FutureValueTrainingError(f"{label} file is missing or unsafe")
+    current = Path(resolved.anchor)
+    for part in resolved.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise FutureValueTrainingError(f"{label} file path contains a symlink")
+    try:
+        raw = resolved.read_bytes()
+    except OSError as error:
+        raise FutureValueTrainingError(f"{label} file cannot be read") from error
+    actual_sha = hashlib.sha256(raw).hexdigest()
+    if len(raw) != expected_bytes or actual_sha != expected_sha.lower():
+        raise FutureValueTrainingError(f"{label} file bytes changed")
+    return resolved, raw, {
+        "path": str(resolved),
+        "bytes": len(raw),
+        "sha256": actual_sha,
+    }
+
+
+def _duplicate_json_artifact(
+    record: Any,
+    *,
+    label: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    path, raw, normalized = _duplicate_file_record(record, label=label)
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueTrainingError(f"{label} file is not valid JSON") from error
+    if not isinstance(value, Mapping):
+        raise FutureValueTrainingError(f"{label} JSON payload is invalid")
+    return dict(value), normalized
+
+
+def _duplicate_artifact_assignments(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Read assignments from the crosswalk or the closed duplicate audit."""
+
+    combined: list[Mapping[str, Any]] = []
+    for key in ("assignments", "mappings", "duplicate_mappings", "rows"):
+        rows = payload.get(key)
+        if isinstance(rows, list) and all(isinstance(row, Mapping) for row in rows):
+            combined.extend(rows)
+    issues = payload.get("issues")
+    if isinstance(issues, list) and all(isinstance(row, Mapping) for row in issues):
+        combined.extend(row for row in issues if row.get("kind") == "duplicate_source_assignment")
+    if not combined:
+        raise FutureValueTrainingError("duplicate identity artifact assignments are missing")
+    return combined
+
+
+def _duplicate_assignment_game_id(row: Mapping[str, Any]) -> str:
+    for key in ("oe_game_id", "bridge_game_id", "annual_survivor_game_id", "game_id", "game_uid"):
+        if key in row:
+            value = canonical_source_game_key(row.get(key))
+            if value:
+                return value
+    return ""
+
+
+def _duplicate_assignment_identity(row: Mapping[str, Any]) -> tuple[str, str]:
+    scoreboard = str(
+        row.get("scoreboard_game_id")
+        or row.get("ScoreboardGames.GameId")
+        or row.get("scoreboard_id")
+        or ""
+    ).strip()
+    riot = str(
+        row.get("scoreboard_riot_platform_game_id")
+        or row.get("RiotPlatformGameId")
+        or row.get("riot_platform_game_id")
+        or ""
+    ).strip()
+    return scoreboard, riot
+
+
+def _duplicate_identities_match(
+    left: tuple[str, str],
+    right: tuple[str, str],
+) -> bool:
+    """Compare scoreboard and Riot identities, allowing omitted evidence fields."""
+
+    return bool(
+        (not left[0] or not right[0] or left[0] == right[0])
+        and (not left[1] or not right[1] or left[1] == right[1])
+        and (left[0] or right[0] or left[1] or right[1])
+    )
+
+
+def _validate_duplicate_identity_source(
+    block: Mapping[str, Any],
+    freeze: Mapping[str, Any],
+) -> dict[str, tuple[str, str]]:
+    """Verify a durable crosswalk or closed duplicate-audit artifact."""
+
+    binding = block.get(
+        "source_binding",
+        block.get("crosswalk_binding", block.get("identity_source")),
+    )
+    if not isinstance(binding, Mapping):
+        raise FutureValueTrainingError("duplicate identity source binding is missing")
+    kind = binding.get("kind")
+    if kind not in {
+        "leaguepedia_crosswalk",
+        "verified_leaguepedia_crosswalk",
+        "duplicate_audit",
+    }:
+        raise FutureValueTrainingError("duplicate identity source kind is invalid")
+    artifact_record = binding.get("artifact", binding.get("crosswalk_artifact"))
+    receipt_record = binding.get("receipt", binding.get("crosswalk_receipt"))
+    artifact, artifact_file = _duplicate_json_artifact(
+        artifact_record,
+        label="duplicate identity artifact",
+    )
+    receipt, receipt_file = _duplicate_json_artifact(
+        receipt_record,
+        label="duplicate identity receipt",
+    )
+    expected_receipt_file_sha = binding.get(
+        "expected_receipt_file_sha256",
+        binding.get(
+            "expected_crosswalk_receipt_file_sha256",
+            binding.get("crosswalk_receipt_file_sha256"),
+        ),
+    )
+    if (
+        not isinstance(expected_receipt_file_sha, str)
+        or _SHA256_RE.fullmatch(expected_receipt_file_sha) is None
+        or expected_receipt_file_sha.lower() != receipt_file["sha256"]
+    ):
+        raise FutureValueTrainingError("duplicate identity receipt file digest changed")
+    receipt_body = dict(receipt)
+    receipt_hash = receipt_body.pop("receipt_sha256", None)
+    if (
+        not isinstance(receipt_hash, str)
+        or _SHA256_RE.fullmatch(receipt_hash) is None
+        or hashlib.sha256(_canonical_bytes(receipt_body)).hexdigest() != receipt_hash.lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity receipt self-hash is invalid")
+    receipt_authority = receipt.get("authority")
+    if not isinstance(receipt_authority, Mapping) or receipt_authority.get("research_only") is not True:
+        raise FutureValueTrainingError("duplicate identity receipt authority is invalid")
+    if any(
+        bool(flag)
+        for name, flag in receipt_authority.items()
+        if name != "research_only"
+    ):
+        raise FutureValueTrainingError("duplicate identity receipt grants authority")
+    artifact_hash = artifact.get("crosswalk_sha256", artifact.get("artifact_sha256"))
+    if artifact_hash is not None:
+        if not isinstance(artifact_hash, str) or _SHA256_RE.fullmatch(artifact_hash) is None:
+            raise FutureValueTrainingError("duplicate identity artifact self-hash is invalid")
+        artifact_body = dict(artifact)
+        artifact_body.pop("crosswalk_sha256", None)
+        artifact_body.pop("artifact_sha256", None)
+        if hashlib.sha256(_canonical_bytes(artifact_body)).hexdigest() != artifact_hash.lower():
+            raise FutureValueTrainingError("duplicate identity artifact self-hash changed")
+    receipt_artifact = receipt.get("artifact")
+    if isinstance(receipt_artifact, Mapping):
+        if (
+            receipt_artifact.get("bytes") != artifact_file["bytes"]
+            or str(receipt_artifact.get("sha256") or "").lower()
+            != artifact_file["sha256"]
+        ):
+            raise FutureValueTrainingError("duplicate identity receipt artifact binding changed")
+    receipt_crosswalk_hash = receipt.get("crosswalk_sha256")
+    if receipt_crosswalk_hash is not None and (
+        not isinstance(receipt_crosswalk_hash, str)
+        or not isinstance(artifact_hash, str)
+        or receipt_crosswalk_hash.lower() != artifact_hash.lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity crosswalk digest changed")
+    expected_source_receipt = binding.get("source_receipt_sha256")
+    expected_source_identity = binding.get("source_identity_sha256")
+    if expected_source_receipt is None and expected_source_identity is None:
+        raise FutureValueTrainingError("duplicate identity source binding is incomplete")
+    if expected_source_receipt is not None and (
+        not isinstance(expected_source_receipt, str)
+        or expected_source_receipt.lower()
+        != str(freeze.get("reference_source_receipt_sha256") or "").lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity source receipt changed")
+    if expected_source_receipt is not None and (
+        str(receipt.get("source_receipt_sha256") or "").lower()
+        != expected_source_receipt.lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity receipt source changed")
+    accepted = freeze.get("accepted_census")
+    accepted_identity = accepted.get("source_identity_sha256") if isinstance(accepted, Mapping) else None
+    if expected_source_identity is not None and (
+        not isinstance(expected_source_identity, str)
+        or expected_source_identity.lower() != str(accepted_identity or "").lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity source census changed")
+    if expected_source_identity is not None and (
+        str(receipt.get("source_identity_sha256") or "").lower()
+        != expected_source_identity.lower()
+    ):
+        raise FutureValueTrainingError("duplicate identity receipt census changed")
+    assignments = _duplicate_artifact_assignments(artifact)
+    identity_by_game: dict[str, tuple[str, str]] = {}
+    for row in assignments:
+        scoreboard, riot = _duplicate_assignment_identity(row)
+        game_ids = {
+            value
+            for key in (
+                "oe_game_id",
+                "bridge_game_id",
+                "annual_survivor_game_id",
+                "game_id",
+                "game_uid",
+            )
+            if key in row
+            and (value := canonical_source_game_key(row.get(key)))
+        }
+        if not game_ids or not scoreboard and not riot:
+            continue
+        identity = (scoreboard, riot)
+        for game_id in game_ids:
+            previous = identity_by_game.get(game_id)
+            if previous is not None:
+                if previous[0] and identity[0] and previous[0] != identity[0]:
+                    raise FutureValueTrainingError(
+                        "duplicate identity artifact maps one ID inconsistently"
+                    )
+                if previous[1] and identity[1] and previous[1] != identity[1]:
+                    raise FutureValueTrainingError(
+                        "duplicate identity artifact maps one ID inconsistently"
+                    )
+                identity = (previous[0] or identity[0], previous[1] or identity[1])
+            identity_by_game[game_id] = identity
+    if not identity_by_game:
+        raise FutureValueTrainingError("duplicate identity artifact has no verified identities")
+    return identity_by_game
+
+
+def validate_duplicate_resolution_block(
+    maps: pd.DataFrame,
+    freeze: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Verify duplicate bridge rows against the raw map frame.
+
+    Older v1 freezes remain valid when they do not exclude an audited bridge
+    identity. A migrated freeze must carry one mapping for every such bridge.
+    The mapping includes source-row snapshots and declared semantic evidence.
+    """
+
+    block = _validate_duplicate_resolution_structure(freeze)
+    if block is None:
+        return None
+    identity_by_game = _validate_duplicate_identity_source(block, freeze)
+    row_ids = _row_game_ids(maps, "maps")
+    if row_ids.duplicated().any():
+        raise FutureValueTrainingError("raw maps contain duplicate canonical game IDs")
+    rows_by_id: dict[str, Mapping[str, Any]] = {
+        str(game_id): dict(row)
+        for game_id, (_, row) in zip(row_ids, maps.iterrows())
+    }
+    accepted = freeze.get("accepted_census")
+    if not isinstance(accepted, Mapping):
+        raise FutureValueTrainingError("source freeze accepted census is invalid")
+    excluded = set(canonical_game_ids(accepted.get("excluded_game_ids") or ()))
+    output: list[dict[str, Any]] = []
+    for mapping in block["mappings"]:
+        bridge_id = str(mapping["bridge_game_id"])
+        survivor_id = str(mapping["annual_survivor_game_id"])
+        if bridge_id not in rows_by_id or survivor_id not in rows_by_id:
+            raise FutureValueTrainingError(
+                "duplicate resolution IDs are missing from raw maps"
+            )
+        if bridge_id not in excluded:
+            raise FutureValueTrainingError("duplicate resolution bridge is not excluded")
+        if survivor_id in excluded:
+            raise FutureValueTrainingError("duplicate resolution survivor is excluded")
+        bridge_row = mapping.get("bridge_source_row", mapping.get("bridge_row"))
+        survivor_row = mapping.get(
+            "annual_survivor_source_row",
+            mapping.get("annual_source_row", mapping.get("survivor_row")),
+        )
+        if not isinstance(bridge_row, Mapping) or not isinstance(survivor_row, Mapping):
+            raise FutureValueTrainingError("duplicate resolution source rows are missing")
+        if _duplicate_row_id(bridge_row) != bridge_id:
+            raise FutureValueTrainingError("duplicate resolution bridge source row ID changed")
+        if _duplicate_row_id(survivor_row) != survivor_id:
+            raise FutureValueTrainingError("duplicate resolution survivor source row ID changed")
+        bridge_identity = identity_by_game.get(bridge_id)
+        survivor_identity = identity_by_game.get(survivor_id)
+        if bridge_identity is None or survivor_identity is None:
+            raise FutureValueTrainingError(
+                "duplicate identity artifact is missing one source ID"
+            )
+        if not _duplicate_identities_match(bridge_identity, survivor_identity):
+            raise FutureValueTrainingError(
+                "duplicate identity artifact does not prove one external game"
+            )
+        evidence = mapping.get("evidence")
+        if not isinstance(evidence, Mapping):
+            raise FutureValueTrainingError("duplicate resolution evidence is missing")
+        declared_identity = evidence.get(
+            "external_identity",
+            evidence.get("identity", evidence),
+        )
+        if not isinstance(declared_identity, Mapping):
+            raise FutureValueTrainingError("duplicate resolution external identity is missing")
+        declared_scoreboard = str(
+            declared_identity.get("scoreboard_game_id")
+            or declared_identity.get("scoreboard_id")
+            or ""
+        ).strip()
+        declared_riot = str(
+            declared_identity.get("scoreboard_riot_platform_game_id")
+            or declared_identity.get("riot_platform_game_id")
+            or ""
+        ).strip()
+        if not _duplicate_identities_match(
+            (declared_scoreboard, declared_riot), bridge_identity
+        ):
+            raise FutureValueTrainingError(
+                "duplicate resolution external identity changed"
+            )
+        _duplicate_semantic_fields(
+            mapping,
+            bridge_row,
+            survivor_row,
+            rows_by_id[bridge_id],
+            rows_by_id[survivor_id],
+        )
+        output.append(
+            {
+                "bridge_game_id": bridge_id,
+                "annual_survivor_game_id": survivor_id,
+                "survivor_rule": mapping["survivor_rule"],
+            }
+        )
+    return {
+        "schema_version": block["schema_version"],
+        "mapping_sha256": str(block["mapping_sha256"]).lower(),
+        "mapping_count": len(output),
+        "bridge_game_ids": [row["bridge_game_id"] for row in output],
+        "annual_survivor_game_ids": [
+            row["annual_survivor_game_id"] for row in output
+        ],
+    }
+
+
+# Private spelling retained for callers which treat source validators as
+# implementation details.
+_validate_duplicate_resolution_block = validate_duplicate_resolution_block
+
+
+def _load_freeze(path: Path) -> dict[str, Any]:
+    if not path.is_file() or path.is_symlink():
+        raise FutureValueTrainingError("future-value source freeze is missing or unsafe")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueTrainingError("future-value source freeze cannot be read") from error
+    if not isinstance(value, dict) or value.get("schema_version") not in _SUPPORTED_FREEZE_SCHEMA_VERSIONS:
+        raise FutureValueTrainingError("future-value source freeze schema is invalid")
+    if value.get("source_mode") != "oe_only":
+        raise FutureValueTrainingError("future-value source freeze is not OE-only")
+    if not isinstance(value.get("unfiltered_source_game_count"), int) or not isinstance(
+        value.get("unfiltered_source_identity_sha256"), str
+    ) or re.fullmatch(r"[0-9a-f]{64}", value["unfiltered_source_identity_sha256"], re.I) is None:
+        raise FutureValueTrainingError("future-value source freeze raw identity is invalid")
+    authority = value.get("authority")
+    if not isinstance(authority, Mapping) or authority.get("research_only") is not True:
+        raise FutureValueTrainingError("future-value source freeze authority is invalid")
+    if any(bool(flag) for name, flag in authority.items() if name != "research_only"):
+        raise FutureValueTrainingError("future-value source freeze grants public authority")
+    accepted = value.get("accepted_census")
+    if not isinstance(accepted, Mapping):
+        raise FutureValueTrainingError("future-value source freeze accepted census is invalid")
+    if not isinstance(accepted.get("source_game_count"), int) or not isinstance(
+        accepted.get("source_identity_sha256"), str
+    ) or re.fullmatch(r"[0-9a-f]{64}", accepted["source_identity_sha256"], re.I) is None:
+        raise FutureValueTrainingError("future-value source freeze accepted identity is invalid")
+    eligible = value.get("model_eligible_census")
+    if not isinstance(eligible, Mapping):
+        raise FutureValueTrainingError("future-value source freeze model census is missing")
+    if not isinstance(eligible.get("game_count"), int) or not isinstance(
+        eligible.get("source_identity_sha256"), str
+    ) or re.fullmatch(r"[0-9a-f]{64}", eligible["source_identity_sha256"], re.I) is None:
+        raise FutureValueTrainingError("future-value source freeze model identity is invalid")
+    bridge_sources = value.get("oe_bridge_sources")
+    if not isinstance(bridge_sources, list) or not bridge_sources:
+        raise FutureValueTrainingError("future-value source freeze bridge sources are missing")
+    reference_receipt = value.get("reference_source_receipt_sha256")
+    if not isinstance(reference_receipt, str) or re.fullmatch(
+        r"[0-9a-f]{64}", reference_receipt, re.I
+    ) is None:
+        raise FutureValueTrainingError("future-value source freeze receipt reference is invalid")
+    receipt_path = value.get("source_receipt_path")
+    receipt_file_hash = value.get("source_receipt_file_sha256")
+    if (
+        not isinstance(receipt_path, str)
+        or not receipt_path.strip()
+        or not isinstance(receipt_file_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", receipt_file_hash, re.I) is None
+    ):
+        raise FutureValueTrainingError("future-value durable source receipt binding is invalid")
+    _validate_duplicate_resolution_structure(value)
+    return value
+
+
+def verify_annual_sources(
+    annual_root: Path,
+    freeze: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Require the exact annual OE bytes named by the freeze."""
+
+    raw_sources = freeze.get("oe_annual_sources")
+    if not isinstance(raw_sources, list) or not raw_sources:
+        raise FutureValueTrainingError("source freeze has no annual OE sources")
+    records: dict[str, dict[str, Any]] = {}
+    for item in raw_sources:
+        if not isinstance(item, Mapping):
+            raise FutureValueTrainingError("annual OE source record is invalid")
+        name = str(item.get("name") or "")
+        year = str(item.get("year") or "")
+        expected_hash = str(item.get("raw_sha256") or "")
+        expected_bytes = item.get("bytes")
+        if not name or not year or len(expected_hash) != 64 or not isinstance(expected_bytes, int):
+            raise FutureValueTrainingError("annual OE source binding is incomplete")
+        path = annual_root / name
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueTrainingError(f"annual OE source is missing or unsafe: {name}")
+        actual_bytes = path.stat().st_size
+        actual_hash = _sha256(path)
+        if actual_bytes != expected_bytes or actual_hash != expected_hash:
+            raise FutureValueTrainingError(f"annual OE source changed: {name}")
+        records[year] = {
+            "year": int(year),
+            "locator": name,
+            "bytes": actual_bytes,
+            "sha256": actual_hash,
+        }
+    return dict(sorted(records.items()))
+
+
+def verify_bridge_sources(
+    bridge_root: Path,
+    freeze: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Require the exact cached OE API bridge bytes named by the freeze."""
+
+    raw_sources = freeze.get("oe_bridge_sources")
+    if not isinstance(raw_sources, list) or not raw_sources:
+        raise FutureValueTrainingError("source freeze bridge records are invalid")
+    records: dict[str, dict[str, Any]] = {}
+    for item in raw_sources:
+        if not isinstance(item, Mapping):
+            raise FutureValueTrainingError("bridge source record is invalid")
+        name = str(item.get("name") or "")
+        expected_hash = str(item.get("raw_sha256") or "")
+        expected_bytes = item.get("bytes")
+        if not name or Path(name).name != name or len(expected_hash) != 64 or not isinstance(expected_bytes, int):
+            raise FutureValueTrainingError("bridge source binding is incomplete")
+        path = bridge_root / name
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueTrainingError(f"bridge source is missing or unsafe: {name}")
+        actual_bytes = path.stat().st_size
+        actual_hash = _sha256(path)
+        if actual_bytes != expected_bytes or actual_hash != expected_hash:
+            raise FutureValueTrainingError(f"bridge source changed: {name}")
+        records[name] = {
+            "locator": name,
+            "bytes": actual_bytes,
+            "sha256": actual_hash,
+        }
+    return dict(sorted(records.items()))
+
+
+def _game_ids(frame: pd.DataFrame) -> tuple[str, ...]:
+    if "game_uid" in frame.columns:
+        fallback = frame["gameid"] if "gameid" in frame.columns else None
+        values = [
+            canonical_source_game_key(
+                value,
+                fallback.loc[index] if fallback is not None else None,
+            )
+            for index, value in frame["game_uid"].items()
+        ]
+    elif "gameid" in frame.columns:
+        values = [canonical_source_game_key(value) for value in frame["gameid"]]
+    else:
+        raise FutureValueTrainingError("OE map source has no game identity")
+    return canonical_game_ids(values)
+
+
+def frozen_census(
+    maps: pd.DataFrame,
+    freeze: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build and verify the exact accepted census from frozen source rules."""
+
+    contract = freeze.get("accepted_census")
+    if not isinstance(contract, Mapping):
+        raise FutureValueTrainingError("source freeze has no accepted census")
+    expected_count = contract.get("source_game_count")
+    expected_identity = contract.get("source_identity_sha256")
+    unfiltered_count = freeze.get("unfiltered_source_game_count")
+    if not isinstance(unfiltered_count, int) or unfiltered_count < int(expected_count or 0):
+        raise FutureValueTrainingError("frozen unfiltered source count is invalid")
+    raw_ids = _game_ids(maps)
+    if len(raw_ids) != unfiltered_count:
+        raise FutureValueTrainingError("unfiltered source census count changed")
+    raw_identity = freeze.get("unfiltered_source_identity_sha256")
+    try:
+        raw_census = census_payload(raw_ids)
+    except ValueError as error:
+        raise FutureValueTrainingError("frozen accepted census is empty") from error
+    if raw_census["source_identity_sha256"] != raw_identity:
+        raise FutureValueTrainingError("unfiltered source census identity changed")
+    validate_duplicate_resolution_block(maps, freeze)
+    excluded = set(canonical_game_ids(contract.get("excluded_game_ids") or ()))
+    if not excluded or not excluded.issubset(set(raw_ids)):
+        raise FutureValueTrainingError("frozen source exclusions are missing from the raw census")
+    accepted = tuple(game_id for game_id in raw_ids if game_id not in excluded)
+    try:
+        filtered_census = census_payload(accepted)
+    except ValueError as error:
+        raise FutureValueTrainingError("frozen accepted census is empty") from error
+    if (
+        filtered_census["game_count"] != expected_count
+        or filtered_census["source_identity_sha256"] != expected_identity
+    ):
+        raise FutureValueTrainingError("frozen accepted census identity changed")
+    return filtered_census
+
+
+def _source_file_records(
+    oe_root: Path,
+    annual_records: Mapping[str, Mapping[str, Any]],
+    bridge_records: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    records = {
+        f"annual_{year}": dict(record)
+        for year, record in sorted(annual_records.items())
+    }
+    for name, record in sorted((bridge_records or {}).items()):
+        records[f"bridge_{name}"] = dict(record)
+    for label, name in (
+        ("maps", "maps.parquet"),
+        ("players", "oe_player_games.parquet"),
+        ("teams", "oe_team_games.parquet"),
+    ):
+        path = oe_root / name
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueTrainingError(f"normalized OE source is missing or unsafe: {name}")
+        records[label] = {
+            "locator": f"warehouse/parquet/{name}",
+            "bytes": path.stat().st_size,
+            "sha256": _sha256(path),
+        }
+    return records
+
+
+def _verified_v2_source_file_records(freeze: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Verify absolute v2 bindings and return the safe receipt locators."""
+
+    raw_records = freeze.get("source_file_records")
+    if not isinstance(raw_records, Mapping):
+        raise FutureValueTrainingError("v2 source freeze file records are missing")
+    required = {"maps", "players", "teams", "accepted_census"}
+    if not required.issubset(raw_records):
+        raise FutureValueTrainingError("v2 source freeze file records are incomplete")
+    absolute: dict[str, dict[str, Any]] = {}
+    for label, record in raw_records.items():
+        if not isinstance(label, str) or not label.strip():
+            raise FutureValueTrainingError("v2 source freeze file label is invalid")
+        if not isinstance(record, Mapping) or not isinstance(record.get("path"), str):
+            raise FutureValueTrainingError(f"v2 source freeze file path is invalid: {label}")
+        _path, _raw, normalized = _duplicate_file_record(
+            record,
+            label=f"v2 source file {label}",
+        )
+        if "year" in record:
+            normalized["year"] = record["year"]
+        absolute[label] = normalized
+    accepted_record = freeze.get("accepted_census_file")
+    if not isinstance(accepted_record, Mapping):
+        raise FutureValueTrainingError("v2 accepted census file binding is missing")
+    accepted_path, _raw, accepted_normalized = _duplicate_file_record(
+        accepted_record,
+        label="v2 accepted census file",
+    )
+    declared = absolute.get("accepted_census")
+    if declared is None or declared != accepted_normalized:
+        raise FutureValueTrainingError("v2 accepted census file binding changed")
+    if not accepted_path.is_file():
+        raise FutureValueTrainingError("v2 accepted census file is missing")
+
+    raw_receipt_records = freeze.get("source_receipt_file_records")
+    if not isinstance(raw_receipt_records, Mapping):
+        raise FutureValueTrainingError("v2 source receipt file records are missing")
+    if set(raw_receipt_records) != set(absolute):
+        raise FutureValueTrainingError("v2 source receipt file records are incomplete")
+    receipt_records: dict[str, dict[str, Any]] = {}
+    for label, record in raw_receipt_records.items():
+        if not isinstance(record, Mapping):
+            raise FutureValueTrainingError(f"v2 source receipt file record is invalid: {label}")
+        locator = record.get("locator")
+        if (
+            not isinstance(locator, str)
+            or not locator.strip()
+            or Path(locator).is_absolute()
+            or ".." in Path(locator).parts
+        ):
+            raise FutureValueTrainingError(f"v2 source receipt locator is unsafe: {label}")
+        expected = absolute[label]
+        if (
+            record.get("bytes") != expected["bytes"]
+            or str(record.get("sha256") or "").lower() != expected["sha256"]
+            or ("year" in record and record.get("year") != expected.get("year"))
+        ):
+            raise FutureValueTrainingError(f"v2 source receipt file binding changed: {label}")
+        normalized = {
+            "locator": locator,
+            "bytes": expected["bytes"],
+            "sha256": expected["sha256"],
+        }
+        if "year" in expected:
+            normalized["year"] = expected["year"]
+        receipt_records[label] = normalized
+    return receipt_records
+
+
+def _write_json(path: Path, value: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(dict(value), allow_nan=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def verify_research_source(
+    *,
+    annual_root: Path,
+    oe_root: Path,
+    freeze_path: Path,
+    output_root: Path,
+) -> dict[str, Any]:
+    """Verify annual bytes, normalized rows, census, and model eligibility."""
+
+    freeze = _load_freeze(freeze_path)
+    annual_records = verify_annual_sources(annual_root, freeze)
+    paths = {
+        "maps": oe_root / "maps.parquet",
+        "players": oe_root / "oe_player_games.parquet",
+        "teams": oe_root / "oe_team_games.parquet",
+    }
+    bridge_root = oe_root / "bridge"
+    if not bridge_root.is_dir():
+        bridge_root = oe_root.parent
+    bridge_records = verify_bridge_sources(bridge_root, freeze)
+    if freeze.get("schema_version") == FREEZE_SCHEMA_V2_VERSION and freeze.get(
+        "source_file_records"
+    ) is not None:
+        source_files = _verified_v2_source_file_records(freeze)
+    else:
+        source_files = _source_file_records(oe_root, annual_records, bridge_records)
+    maps = pd.read_parquet(paths["maps"])
+    census = frozen_census(maps, freeze)
+    try:
+        source = bind_accepted_future_value_source(
+            maps,
+            pd.read_parquet(paths["players"]),
+            pd.read_parquet(paths["teams"]),
+            census=census,
+            source_as_of=freeze["source_as_of"],
+            source_files=source_files,
+        )
+    except FutureValueSourceError as error:
+        raise FutureValueTrainingError(str(error)) from error
+
+    reference_receipt = str(freeze["reference_source_receipt_sha256"])
+    if source.receipt.get("receipt_sha256") != reference_receipt:
+        raise FutureValueTrainingError("source receipt identity changed")
+
+    eligible = freeze.get("model_eligible_census")
+    if isinstance(eligible, Mapping) and (
+        source.receipt.get("model_eligible_game_count") != eligible.get("game_count")
+        or source.receipt.get("model_eligible_identity_sha256")
+        != eligible.get("source_identity_sha256")
+    ):
+        raise FutureValueTrainingError("model-eligible census identity changed")
+
+    source_receipt_path = output_root / "future-value-source-receipt.json"
+    write_source_receipt(source_receipt_path, source)
+    run: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "status": "source_verified_model_unfitted",
+        "source_as_of": source.receipt["source_as_of"],
+        "source_game_count": source.receipt["source_game_count"],
+        "source_identity_sha256": source.receipt["source_identity_sha256"],
+        "accepted_game_ids": source.receipt["accepted_game_ids"],
+        "model_eligible_game_count": source.receipt["model_eligible_game_count"],
+        "model_eligible_identity_sha256": source.receipt[
+            "model_eligible_identity_sha256"
+        ],
+        "source_receipt_sha256": source.receipt["receipt_sha256"],
+        "freeze": {
+            "locator": str(freeze_path),
+            "bytes": freeze_path.stat().st_size,
+            "sha256": _sha256(freeze_path),
+        },
+        "annual_sources": annual_records,
+        "bridge_sources": bridge_records,
+        "artifacts": {
+            "source_receipt": {
+                "locator": source_receipt_path.name,
+                "bytes": source_receipt_path.stat().st_size,
+                "sha256": _sha256(source_receipt_path),
+            }
+        },
+        "blockers": [
+            "fitted_metric_weights_missing",
+            "fold_internal_rank_3_atoms_missing",
+            "complete_chronological_evaluation_missing",
+            "current_rating_comparison_missing",
+            "downstream_integration_missing",
+            "independent_promotion_receipt_missing",
+        ],
+        "authority": {
+            "research_only": True,
+            "public_player_rating": False,
+            "public_team_rating": False,
+            "public_probability": False,
+            "odds": False,
+            "expected_value": False,
+            "recommendation": False,
+            "betting": False,
+            "promotion": False,
+            "deployment": False,
+        },
+    }
+    run["receipt_sha256"] = hashlib.sha256(_canonical_bytes(run)).hexdigest()
+    _write_json(output_root / "future-value-research-run.json", run)
+    return run
+
+
+def verify_annual_only(
+    *,
+    annual_root: Path,
+    freeze_path: Path,
+    output_root: Path,
+) -> dict[str, Any]:
+    freeze = _load_freeze(freeze_path)
+    records = verify_annual_sources(annual_root, freeze)
+    receipt: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "status": "annual_sources_verified",
+        "source_as_of": freeze["source_as_of"],
+        "annual_sources": records,
+        "authority": {"research_only": True, "deployment": False},
+    }
+    receipt["receipt_sha256"] = hashlib.sha256(_canonical_bytes(receipt)).hexdigest()
+    _write_json(output_root / "future-value-annual-verification.json", receipt)
+    return receipt
+
+
+def _load_json_mapping(path: Path, label: str) -> dict[str, Any]:
+    if not path.is_file() or path.is_symlink():
+        raise FutureValueTrainingError(f"{label} is missing or unsafe")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueTrainingError(f"{label} cannot be read") from error
+    if not isinstance(value, dict):
+        raise FutureValueTrainingError(f"{label} is not a JSON object")
+    return value
+
+
+def _calibration_file_record(value: Any, label: str) -> dict[str, Any]:
+    """Verify one file binding carried by a calibration prelude."""
+
+    if not isinstance(value, Mapping) or set(value) != {"path", "bytes", "sha256"}:
+        raise FutureValueTrainingError(f"{label} file binding is invalid")
+    raw_path = value.get("path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise FutureValueTrainingError(f"{label} path is invalid")
+    path = Path(raw_path)
+    if not path.is_absolute() or ".." in path.parts or path.is_symlink() or not path.is_file():
+        raise FutureValueTrainingError(f"{label} path is missing or unsafe")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise FutureValueTrainingError(f"{label} path contains a symlink")
+    try:
+        expected_bytes = int(value["bytes"])
+    except (TypeError, ValueError) as error:
+        raise FutureValueTrainingError(f"{label} byte count is invalid") from error
+    expected_hash = str(value.get("sha256") or "").lower()
+    if re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None:
+        raise FutureValueTrainingError(f"{label} hash is invalid")
+    actual_bytes = path.stat().st_size
+    actual_hash = _sha256(path)
+    if expected_bytes != actual_bytes or expected_hash != actual_hash:
+        raise FutureValueTrainingError(f"{label} bytes or hash changed")
+    return {"path": str(path), "bytes": actual_bytes, "sha256": actual_hash}
+
+
+def _load_bound_calibration_json(record: Mapping[str, Any], label: str) -> dict[str, Any]:
+    path = Path(str(record["path"]))
+    value = _load_json_mapping(path, label)
+    return value
+
+
+def _verify_calibration_model_binding(
+    fold: Mapping[str, Any],
+    *,
+    source_receipt_sha256: str,
+    variant: str,
+) -> dict[str, Any]:
+    """Verify the model, code, and prediction files behind prior logits."""
+
+    binding = fold.get("model_binding")
+    if not isinstance(binding, Mapping):
+        raise FutureValueTrainingError("calibration prior model binding is missing")
+    if binding.get("source_receipt_sha256") != source_receipt_sha256:
+        raise FutureValueTrainingError("calibration prior model source binding changed")
+    if binding.get("variant") != variant:
+        raise FutureValueTrainingError("calibration prior model variant binding changed")
+    for field in (
+        "fit_window_end",
+        "fit_game_identity_sha256",
+        "validation_game_identity_sha256",
+        "parameter_sha256",
+        "model_receipt",
+        "model_artifact",
+        "prediction_ledger",
+        "code",
+    ):
+        if field not in binding:
+            raise FutureValueTrainingError(
+                f"calibration prior model binding is missing: {field}"
+            )
+    model_receipt_record = _calibration_file_record(
+        binding["model_receipt"], "calibration prior model receipt"
+    )
+    model_artifact_record = _calibration_file_record(
+        binding["model_artifact"], "calibration prior model artifact"
+    )
+    ledger_record = _calibration_file_record(
+        binding["prediction_ledger"], "calibration prior prediction ledger"
+    )
+    code = binding.get("code")
+    if not isinstance(code, Mapping):
+        raise FutureValueTrainingError("calibration prior code binding is invalid")
+    commit = str(code.get("commit") or "")
+    if re.fullmatch(r"[0-9a-f]{40,64}", commit, re.I) is None:
+        raise FutureValueTrainingError("calibration prior code commit is invalid")
+    code_files = code.get("files")
+    if not isinstance(code_files, list) or not code_files:
+        raise FutureValueTrainingError("calibration prior code files are missing")
+    verified_code_files = [
+        _calibration_file_record(value, "calibration prior code file")
+        for value in code_files
+    ]
+    model_receipt = _load_bound_calibration_json(
+        model_receipt_record, "calibration prior model receipt"
+    )
+    model_artifact = _load_bound_calibration_json(
+        model_artifact_record, "calibration prior model artifact"
+    )
+    ledger = _load_bound_calibration_json(
+        ledger_record, "calibration prior prediction ledger"
+    )
+    for payload, label in ((model_receipt, "model receipt"), (model_artifact, "model artifact")):
+        claimed = payload.get("receipt_sha256", payload.get("artifact_sha256"))
+        if not isinstance(claimed, str) or re.fullmatch(r"[0-9a-f]{64}", claimed, re.I) is None:
+            raise FutureValueTrainingError(f"calibration prior {label} self hash is missing")
+        payload_without_hash = dict(payload)
+        payload_without_hash.pop("receipt_sha256", None)
+        payload_without_hash.pop("artifact_sha256", None)
+        if hashlib.sha256(_canonical_bytes(payload_without_hash)).hexdigest() != claimed.lower():
+            raise FutureValueTrainingError(f"calibration prior {label} self hash changed")
+    ledger_hash = ledger.get("ledger_sha256", ledger.get("receipt_sha256"))
+    if not isinstance(ledger_hash, str) or re.fullmatch(r"[0-9a-f]{64}", ledger_hash, re.I) is None:
+        raise FutureValueTrainingError("calibration prior prediction ledger hash is missing")
+    ledger_without_hash = dict(ledger)
+    ledger_without_hash.pop("ledger_sha256", None)
+    ledger_without_hash.pop("receipt_sha256", None)
+    if hashlib.sha256(_canonical_bytes(ledger_without_hash)).hexdigest() != ledger_hash.lower():
+        raise FutureValueTrainingError("calibration prior prediction ledger hash changed")
+    for payload, label in ((model_receipt, "model receipt"), (model_artifact, "model artifact"), (ledger, "prediction ledger")):
+        if payload.get("source_receipt_sha256") != source_receipt_sha256:
+            raise FutureValueTrainingError(f"calibration prior {label} source binding changed")
+        if payload.get("variant") != variant:
+            raise FutureValueTrainingError(f"calibration prior {label} variant binding changed")
+    for payload, label in ((model_receipt, "model receipt"), (model_artifact, "model artifact")):
+        if payload.get("code") != dict(code):
+            raise FutureValueTrainingError(f"calibration prior {label} code binding changed")
+    if model_receipt.get("parameter_sha256") != binding["parameter_sha256"]:
+        raise FutureValueTrainingError("calibration prior model parameter binding changed")
+    if model_artifact.get("parameter_sha256") != binding["parameter_sha256"]:
+        raise FutureValueTrainingError("calibration prior model artifact binding changed")
+    if model_receipt.get("parameter_sha256") != model_artifact.get("parameter_sha256"):
+        raise FutureValueTrainingError("calibration prior model receipt and artifact differ")
+    if model_receipt_record["sha256"] != str(binding["model_receipt"].get("sha256")).lower():
+        raise FutureValueTrainingError("calibration prior model receipt file binding changed")
+    if ledger.get("rows_sha256") is None or ledger.get("row_count") is None:
+        raise FutureValueTrainingError("calibration prior prediction ledger metadata is missing")
+    return {
+        "binding": dict(binding),
+        "model_receipt": model_receipt,
+        "model_artifact": model_artifact,
+        "prediction_ledger": ledger,
+        "code": {"commit": commit, "files": verified_code_files},
+        "files": {
+            "model_receipt": model_receipt_record,
+            "model_artifact": model_artifact_record,
+            "prediction_ledger": ledger_record,
+        },
+    }
+
+
+def _load_calibration_prior_folds(
+    path: Path,
+    *,
+    source_receipt_sha256: str,
+    variant_keys: Sequence[str],
+) -> tuple[dict[str, list[Mapping[str, Any]]], dict[str, Any]]:
+    """Load one source-bound calibration-prelude JSON and bind its bytes."""
+
+    payload = _load_json_mapping(path, "calibration prior fold receipt")
+    if payload.get("schema_version") != CALIBRATION_PRIOR_SCHEMA_VERSION:
+        raise FutureValueTrainingError("calibration prior fold receipt schema is invalid")
+    if payload.get("source_receipt_sha256") != str(source_receipt_sha256):
+        raise FutureValueTrainingError("calibration prior fold source receipt changed")
+    claimed_receipt = payload.get("receipt_sha256")
+    if not isinstance(claimed_receipt, str) or re.fullmatch(r"[0-9a-f]{64}", claimed_receipt, re.I) is None:
+        raise FutureValueTrainingError("calibration prior fold receipt hash is invalid")
+    receipt_payload = dict(payload)
+    receipt_payload.pop("receipt_sha256", None)
+    if hashlib.sha256(_canonical_bytes(receipt_payload)).hexdigest() != claimed_receipt.lower():
+        raise FutureValueTrainingError("calibration prior fold receipt hash does not match")
+    variants = payload.get("variants")
+    folds_by_variant: dict[str, list[Mapping[str, Any]]] = {}
+    if isinstance(variants, Mapping):
+        for variant_key in variant_keys:
+            selected = variants.get(variant_key)
+            if isinstance(selected, Mapping):
+                selected = selected.get("folds")
+            if not isinstance(selected, list) or not selected:
+                raise FutureValueTrainingError(
+                    f"calibration prior fold receipt is missing variant: {variant_key}"
+                )
+            if any(not isinstance(fold, Mapping) for fold in selected):
+                raise FutureValueTrainingError("calibration prior fold rows are invalid")
+            for fold in selected:
+                if fold.get("source_receipt_sha256") != str(source_receipt_sha256):
+                    raise FutureValueTrainingError("calibration prior fold source binding changed")
+                if fold.get("variant") != variant_key:
+                    raise FutureValueTrainingError("calibration prior fold variant binding changed")
+                verified_model = _verify_calibration_model_binding(
+                    fold,
+                    source_receipt_sha256=str(source_receipt_sha256),
+                    variant=variant_key,
+                )
+                ledger = verified_model["prediction_ledger"]
+                rows = fold.get("rows")
+                ledger_rows = ledger.get("rows")
+                if not isinstance(rows, list) or not isinstance(ledger_rows, list) or rows != ledger_rows:
+                    raise FutureValueTrainingError(
+                        "calibration prior prediction ledger rows do not match fold"
+                    )
+                if ledger.get("row_count") != len(rows) or ledger.get("rows_sha256") != hashlib.sha256(
+                    _canonical_bytes(rows)
+                ).hexdigest():
+                    raise FutureValueTrainingError(
+                        "calibration prior prediction ledger row binding changed"
+                    )
+            folds_by_variant[variant_key] = list(selected)
+    else:
+        folds = payload.get("folds")
+        if not isinstance(folds, list) or not folds:
+            raise FutureValueTrainingError("calibration prior folds are missing")
+        if any(not isinstance(fold, Mapping) for fold in folds):
+            raise FutureValueTrainingError("calibration prior fold rows are invalid")
+        for variant_key in variant_keys:
+            for fold in folds:
+                if fold.get("source_receipt_sha256") != str(source_receipt_sha256):
+                    raise FutureValueTrainingError("calibration prior fold source binding changed")
+                if fold.get("variant") != variant_key:
+                    raise FutureValueTrainingError("calibration prior fold variant binding changed")
+                verified_model = _verify_calibration_model_binding(
+                    fold,
+                    source_receipt_sha256=str(source_receipt_sha256),
+                    variant=variant_key,
+                )
+                ledger = verified_model["prediction_ledger"]
+                rows = fold.get("rows")
+                ledger_rows = ledger.get("rows")
+                if not isinstance(rows, list) or not isinstance(ledger_rows, list) or rows != ledger_rows:
+                    raise FutureValueTrainingError(
+                        "calibration prior prediction ledger rows do not match fold"
+                    )
+            folds_by_variant[variant_key] = list(folds)
+    binding = {
+        "schema_version": CALIBRATION_PRIOR_SCHEMA_VERSION,
+        "path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": _sha256(path),
+        "payload_receipt_sha256": claimed_receipt.lower(),
+        "source_receipt_sha256": str(source_receipt_sha256),
+        "variant_keys": list(variant_keys),
+        "fold_count": {key: len(value) for key, value in folds_by_variant.items()},
+    }
+    return folds_by_variant, binding
+
+
+def _phase_hash(value: Any, field: str) -> str:
+    result = str(value or "").lower()
+    if re.fullmatch(r"[0-9a-f]{64}", result) is None:
+        raise FutureValueTrainingError(f"{field} hash is invalid")
+    return result
+
+
+def _phase_partition_fields(
+    payload: Mapping[str, Any],
+    *,
+    label: str,
+) -> dict[str, Any]:
+    try:
+        return _phase_partition_evidence(payload, label=label)
+    except FutureValueSourceError as error:
+        raise FutureValueTrainingError(str(error)) from error
+
+
+def _phase_file_record(
+    path: Path,
+    *,
+    expected_sha256: str,
+    label: str,
+) -> dict[str, Any]:
+    if not path.is_absolute() or ".." in path.parts:
+        raise FutureValueTrainingError(f"{label} is missing or unsafe")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise FutureValueTrainingError(f"{label} path contains a symlink")
+    if path.is_symlink() or not path.is_file():
+        raise FutureValueTrainingError(f"{label} is missing or unsafe")
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as error:
+        raise FutureValueTrainingError(f"{label} path cannot be resolved") from error
+    if resolved != path:
+        raise FutureValueTrainingError(f"{label} path is not canonical")
+    expected = _phase_hash(expected_sha256, f"expected {label}")
+    actual = _sha256(path)
+    if actual != expected:
+        raise FutureValueTrainingError(f"{label} hash changed")
+    return {"path": str(path), "bytes": path.stat().st_size, "sha256": actual}
+
+
+def _phase_reference_game_ids(source_receipt: Mapping[str, Any]) -> tuple[str, ...]:
+    accepted = tuple(canonical_game_ids(source_receipt["accepted_game_ids"]))
+    if not accepted or list(accepted) != [str(value) for value in source_receipt["accepted_game_ids"]]:
+        raise FutureValueTrainingError("phase reference accepted IDs are not canonical")
+    # Source extras describe rows that were rejected from the accepted census.
+    # They are never part of phase, series, or evaluation metadata.
+    return accepted
+
+
+def _verify_phase_source_receipt_file(
+    source_receipt: Mapping[str, Any],
+    *,
+    source_receipt_path: Path,
+    source_receipt_file_sha256: str,
+) -> dict[str, Any]:
+    record = _phase_file_record(
+        source_receipt_path,
+        expected_sha256=source_receipt_file_sha256,
+        label="phase source receipt",
+    )
+    payload = _load_json_mapping(source_receipt_path, "phase source receipt")
+    _validate_source_receipt_mapping(payload)
+    if dict(payload) != dict(source_receipt):
+        raise FutureValueTrainingError("phase source receipt payload changed")
+    return record
+
+
+def _build_phase_partition_binding(
+    artifact_path: Path,
+    receipt_path: Path,
+    *,
+    artifact_sha256: str,
+    receipt_file_sha256: str,
+    source_receipt: Mapping[str, Any],
+    source_receipt_path: Path,
+    source_receipt_file_sha256: str,
+    artifact_kind: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Verify phase files before constructing the rating evaluator binding."""
+
+    artifact_file = _phase_file_record(
+        artifact_path,
+        expected_sha256=artifact_sha256,
+        label="phase artifact",
+    )
+    receipt_file = _phase_file_record(
+        receipt_path,
+        expected_sha256=receipt_file_sha256,
+        label="phase run receipt",
+    )
+    source_receipt_file = _verify_phase_source_receipt_file(
+        source_receipt,
+        source_receipt_path=source_receipt_path,
+        source_receipt_file_sha256=source_receipt_file_sha256,
+    )
+    artifact = _load_json_mapping(artifact_path, "phase artifact")
+    receipt = _load_json_mapping(receipt_path, "phase run receipt")
+    artifact_fields = _phase_partition_fields(artifact, label="phase artifact")
+    receipt_fields = _phase_partition_fields(receipt, label="phase run receipt")
+    for field in (
+        "source_receipt_sha256",
+        "eligible_game_count",
+        "eligible_identity_sha256",
+        "eligible_assignment_sha256",
+        "reference_assignment_sha256",
+        "reference_assignment_match",
+        "status",
+    ):
+        if artifact_fields[field] != receipt_fields[field]:
+            raise FutureValueTrainingError(
+                f"phase artifact and run receipt differ: {field}"
+            )
+    source_hash = _phase_hash(source_receipt.get("receipt_sha256"), "source receipt")
+    if artifact_fields["source_receipt_sha256"] != source_hash:
+        raise FutureValueTrainingError("phase source receipt differs")
+    expected_count = int(source_receipt.get("model_eligible_game_count") or -1)
+    expected_identity = _phase_hash(
+        source_receipt.get("model_eligible_identity_sha256"),
+        "source model-eligible identity",
+    )
+    if artifact_fields["eligible_game_count"] != expected_count:
+        raise FutureValueTrainingError("phase eligible count differs from source")
+    if artifact_fields["eligible_identity_sha256"] != expected_identity:
+        raise FutureValueTrainingError("phase eligible identity differs from source")
+    reference_ids = _phase_reference_game_ids(source_receipt)
+    expected_reference_count = len(reference_ids)
+    expected_reference_identity = identity_sha256(reference_ids)
+    if artifact_fields["reference_game_count"] != expected_reference_count:
+        raise FutureValueTrainingError("phase reference count differs from source")
+    if artifact_fields["reference_identity_sha256"] != expected_reference_identity:
+        raise FutureValueTrainingError("phase reference identity differs from source")
+    if (
+        expected_reference_count != artifact_fields["eligible_game_count"]
+        and artifact_fields["reference_assignment_sha256"]
+        == artifact_fields["eligible_assignment_sha256"]
+    ):
+        raise FutureValueTrainingError(
+            "phase reference assignment is not full-census bound"
+        )
+    outputs = receipt.get("outputs")
+    if not isinstance(outputs, Mapping) or not isinstance(outputs.get(artifact_kind), Mapping):
+        raise FutureValueTrainingError("phase run receipt selected output is missing")
+    output = outputs[artifact_kind]
+    output_path = output.get("path", output.get("locator"))
+    output_path_obj = Path(output_path) if isinstance(output_path, str) else None
+    if (
+        not isinstance(output_path, str)
+        or output_path_obj is None
+        or not output_path_obj.is_absolute()
+        or output_path_obj.is_symlink()
+        or output_path_obj.resolve() != artifact_path.resolve()
+    ):
+        raise FutureValueTrainingError("phase run receipt output path changed")
+    if output.get("bytes") != artifact_file["bytes"] or str(
+        output.get("sha256") or ""
+    ).lower() != artifact_file["sha256"]:
+        raise FutureValueTrainingError("phase run receipt output bytes changed")
+    binding = {
+        "phase_artifact": artifact_file,
+        "phase_receipt": receipt_file,
+        "phase_artifact_sha256": artifact_file["sha256"],
+        "phase_receipt_file_sha256": receipt_file["sha256"],
+        "phase_artifact_kind": artifact_kind,
+        "eligible_game_count": artifact_fields["eligible_game_count"],
+        "eligible_identity_sha256": artifact_fields["eligible_identity_sha256"],
+        "eligible_assignment_sha256": artifact_fields["eligible_assignment_sha256"],
+        "reference_game_count": artifact_fields["reference_game_count"],
+        "reference_identity_sha256": artifact_fields["reference_identity_sha256"],
+        "reference_assignment_sha256": artifact_fields["reference_assignment_sha256"],
+        "source_receipt_sha256": source_hash,
+        "source_receipt_file": source_receipt_file,
+    }
+    runtime_binding = {
+        "artifact": artifact_file,
+        "receipt": receipt_file,
+        "artifact_kind": artifact_kind,
+        "expected_artifact_sha256": artifact_file["sha256"],
+        "expected_receipt_file_sha256": receipt_file["sha256"],
+        "eligible_game_count": artifact_fields["eligible_game_count"],
+        "eligible_identity_sha256": artifact_fields["eligible_identity_sha256"],
+        "eligible_assignment_sha256": artifact_fields["eligible_assignment_sha256"],
+        "reference_game_count": artifact_fields["reference_game_count"],
+        "reference_identity_sha256": artifact_fields["reference_identity_sha256"],
+        "reference_assignment_sha256": artifact_fields["reference_assignment_sha256"],
+        "source_receipt_sha256": source_hash,
+        "source_receipt": source_receipt_file,
+    }
+    return binding, runtime_binding
+
+
+def _validate_source_receipt_mapping(receipt: Mapping[str, Any]) -> None:
+    """Verify the source receipt payload before any training binding."""
+
+    try:
+        validate_future_value_source_receipt_payload(receipt)
+    except FutureValueSourceError as error:
+        raise FutureValueTrainingError(str(error)) from error
+
+
+def verify_variant_input_binding(
+    binding_path: Path,
+    *,
+    source_receipt: Mapping[str, Any],
+    expected_game_ids: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Verify the frozen four-variant producer inputs and file receipts."""
+
+    binding = _load_json_mapping(binding_path, "variant input binding")
+    _validate_source_receipt_mapping(source_receipt)
+    expected_fields = {
+        "schema_version",
+        "status",
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "source_receipt_sha256",
+        "evaluation_game_count",
+        "evaluation_game_identity_sha256",
+        "evaluation_game_ids",
+        "producer_contract",
+        "files",
+        "authority",
+        "receipt_sha256",
+    }
+    if set(binding) != expected_fields:
+        raise FutureValueTrainingError("variant input binding schema is not canonical")
+    if binding.get("schema_version") != "scryglass:future-value-variant-input-binding:v1" or binding.get(
+        "status"
+    ) != "frozen_research_input":
+        raise FutureValueTrainingError("variant input binding status is invalid")
+    expected_authority = {
+        "research_only": True,
+        "public": False,
+        "probability": False,
+        "odds": False,
+        "ev": False,
+        "recommendation": False,
+        "betting": False,
+        "promotion": False,
+        "deployment": False,
+    }
+    if dict(binding.get("authority") or {}) != expected_authority:
+        raise FutureValueTrainingError("variant input binding authority is invalid")
+    claimed_binding_hash = binding.get("receipt_sha256")
+    if not isinstance(claimed_binding_hash, str) or hashlib.sha256(
+        _canonical_bytes({key: value for key, value in binding.items() if key != "receipt_sha256"})
+    ).hexdigest() != claimed_binding_hash:
+        raise FutureValueTrainingError("variant input binding receipt changed")
+    if binding.get("source_receipt_sha256") != source_receipt.get("receipt_sha256"):
+        raise FutureValueTrainingError("variant input binding source receipt changed")
+    if binding.get("source_identity_sha256") != source_receipt.get("source_identity_sha256"):
+        raise FutureValueTrainingError("variant input binding source identity changed")
+    if (
+        binding.get("source_as_of") != source_receipt.get("source_as_of")
+        or binding.get("source_game_count") != source_receipt.get("source_game_count")
+    ):
+        raise FutureValueTrainingError("variant input source census changed")
+    raw_bound_ids = binding.get("evaluation_game_ids")
+    if not isinstance(raw_bound_ids, list):
+        raise FutureValueTrainingError("variant input evaluation IDs are invalid")
+    bound_ids = tuple(str(value) for value in raw_bound_ids)
+    if (
+        not bound_ids
+        or tuple(canonical_game_ids(bound_ids)) != bound_ids
+        or int(binding.get("evaluation_game_count") or -1) != len(bound_ids)
+        or binding.get("evaluation_game_identity_sha256") != identity_sha256(bound_ids)
+        or not set(bound_ids).issubset(set(map(str, source_receipt["model_eligible_game_ids"])))
+    ):
+        raise FutureValueTrainingError("variant input evaluation census changed")
+    expected_ids = tuple(canonical_game_ids(str(value) for value in (expected_game_ids or ())))
+    if expected_ids and bound_ids != expected_ids:
+        raise FutureValueTrainingError("variant input evaluation IDs do not match runtime")
+    producer_contract = binding.get("producer_contract")
+    if not isinstance(producer_contract, Mapping):
+        raise FutureValueTrainingError("variant input producer contract is missing")
+    expected_contract = {
+        "current_rating": "sequential strict-prior Dual Elo and exact-roster player Elo; same timestamp batch uses the prior timestamp state",
+        "same_timestamp_policy": "features for all maps at one timestamp are emitted before any map at that timestamp updates history",
+        "scaling_curve": "strict-prior player-champion checkpoint histories with champion fallback; current map checkpoint values update history after scoring",
+    }
+    if dict(producer_contract) != expected_contract:
+        raise FutureValueTrainingError("variant input producer contract changed")
+    files = binding.get("files")
+    required_files = {
+        "source_receipt",
+        "current_rating_base",
+        "atomized_matrix",
+        "atomized_manifest",
+    }
+    if not isinstance(files, Mapping) or set(files) != required_files:
+        raise FutureValueTrainingError("variant input file receipts are missing")
+    verified_files: dict[str, dict[str, Any]] = {}
+    for label, record in files.items():
+        if not isinstance(record, Mapping):
+            raise FutureValueTrainingError(f"variant input file record is invalid: {label}")
+        path_value = record.get("path")
+        if not isinstance(path_value, str) or not path_value:
+            raise FutureValueTrainingError(f"variant input file path is missing: {label}")
+        path = Path(path_value)
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueTrainingError(f"variant input file is missing or unsafe: {label}")
+        expected_bytes = record.get("bytes")
+        expected_hash = str(record.get("sha256") or "")
+        if not isinstance(expected_bytes, int) or len(expected_hash) != 64:
+            raise FutureValueTrainingError(f"variant input file receipt is incomplete: {label}")
+        actual_bytes = path.stat().st_size
+        actual_hash = _sha256(path)
+        if actual_bytes != expected_bytes or actual_hash != expected_hash:
+            raise FutureValueTrainingError(f"variant input file changed: {label}")
+        verified_files[str(label)] = {
+            "path": str(path),
+            "bytes": actual_bytes,
+            "sha256": actual_hash,
+        }
+    source_file = verified_files.get("source_receipt")
+    if source_file is None:
+        raise FutureValueTrainingError("variant input source receipt file is missing")
+    source_path = Path(source_file["path"])
+    source_payload = _load_json_mapping(source_path, "variant input source receipt")
+    if source_payload != dict(source_receipt):
+        raise FutureValueTrainingError("variant input source receipt payload changed")
+    rating_file = verified_files.get("current_rating_base")
+    matrix_file = verified_files.get("atomized_matrix")
+    manifest_file = verified_files.get("atomized_manifest")
+    if rating_file is None or matrix_file is None or manifest_file is None:
+        raise FutureValueTrainingError("atomized producer files are incomplete")
+    manifest = _load_json_mapping(Path(manifest_file["path"]), "atomized producer manifest")
+    if manifest.get("matrix_sha256") != matrix_file["sha256"]:
+        raise FutureValueTrainingError("atomized matrix manifest hash changed")
+    if int(manifest.get("rows") or -1) != int(binding.get("evaluation_game_count") or -2):
+        raise FutureValueTrainingError("atomized matrix row count changed")
+    for label, record in (("current rating", rating_file), ("atomized matrix", matrix_file)):
+        path = Path(record["path"])
+        try:
+            columns = set(pd.read_parquet(path, columns=None).columns)
+            game_column = next(
+                name for name in ("game_id", "game_uid", "gameid") if name in columns
+            )
+            frame_ids = tuple(
+                canonical_game_ids(
+                    pd.read_parquet(path, columns=[game_column])[game_column].astype(str)
+                )
+            )
+        except (OSError, ValueError, StopIteration) as error:
+            raise FutureValueTrainingError(f"{label} identity cannot be read") from error
+        if frame_ids != bound_ids:
+            raise FutureValueTrainingError(f"{label} game IDs changed")
+    return {
+        "schema_version": binding.get("schema_version"),
+        "receipt_sha256": claimed_binding_hash,
+        "source_receipt_sha256": source_receipt.get("receipt_sha256"),
+        "evaluation_game_count": binding.get("evaluation_game_count"),
+        "evaluation_game_identity_sha256": binding.get("evaluation_game_identity_sha256"),
+        "files": verified_files,
+        "atomized_manifest_sha256": manifest_file["sha256"],
+        "atomized_matrix_sha256": matrix_file["sha256"],
+        "authority": {"research_only": True, "promotion": False, "deployment": False},
+    }
+
+
+def _row_game_ids(frame: pd.DataFrame, label: str) -> pd.Series:
+    if "game_uid" in frame.columns:
+        fallback = frame["gameid"] if "gameid" in frame.columns else None
+        values = [
+            canonical_source_game_key(
+                value,
+                fallback.loc[index] if fallback is not None else None,
+            )
+            for index, value in frame["game_uid"].items()
+        ]
+    elif "gameid" in frame.columns:
+        values = [canonical_source_game_key(value) for value in frame["gameid"]]
+    else:
+        raise FutureValueTrainingError(f"{label} has no game identity")
+    ids = pd.Series(values, index=frame.index, dtype="string")
+    if ids.isna().any() or ids.str.strip().eq("").any():
+        raise FutureValueTrainingError(f"{label} has an empty game identity")
+    return ids
+
+
+def _accepted_map_frame(
+    frame: pd.DataFrame,
+    *,
+    source_receipt: Mapping[str, Any],
+) -> pd.DataFrame:
+    """Return only the accepted map census before any series binding.
+
+    Normalized source files can carry rows outside the accepted receipt.  Those
+    rows are valid source evidence for the raw census, but they must not reach
+    a Leaguepedia crosswalk, a series partition, or a model evaluation.  A
+    duplicate canonical identity is unsafe even when the duplicate is outside
+    the accepted set because it makes source selection ambiguous.
+    """
+
+    raw_expected = source_receipt.get("accepted_game_ids")
+    if not isinstance(raw_expected, list):
+        raise FutureValueTrainingError("source receipt accepted map IDs are invalid")
+    expected = tuple(canonical_game_ids(raw_expected))
+    if not expected or list(expected) != [str(value) for value in raw_expected]:
+        raise FutureValueTrainingError("source receipt accepted map IDs are not canonical")
+    ids = _row_game_ids(frame, "maps")
+    if ids.duplicated().any():
+        raise FutureValueTrainingError("maps contain duplicate canonical game IDs")
+    available = set(ids.astype(str))
+    missing = sorted(set(expected) - available)
+    if missing:
+        raise FutureValueTrainingError(
+            f"maps are missing {len(missing)} accepted game IDs"
+        )
+    selected = frame.loc[ids.isin(expected)].copy()
+    selected_ids = tuple(sorted(ids.loc[selected.index].astype(str)))
+    if selected_ids != expected or len(selected) != len(expected):
+        raise FutureValueTrainingError("accepted map census is not exactly one row per game")
+    return selected
+
+
+def _code_hashes(repo_root: Path) -> dict[str, str]:
+    """Bind every producer module used by the four-way research run."""
+
+    paths = (
+        "lol_kills/research/future_value_rating.py",
+        "lol_kills/research/future_value_training.py",
+        "lol_kills/research/future_phase_curve.py",
+        "lol_kills/research/atomized_rf_composite.py",
+        "lol_kills/research/future_value_draft_score.py",
+    )
+    output: dict[str, str] = {}
+    for relative in paths:
+        path = repo_root / relative
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueTrainingError(f"model producer source is missing: {relative}")
+        output[relative] = _sha256(path)
+    return output
+
+
+def _load_feature_ledger_bundle(path: Path | None) -> Mapping[str, Any] | None:
+    """Load JSON ledger bundles with explicit per-variant fold bindings.
+
+    JSON is used because a parquet round trip drops ``DataFrame.attrs``, which
+    carry the producer receipt.  Every fold record must contain ``rows`` and
+    ``attrs``.  The caller still validates the complete binding in the rating
+    module before fitting.
+    """
+
+    if path is None:
+        return None
+    value = _load_json_mapping(path, "feature ledger bundle")
+    variants = value.get("variants")
+    if not isinstance(variants, Mapping):
+        raise FutureValueTrainingError("feature ledger bundle variants are missing")
+    bundle: dict[str, Any] = {}
+    for variant_name, variant_value in variants.items():
+        if not isinstance(variant_value, Mapping):
+            raise FutureValueTrainingError("feature ledger variant binding is invalid")
+        folds = variant_value.get("folds")
+        if not isinstance(folds, Mapping):
+            raise FutureValueTrainingError("feature ledger fold bindings are missing")
+        def read_folds(raw_folds: Mapping[str, Any]) -> dict[str, pd.DataFrame]:
+            fold_bundle: dict[str, pd.DataFrame] = {}
+            for fold, record in raw_folds.items():
+                if not isinstance(record, Mapping) or not isinstance(record.get("rows"), list):
+                    raise FutureValueTrainingError("feature ledger fold record is invalid")
+                attrs = record.get("attrs")
+                if not isinstance(attrs, Mapping):
+                    raise FutureValueTrainingError("feature ledger fold attrs are missing")
+                frame = pd.DataFrame(record["rows"])
+                frame.attrs = dict(attrs)
+                fold_bundle[str(fold)] = frame
+            return fold_bundle
+
+        outer_bundle = read_folds(folds)
+        raw_inner = variant_value.get("inner_folds")
+        if raw_inner is None:
+            raw_inner = variant_value.get("inner")
+        if raw_inner is not None:
+            if not isinstance(raw_inner, Mapping):
+                raise FutureValueTrainingError("feature ledger inner fold bindings are invalid")
+            bundle[str(variant_name)] = {
+                "outer": outer_bundle,
+                "inner": read_folds(raw_inner),
+            }
+        else:
+            bundle[str(variant_name)] = outer_bundle
+    return bundle
+
+
+def _resolve_variant_names(value: str | None) -> tuple[RatingVariant, ...] | None:
+    """Resolve one or all explicit rating variants for the CLI."""
+
+    if value is None or value.strip().casefold() in {"legacy", "current_ratings"}:
+        return None
+    if value.strip().casefold() == "all":
+        return tuple(RATING_VARIANT_ORDER)
+    try:
+        return (RatingVariant(value.strip()),)
+    except ValueError as error:
+        raise FutureValueTrainingError(f"unknown rating variant: {value}") from error
+
+
+def _git_output(repo_root: Path, *arguments: str) -> str:
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise FutureValueTrainingError("model runtime cannot bind the git source state")
+    return result.stdout.strip()
+
+
+def run_model_evaluation(
+    *,
+    oe_root: Path,
+    freeze_path: Path,
+    source_receipt_path: Path,
+    model_output_path: Path,
+    runtime_receipt_path: Path,
+    n_folds: int = 3,
+    command: list[str] | None = None,
+    rating_variant: str | None = None,
+    feature_ledger_path: Path | None = None,
+    input_binding_path: Path | None = None,
+    crosswalk_path: Path | None = None,
+    crosswalk_receipt_path: Path | None = None,
+    crosswalk_receipt_file_sha256: str | None = None,
+    phase_artifact_path: Path | None = None,
+    phase_receipt_path: Path | None = None,
+    phase_artifact_sha256: str | None = None,
+    phase_receipt_file_sha256: str | None = None,
+    phase_artifact_kind: str = "candidate",
+    calibration_prior_path: Path | None = None,
+) -> dict[str, Any]:
+    """Run the frozen research model and emit a gate-grade runtime receipt."""
+
+    freeze = _load_freeze(freeze_path)
+    source_receipt = _load_json_mapping(source_receipt_path, "source receipt")
+    _validate_source_receipt_mapping(source_receipt)
+    crosswalk_values = (
+        crosswalk_path,
+        crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256,
+    )
+    if any(value is not None for value in crosswalk_values) and not all(
+        value is not None for value in crosswalk_values
+    ):
+        raise FutureValueTrainingError("crosswalk inputs must be supplied together")
+    if crosswalk_receipt_file_sha256 is not None and re.fullmatch(
+        r"[0-9a-f]{64}", str(crosswalk_receipt_file_sha256), re.I
+    ) is None:
+        raise FutureValueTrainingError("crosswalk receipt file hash is invalid")
+    phase_values = (
+        phase_artifact_path,
+        phase_receipt_path,
+        phase_artifact_sha256,
+        phase_receipt_file_sha256,
+    )
+    if any(value is not None for value in phase_values) and not all(
+        value is not None for value in phase_values
+    ):
+        raise FutureValueTrainingError("phase partition inputs must be supplied together")
+    expected_receipt_hash = str(freeze["reference_source_receipt_sha256"])
+    expected_receipt_file_hash = str(freeze.get("source_receipt_file_sha256") or "")
+    expected_receipt_path = str(freeze.get("source_receipt_path") or "")
+    if source_receipt.get("receipt_sha256") != expected_receipt_hash:
+        raise FutureValueTrainingError("source receipt identity changed")
+    if not expected_receipt_path or Path(expected_receipt_path) != source_receipt_path:
+        raise FutureValueTrainingError("source receipt path does not match the freeze")
+    receipt_file_hash = _sha256(source_receipt_path)
+    if receipt_file_hash != expected_receipt_file_hash:
+        raise FutureValueTrainingError("source receipt file hash changed")
+    phase_partition_binding = None
+    phase_runtime_binding = None
+    if phase_artifact_path is not None and phase_receipt_path is not None:
+        if phase_artifact_kind not in {"candidate", "evaluation"}:
+            raise FutureValueTrainingError("phase artifact kind is invalid")
+        phase_partition_binding, phase_runtime_binding = _build_phase_partition_binding(
+            phase_artifact_path,
+            phase_receipt_path,
+            artifact_sha256=str(phase_artifact_sha256),
+            receipt_file_sha256=str(phase_receipt_file_sha256),
+            source_receipt=source_receipt,
+            source_receipt_path=source_receipt_path,
+            source_receipt_file_sha256=expected_receipt_file_hash,
+            artifact_kind=phase_artifact_kind,
+        )
+    input_binding = None
+    if input_binding_path is not None:
+        input_binding = verify_variant_input_binding(
+            input_binding_path,
+            source_receipt=source_receipt,
+            expected_game_ids=source_receipt["model_eligible_game_ids"],
+        )
+
+    paths = {
+        "maps": oe_root / "maps.parquet",
+        "players": oe_root / "oe_player_games.parquet",
+        "teams": oe_root / "oe_team_games.parquet",
+    }
+    normalized_contract = freeze.get("normalized_source_files")
+    if not isinstance(normalized_contract, Mapping):
+        raise FutureValueTrainingError("normalized source file contract is missing")
+    frames: dict[str, pd.DataFrame] = {}
+    verified_series_model_frame: pd.DataFrame | None = None
+    eligible_ids = set(str(value) for value in source_receipt["model_eligible_game_ids"])
+    for label, path in paths.items():
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueTrainingError(f"model source is missing or unsafe: {label}")
+        contract = normalized_contract.get(label)
+        if (
+            not isinstance(contract, Mapping)
+            or contract.get("bytes") != path.stat().st_size
+            or contract.get("sha256") != _sha256(path)
+        ):
+            raise FutureValueTrainingError(f"normalized model source changed: {label}")
+        frame = pd.read_parquet(path)
+        if label == "maps":
+            frame = _accepted_map_frame(frame, source_receipt=source_receipt)
+            if crosswalk_path is not None and crosswalk_receipt_path is not None:
+                bound_full_maps = bind_verified_leaguepedia_series_crosswalk(
+                    frame,
+                    crosswalk_path=crosswalk_path,
+                    receipt_path=crosswalk_receipt_path,
+                    source_receipt=source_receipt,
+                    expected_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+                )
+                full_series_frame = _map_model_frame(
+                    bound_full_maps,
+                    verified_source_receipt=source_receipt,
+                    verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+                    verified_crosswalk_receipt_file_sha256=str(
+                        crosswalk_receipt_file_sha256
+                    ),
+                )
+                verified_series_model_frame = full_series_frame[
+                    full_series_frame["game_id"].astype(str).isin(eligible_ids)
+                ].copy()
+                verified_series_model_frame.attrs["crosswalk_receipt_file_sha256"] = str(
+                    crosswalk_receipt_file_sha256
+                )
+        ids = _row_game_ids(frame, label)
+        selected = frame.loc[ids.isin(eligible_ids)].copy()
+        selected["game_uid"] = ids.loc[selected.index].to_numpy()
+        frames[label] = selected.reset_index(drop=True)
+    if frames["maps"]["game_uid"].nunique() != len(eligible_ids):
+        raise FutureValueTrainingError("model map frame does not match the eligible census")
+    crosswalk_runtime_binding = None
+    if crosswalk_path is not None and crosswalk_receipt_path is not None:
+        if feature_ledger_path is None:
+            raise FutureValueTrainingError(
+                "verified crosswalk evaluation requires a feature ledger bundle"
+            )
+        feature_payload = _load_json_mapping(
+            feature_ledger_path, "feature ledger bundle"
+        )
+        feature_source = feature_payload.get("source")
+        if not isinstance(feature_source, Mapping) or feature_source.get(
+            "series_partition_receipt_file_sha256"
+        ) != str(crosswalk_receipt_file_sha256):
+            raise FutureValueTrainingError(
+                "crosswalk receipt hash does not match the feature bundle"
+            )
+        if verified_series_model_frame is None or set(
+            verified_series_model_frame["game_id"].astype(str)
+        ) != eligible_ids:
+            raise FutureValueTrainingError(
+                "verified crosswalk model frame does not match the eligible census"
+            )
+        crosswalk_runtime_binding = {
+            "artifact": {
+                "path": str(crosswalk_path),
+                "bytes": crosswalk_path.stat().st_size,
+                "sha256": _sha256(crosswalk_path),
+            },
+            "receipt": {
+                "path": str(crosswalk_receipt_path),
+                "bytes": crosswalk_receipt_path.stat().st_size,
+                "sha256": _sha256(crosswalk_receipt_path),
+            },
+            "expected_receipt_file_sha256": str(
+                crosswalk_receipt_file_sha256
+            ),
+        }
+
+    repo_root = Path(__file__).resolve().parents[2]
+    code_paths = [
+        "lol_kills/research/future_value_rating.py",
+        "lol_kills/research/future_value_training.py",
+        "lol_kills/ratings/player_elo.py",
+        "lol_kills/ratings/hierarchical_bt.py",
+        "lol_kills/research/future_phase_curve.py",
+        "lol_kills/research/future_value_draft_score.py",
+    ]
+    dirty_code = _git_output(repo_root, "status", "--porcelain", "--", *code_paths)
+    if dirty_code:
+        raise FutureValueTrainingError("model code has uncommitted changes")
+    code_commit = _git_output(repo_root, "rev-parse", "HEAD")
+    producer_code_hashes = _code_hashes(repo_root)
+    selected_variants = _resolve_variant_names(rating_variant)
+    calibration_variant_keys = (
+        tuple(variant.value for variant in selected_variants)
+        if selected_variants is not None
+        else ("legacy",)
+    )
+    calibration_prior_by_variant: dict[str, list[Mapping[str, Any]]] = {}
+    calibration_prior_binding: dict[str, Any] | None = None
+    if calibration_prior_path is not None:
+        calibration_prior_by_variant, calibration_prior_binding = _load_calibration_prior_folds(
+            calibration_prior_path,
+            source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+            variant_keys=calibration_variant_keys,
+        )
+    ledger_bundle = _load_feature_ledger_bundle(feature_ledger_path)
+    if selected_variants is not None and ledger_bundle is None:
+        raise FutureValueTrainingError(
+            "explicit rating variants require a per-variant feature ledger bundle"
+        )
+    started_at = datetime.now(timezone.utc)
+    started = time.perf_counter()
+    try:
+        from threadpoolctl import threadpool_info
+
+        threadpools = threadpool_info()
+    except (ImportError, RuntimeError):
+        threadpools = []
+    try:
+        if selected_variants is None:
+            result: dict[str, Any] = evaluate_future_value(
+                frames["maps"],
+                frames["players"],
+                n_folds=int(n_folds),
+                source_receipt=source_receipt,
+                source_receipt_path=str(source_receipt_path),
+                source_receipt_file_sha256=receipt_file_hash,
+                runtime_receipt_path=str(runtime_receipt_path),
+                crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+                verified_model_frame=verified_series_model_frame,
+                phase_partition_binding=phase_partition_binding,
+                expected_phase_artifact_sha256=phase_artifact_sha256,
+                expected_phase_receipt_file_sha256=phase_receipt_file_sha256,
+                calibration_prior_folds=calibration_prior_by_variant.get("legacy"),
+            )
+        else:
+            variant_results: dict[str, Any] = {}
+            for variant in selected_variants:
+                variant_key = variant.value
+                variant_ledger = ledger_bundle.get(variant_key)
+                if not isinstance(variant_ledger, Mapping):
+                    raise FutureValueTrainingError(
+                        f"feature ledger bundle is missing variant: {variant_key}"
+                    )
+                inner_variant_ledger = None
+                if "outer" in variant_ledger:
+                    outer_variant_ledger = variant_ledger.get("outer")
+                    inner_variant_ledger = variant_ledger.get("inner")
+                    if not isinstance(outer_variant_ledger, Mapping) or not isinstance(
+                        inner_variant_ledger, Mapping
+                    ):
+                        raise FutureValueTrainingError(
+                            f"feature ledger nested bindings are invalid: {variant_key}"
+                        )
+                    variant_ledger = outer_variant_ledger
+                variant_results[variant_key] = evaluate_future_value(
+                    frames["maps"],
+                    frames["players"],
+                    n_folds=int(n_folds),
+                    source_receipt=source_receipt,
+                    source_receipt_path=str(source_receipt_path),
+                    source_receipt_file_sha256=receipt_file_hash,
+                    runtime_receipt_path=str(runtime_receipt_path),
+                    variant=variant,
+                    feature_ledger=variant_ledger,
+                    inner_feature_ledger=inner_variant_ledger,
+                    crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+                    verified_model_frame=verified_series_model_frame,
+                    phase_partition_binding=phase_partition_binding,
+                    expected_phase_artifact_sha256=phase_artifact_sha256,
+                    expected_phase_receipt_file_sha256=phase_receipt_file_sha256,
+                    calibration_prior_folds=calibration_prior_by_variant.get(variant_key),
+                )
+            result = {
+                "schema_version": "scryglass:future-value-four-variant-evaluation:v1",
+                "variants": variant_results,
+                "variant_configs": {
+                    variant.value: rating_variant_config_receipt(variant)
+                    for variant in selected_variants
+                },
+                "source": {
+                    "source_as_of": source_receipt["source_as_of"],
+                    "source_game_count": source_receipt["source_game_count"],
+                    "source_identity_sha256": source_receipt["source_identity_sha256"],
+                    "source_receipt_sha256": source_receipt["receipt_sha256"],
+                },
+                "authority": {
+                    "research_only": True,
+                    "public_player_rating": False,
+                    "public_team_rating": False,
+                    "public_probability": False,
+                    "deployment": False,
+                    "promotion": False,
+                },
+            }
+    except FutureValueSourceError as error:
+        raise FutureValueTrainingError(str(error)) from error
+    result["source"]["normalized_source_files"] = {
+        str(label): dict(record)
+        for label, record in sorted(normalized_contract.items())
+    }
+    if calibration_prior_binding is not None:
+        result["source"]["calibration_prior"] = dict(calibration_prior_binding)
+    elapsed = time.perf_counter() - started
+    completed_at = datetime.now(timezone.utc)
+    _write_json(model_output_path, result)
+    output_hash = _sha256(model_output_path)
+    runtime: dict[str, Any] = {
+        "schema_version": MODEL_RUNTIME_SCHEMA_VERSION,
+        "status": "research_evaluation_complete",
+        "entrypoint": "lol_kills.research.future_value_training.run_model_evaluation",
+        "command": list(command or []),
+        "code_commit": code_commit,
+        "producer_code_hashes": producer_code_hashes,
+        "rating_variant": rating_variant or "legacy",
+        "feature_ledger_path": str(feature_ledger_path) if feature_ledger_path else None,
+        "input_binding": input_binding,
+        "calibration_prior": calibration_prior_binding,
+        "series_partition": crosswalk_runtime_binding,
+        "phase_partition": phase_runtime_binding,
+        "started_at": started_at.isoformat().replace("+00:00", "Z"),
+        "completed_at": completed_at.isoformat().replace("+00:00", "Z"),
+        "elapsed_seconds": float(elapsed),
+        "environment": {
+            "python_version": platform.python_version(),
+            "python_implementation": platform.python_implementation(),
+            "platform": platform.platform(),
+            "machine": platform.machine(),
+            "processor": platform.processor(),
+            "logical_cpu_count": os.cpu_count(),
+            "pid": os.getpid(),
+            "thread_environment": {
+                name: os.environ.get(name)
+                for name in (
+                    "OMP_NUM_THREADS",
+                    "OPENBLAS_NUM_THREADS",
+                    "MKL_NUM_THREADS",
+                    "NUMEXPR_NUM_THREADS",
+                    "VECLIB_MAXIMUM_THREADS",
+                )
+            },
+            "threadpools": threadpools,
+        },
+        "source": {
+            "source_as_of": source_receipt["source_as_of"],
+            "source_game_count": source_receipt["source_game_count"],
+            "source_identity_sha256": source_receipt["source_identity_sha256"],
+            "model_eligible_game_count": source_receipt["model_eligible_game_count"],
+            "model_eligible_identity_sha256": source_receipt[
+                "model_eligible_identity_sha256"
+            ],
+            "source_receipt_path": str(source_receipt_path),
+            "source_receipt_sha256": source_receipt["receipt_sha256"],
+            "source_receipt_file_sha256": receipt_file_hash,
+        },
+        "input_rows": {
+            "maps": int(len(frames["maps"])),
+            "players": int(len(frames["players"])),
+            "teams": int(len(frames["teams"])),
+        },
+        "output": {
+            "path": str(model_output_path),
+            "bytes": model_output_path.stat().st_size,
+            "sha256": output_hash,
+            "prediction_ledger_sha256": (
+                result.get("prediction_ledger", {}).get("sha256")
+                if selected_variants is None
+                else {
+                    key: value.get("prediction_ledger", {}).get("sha256")
+                    for key, value in result.get("variants", {}).items()
+                }
+            ),
+            "prediction_ledger_rows": (
+                result.get("prediction_ledger", {}).get("row_count")
+                if selected_variants is None
+                else {
+                    key: value.get("prediction_ledger", {}).get("row_count")
+                    for key, value in result.get("variants", {}).items()
+                }
+            ),
+        },
+        "authority": {
+            "research_only": True,
+            "public_player_rating": False,
+            "public_team_rating": False,
+            "public_probability": False,
+            "odds": False,
+            "expected_value": False,
+            "recommendation": False,
+            "betting": False,
+            "promotion": False,
+            "deployment": False,
+        },
+    }
+    runtime["receipt_sha256"] = hashlib.sha256(_canonical_bytes(runtime)).hexdigest()
+    _write_json(runtime_receipt_path, runtime)
+    return runtime
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--annual-root", type=Path)
+    parser.add_argument("--oe-root", type=Path)
+    parser.add_argument("--freeze", type=Path, default=DEFAULT_FREEZE)
+    parser.add_argument("--output-root", type=Path)
+    parser.add_argument("--annual-only", action="store_true")
+    parser.add_argument("--fit-model", action="store_true")
+    parser.add_argument("--source-receipt", type=Path)
+    parser.add_argument("--model-output", type=Path)
+    parser.add_argument("--runtime-receipt", type=Path)
+    parser.add_argument("--n-folds", type=int, default=3)
+    parser.add_argument(
+        "--rating-variant",
+        "--variants",
+        default=None,
+        choices=("legacy", "current_only", "future_player_form", "scaling_curve", "both", "all"),
+        help="run the legacy model, one registered variant, or all four variants",
+    )
+    parser.add_argument(
+        "--feature-ledger-bundle",
+        type=Path,
+        help="JSON bundle with independently bound per-variant fold ledgers",
+    )
+    parser.add_argument(
+        "--input-binding",
+        type=Path,
+        help="frozen current-rating and atomized producer input binding",
+    )
+    parser.add_argument("--crosswalk", type=Path)
+    parser.add_argument("--crosswalk-receipt", type=Path)
+    parser.add_argument("--crosswalk-receipt-file-sha256")
+    parser.add_argument("--phase-artifact", type=Path)
+    parser.add_argument("--phase-receipt", type=Path)
+    parser.add_argument("--phase-artifact-sha256")
+    parser.add_argument("--phase-receipt-file-sha256")
+    parser.add_argument(
+        "--calibration-prior",
+        type=Path,
+        help="source-bound JSON receipt with whole-series out-of-sample calibration prelude folds",
+    )
+    parser.add_argument(
+        "--phase-artifact-kind",
+        default="candidate",
+        choices=("candidate", "evaluation"),
+    )
+    args = parser.parse_args(argv)
+    try:
+        if args.fit_model:
+            required = {
+                "--oe-root": args.oe_root,
+                "--source-receipt": args.source_receipt,
+                "--model-output": args.model_output,
+                "--runtime-receipt": args.runtime_receipt,
+            }
+            missing = [name for name, value in required.items() if value is None]
+            if missing:
+                parser.error("model fit requires " + ", ".join(missing))
+            result = run_model_evaluation(
+                oe_root=args.oe_root,
+                freeze_path=args.freeze,
+                source_receipt_path=args.source_receipt,
+                model_output_path=args.model_output,
+                runtime_receipt_path=args.runtime_receipt,
+                n_folds=args.n_folds,
+                rating_variant=args.rating_variant,
+                feature_ledger_path=args.feature_ledger_bundle,
+                input_binding_path=args.input_binding,
+                crosswalk_path=(
+                    None if args.crosswalk is None else args.crosswalk.resolve()
+                ),
+                crosswalk_receipt_path=(
+                    None
+                    if args.crosswalk_receipt is None
+                    else args.crosswalk_receipt.resolve()
+                ),
+                crosswalk_receipt_file_sha256=args.crosswalk_receipt_file_sha256,
+                phase_artifact_path=(
+                    None if args.phase_artifact is None else args.phase_artifact.resolve()
+                ),
+                phase_receipt_path=(
+                    None if args.phase_receipt is None else args.phase_receipt.resolve()
+                ),
+                phase_artifact_sha256=args.phase_artifact_sha256,
+                phase_receipt_file_sha256=args.phase_receipt_file_sha256,
+                phase_artifact_kind=args.phase_artifact_kind,
+                calibration_prior_path=(
+                    None
+                    if args.calibration_prior is None
+                    else args.calibration_prior.resolve()
+                ),
+                command=[
+                    sys.executable,
+                    "-m",
+                    "lol_kills.research.future_value_training",
+                    *(argv or sys.argv[1:]),
+                ],
+            )
+        elif args.annual_only:
+            if args.annual_root is None or args.output_root is None:
+                parser.error("--annual-root and --output-root are required")
+            result = verify_annual_only(
+                annual_root=args.annual_root,
+                freeze_path=args.freeze,
+                output_root=args.output_root,
+            )
+        else:
+            if args.annual_root is None or args.output_root is None:
+                parser.error("--annual-root and --output-root are required")
+            if args.oe_root is None:
+                parser.error("--oe-root is required unless --annual-only is set")
+            result = verify_research_source(
+                annual_root=args.annual_root,
+                oe_root=args.oe_root,
+                freeze_path=args.freeze,
+                output_root=args.output_root,
+            )
+    except FutureValueTrainingError as error:
+        parser.exit(1, f"future-value research verification failed: {error}\n")
+    print(json.dumps(result, allow_nan=False, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+__all__ = [
+    "CALIBRATION_PRIOR_SCHEMA_VERSION",
+    "DEFAULT_FREEZE",
+    "DUPLICATE_RESOLUTION_SCHEMA_VERSION",
+    "FREEZE_SCHEMA_V2_VERSION",
+    "FutureValueTrainingError",
+    "KNOWN_DUPLICATE_BRIDGE_GAME_IDS",
+    "duplicate_resolution_mapping_sha256",
+    "frozen_census",
+    "validate_duplicate_resolution_block",
+    "verify_annual_only",
+    "verify_annual_sources",
+    "verify_bridge_sources",
+    "verify_research_source",
+    "verify_variant_input_binding",
+    "run_model_evaluation",
+]

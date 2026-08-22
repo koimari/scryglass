@@ -36,6 +36,13 @@ from lol_kills.postgame_sync import (
     sync_once,
     validate_live_source,
 )
+from lol_kills.research.future_value_refresh_shadow import (
+    AUTHORITY as FUTURE_VALUE_SHADOW_AUTHORITY,
+    SCHEMA_VERSION as FUTURE_VALUE_SHADOW_SCHEMA_VERSION,
+    FutureValueShadowPromotionError,
+    reject_unauthorized_promotion,
+    run_future_value_refresh_shadow,
+)
 from lol_kills.v2.tierlists import live_refresh
 from lol_kills.v2.tierlists.accepted_census import write_census
 from lol_kills.refresh_ledger import (
@@ -127,6 +134,7 @@ class RefreshConfig:
     attempts: int = DEFAULT_ATTEMPTS
     step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_MINUTES * 60
     probe_propagation_seconds: float = DEFAULT_PROBE_PROPAGATION_SECONDS
+    future_value_shadow_promote_variant: str | None = None
 
     @property
     def sync(self) -> SyncConfig:
@@ -228,6 +236,9 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
         attempts=attempts,
         probe_propagation_seconds=probe_propagation_seconds,
         step_timeout_seconds=step_timeout_minutes * 60,
+        future_value_shadow_promote_variant=_read_env(
+            "SCRYGLASS_FUTURE_VALUE_SHADOW_PROMOTE"
+        ),
     )
 
 
@@ -250,6 +261,10 @@ def _write_health(config: RefreshConfig, status: str, checked_at: datetime, **fi
 
 
 def _preflight(config: RefreshConfig) -> None:
+    try:
+        reject_unauthorized_promotion(config.future_value_shadow_promote_variant)
+    except FutureValueShadowPromotionError as error:
+        raise PublicRefreshError(str(error)) from error
     if not config.production:
         return
     if config.publication_backend != "supabase":
@@ -627,6 +642,100 @@ def _run_with_source_retries(
                 raise
             _sleep_before_retry(attempt)
     raise PublicRefreshError("ratings refresh stopped without a result") from last_error
+
+
+def _future_value_shadow_artifacts() -> dict[str, Any]:
+    """Read optional research artifact bindings from the process environment."""
+
+    supplied: dict[str, Any] = {}
+    raw_bundle = _read_env("SCRYGLASS_FUTURE_VALUE_SHADOW_ARTIFACTS")
+    if raw_bundle:
+        try:
+            parsed = json.loads(raw_bundle)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, Mapping):
+            supplied.update({str(key): value for key, value in parsed.items()})
+    for name in ("model", "snapshot", "tier", "draft"):
+        value = _read_env(f"SCRYGLASS_FUTURE_VALUE_{name.upper()}_ARTIFACT")
+        if value:
+            supplied[name] = value
+    return supplied
+
+
+def _run_future_value_shadow(
+    config: RefreshConfig,
+    *,
+    ratings: Mapping[str, Any],
+    accepted_inputs: Mapping[str, Any] | None,
+    checked_at: datetime,
+) -> dict[str, Any]:
+    """Record future-value research inputs after the current rating step."""
+
+    state = _load_json(config.sync.state_path)
+    raw_ids = state.get("published_game_ids")
+    if not isinstance(raw_ids, list):
+        raw_ids = ratings.get("game_ids")
+    source_ids = raw_ids if isinstance(raw_ids, list) else []
+    source_identity = ratings.get("source_identity_sha256")
+    if not source_identity and source_ids:
+        source_identity = source_identity_sha256(source_ids)
+    source_count = len(source_ids) if source_ids else ratings.get("source_game_count")
+    source_as_of = ratings.get("source_observed_through")
+    if not source_as_of and accepted_inputs is not None:
+        source_as_of = accepted_inputs.get("source_observed_through")
+    source_receipt_sha256 = (
+        accepted_inputs.get("source_receipt_sha256") if accepted_inputs is not None else None
+    )
+    source_receipt_path = config.accepted_source_receipt
+    if source_receipt_sha256 is None and source_receipt_path is not None:
+        try:
+            source_payload = json.loads(source_receipt_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            source_payload = None
+        if isinstance(source_payload, Mapping):
+            source_receipt_sha256 = source_payload.get("receipt_canonical_sha256")
+    try:
+        return run_future_value_refresh_shadow(
+            runtime_root=config.runtime_root,
+            source_as_of=source_as_of,
+            source_game_ids=source_ids,
+            source_game_count=source_count,
+            source_identity_sha256=source_identity,
+            source_receipt_sha256=source_receipt_sha256,
+            accepted_source_receipt_path=source_receipt_path,
+            current_ratings=ratings,
+            artifacts=_future_value_shadow_artifacts(),
+            checked_at=checked_at,
+        )
+    except Exception as error:  # noqa: BLE001
+        # The unified public refresh persists this object in its run receipt.
+        # A research shadow failure cannot interrupt current ratings, Tier
+        # Lists, pack staging, activation, or rollback.
+        return {
+            "schema_version": FUTURE_VALUE_SHADOW_SCHEMA_VERSION,
+            "status": "research_only_blocked",
+            "checked_at": _iso(checked_at),
+            "source": {
+                "source_as_of": source_as_of,
+                "source_game_count": source_count,
+                "source_identity_sha256": source_identity,
+                "source_receipt_sha256": source_receipt_sha256,
+            },
+            "current_ratings": {
+                "status": ratings.get("status"),
+                "pack_id": ratings.get("pack_id"),
+            },
+            "artifacts": {},
+            "coverage": {},
+            "blockers": ["shadow_adapter_failed"],
+            "error": f"{type(error).__name__}: {str(error)[:300]}",
+            "authority": dict(FUTURE_VALUE_SHADOW_AUTHORITY),
+            "writes_public_artifacts": False,
+            "stage_or_activation": False,
+            "receipt_path": None,
+            "write_error": "shadow result is preserved by the unified refresh receipt",
+        }
 
 
 def _run_tier_refresh(
@@ -1522,6 +1631,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
     publication: dict[str, Any] | None = None
     tier: dict[str, Any] | None = None
     tier_publication: dict[str, Any] | None = None
+    future_value_shadow: dict[str, Any] | None = None
     database_publication: dict[str, Any] | None = None
     post_publication_verified = False
     failure_stage = "preflight"
@@ -1591,6 +1701,12 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             checked_at,
             force=force,
             prepare_tier_fn=prepare_tier,
+        )
+        future_value_shadow = _run_future_value_shadow(
+            config,
+            ratings=ratings,
+            accepted_inputs=accepted_inputs,
+            checked_at=checked_at,
         )
         publication = ratings.get("publication") if isinstance(ratings.get("publication"), dict) else None
         reported_tier_publication = ratings.get("tier_publication")
@@ -1747,6 +1863,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             "checked_at": _iso(checked_at),
             "continuity_bootstrap": continuity_bootstrap,
             "ratings": ratings,
+            "future_value_shadow": future_value_shadow,
             "tier": tier,
             "tier_publication": tier_publication,
             "tier_error": tier_error,
