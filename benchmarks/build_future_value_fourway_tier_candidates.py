@@ -22,6 +22,7 @@ from benchmarks.rebuild_future_value_tier_baseline import (
     EXPECTED_ACCEPTED_IDENTITY_SHA256,
     EXPECTED_MODEL_ELIGIBLE_GAME_COUNT,
     EXPECTED_MODEL_ELIGIBLE_IDENTITY_SHA256,
+    RUNTIME_PLAYER_FILE,
     TierBaselineRebuildError,
     _stage_runtime,
     load_tier_baseline_bundle,
@@ -38,6 +39,7 @@ from lol_kills.research.future_value_tierlist import (
     validate_candidate,
 )
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
+from lol_kills.v2.tierlists.champion_elo import SOURCE_LOCATOR
 from lol_kills.v2.tierlists.pooled_candidate import build_pooled_candidate
 
 
@@ -428,6 +430,34 @@ def _invoke_builder(
     return dict(candidate)
 
 
+def _verify_candidate_source(
+    candidate_source: object,
+    runtime: Mapping[str, Any],
+    label: str,
+) -> None:
+    if not isinstance(candidate_source, Mapping):
+        raise FourwayTierCandidateError(f"{label} source binding is missing")
+    player_source = runtime.get("player_source")
+    if not isinstance(player_source, Mapping):
+        raise FourwayTierCandidateError(f"{label} staged player source binding is missing")
+    if player_source.get("locator") != RUNTIME_PLAYER_FILE:
+        raise FourwayTierCandidateError(f"{label} staged player source locator changed")
+    if candidate_source.get("locator") != SOURCE_LOCATOR:
+        raise FourwayTierCandidateError(f"{label} candidate source locator changed")
+    if candidate_source.get("source_files") != [SOURCE_LOCATOR]:
+        raise FourwayTierCandidateError(f"{label} candidate source files changed")
+    player_sha256 = _require_hash(
+        player_source.get("sha256"), f"{label} staged player source hash"
+    )
+    expected_binding_sha256 = _hash_bytes(
+        canonical_json_bytes(
+            [{"locator": SOURCE_LOCATOR, "raw_sha256": player_sha256}]
+        )
+    )
+    if candidate_source.get("raw_sha256") != expected_binding_sha256:
+        raise FourwayTierCandidateError(f"{label} candidate source bytes changed")
+
+
 def _write_json_once(path: Path, value: Mapping[str, Any], label: str) -> str:
     if path.exists() or path.is_symlink():
         raise FourwayTierCandidateError(f"{label} output already exists")
@@ -596,9 +626,7 @@ def build_fourway_tier_candidates(
             raise FourwayTierCandidateError(f"{variant} candidate expected cutoff changed")
         if candidate_source.get("source_latest_replayed") != source["source_as_of"]:
             raise FourwayTierCandidateError(f"{variant} candidate source cutoff changed")
-        expected_player_sha = runtime.get("player_source", {}).get("sha256") if isinstance(runtime, Mapping) else None
-        if expected_player_sha is not None and candidate_source.get("raw_sha256") != expected_player_sha:
-            raise FourwayTierCandidateError(f"{variant} candidate source bytes changed")
+        _verify_candidate_source(candidate_source, runtime, variant)
         candidates[variant] = candidate
         candidate_path = output / "candidates" / f"{variant}.json"
         raw_sha256 = _write_json_once(candidate_path, candidate, f"{variant} candidate")

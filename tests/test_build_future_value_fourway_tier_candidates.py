@@ -161,7 +161,12 @@ def _fixture(tmp_path: Path) -> tuple[dict[str, object], Path, str, str, Path]:
 def _patch_verified_staging(monkeypatch: pytest.MonkeyPatch, player_sha: str) -> None:
     def fake_stage(output, players, meta, repository, *, require_assets):
         (output / "runtime").mkdir(parents=True)
-        return {"player_source": {"sha256": player_sha}}
+        return {
+            "player_source": {
+                "locator": adapter.RUNTIME_PLAYER_FILE,
+                "sha256": player_sha,
+            }
+        }
 
     monkeypatch.setattr(adapter, "_stage_runtime", fake_stage)
     monkeypatch.setattr(adapter, "verify_target_parity", lambda *args, **kwargs: None)
@@ -199,8 +204,14 @@ def test_builds_four_candidates_on_one_exact_eligible_universe_and_keeps_baselin
             "as_of": SOURCE_AS_OF,
             "expected_live_as_of": SOURCE_AS_OF,
             "source": {
+                "locator": adapter.SOURCE_LOCATOR,
+                "source_files": [adapter.SOURCE_LOCATOR],
                 "source_latest_replayed": SOURCE_AS_OF,
-                "raw_sha256": player_sha,
+                "raw_sha256": hashlib.sha256(
+                    adapter.canonical_json_bytes(
+                        [{"locator": adapter.SOURCE_LOCATOR, "raw_sha256": player_sha}]
+                    )
+                ).hexdigest(),
             },
         }
 
@@ -299,3 +310,20 @@ def test_rejects_shadow_source_mismatch_before_staging(
             expected_model_eligible_identity_sha256=identity_sha256(ELIGIBLE),
             candidate_builder=lambda *args, **kwargs: {},
         )
+
+
+def test_rejects_raw_file_hash_when_candidate_binding_hash_is_required() -> None:
+    player_sha = "a" * 64
+    runtime = {
+        "player_source": {
+            "locator": adapter.RUNTIME_PLAYER_FILE,
+            "sha256": player_sha,
+        }
+    }
+    candidate_source = {
+        "locator": adapter.SOURCE_LOCATOR,
+        "source_files": [adapter.SOURCE_LOCATOR],
+        "raw_sha256": player_sha,
+    }
+    with pytest.raises(adapter.FourwayTierCandidateError, match="source bytes"):
+        adapter._verify_candidate_source(candidate_source, runtime, "current_only")
