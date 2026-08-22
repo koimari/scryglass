@@ -54,6 +54,22 @@ AUTHORITY = {
     "promotion": False,
     "merge": False,
     "deployment": False,
+    "odds": False,
+    "expected_value": False,
+    "recommendation": False,
+    "betting": False,
+}
+FINAL_MODEL_AUTHORITY = {
+    "research_only": True,
+    "public_player_rating": False,
+    "public_team_rating": False,
+    "public_probability": False,
+    "promotion": False,
+    "merge": False,
+    "deployment": False,
+    "odds": False,
+    "expected_value": False,
+    "recommendation": False,
     "betting": False,
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
@@ -127,11 +143,14 @@ def _verify_file(path: Path, expected_sha256: object, label: str) -> str:
     return expected
 
 
-def _verify_authority(value: object, label: str) -> None:
-    if not isinstance(value, Mapping) or value.get("research_only") is not True:
-        raise V2TierShadowError(f"{label} research authority is missing")
-    if any(bool(flag) for name, flag in value.items() if name != "research_only"):
-        raise V2TierShadowError(f"{label} grants authority")
+def _verify_authority(
+    value: object,
+    label: str,
+    *,
+    expected: Mapping[str, bool] = AUTHORITY,
+) -> None:
+    if not isinstance(value, Mapping) or dict(value) != dict(expected):
+        raise V2TierShadowError(f"{label} authority is incomplete or changed")
 
 
 def _verify_self_hash(payload: Mapping[str, Any], field: str, label: str) -> str:
@@ -141,6 +160,81 @@ def _verify_self_hash(payload: Mapping[str, Any], field: str, label: str) -> str
     if _canonical_sha256(unsigned) != claimed:
         raise V2TierShadowError(f"{label} self-hash changed")
     return claimed
+
+
+def _source_binding_check(
+    binding: object,
+    source_receipt: Mapping[str, Any],
+    *,
+    label: str,
+) -> None:
+    if not isinstance(binding, Mapping):
+        raise V2TierShadowError(f"{label} source binding is missing")
+    eligible = tuple(sorted(str(value) for value in source_receipt["model_eligible_game_ids"]))
+    expected: dict[str, Any] = {
+        "source_as_of": source_receipt.get("source_as_of"),
+        "source_receipt_sha256": source_receipt.get("receipt_sha256"),
+        "source_identity_sha256": source_receipt.get("source_identity_sha256"),
+        "source_game_count": source_receipt.get("source_game_count"),
+        "model_eligible_game_count": len(eligible),
+        "model_eligible_game_ids": list(eligible),
+        "model_eligible_identity_sha256": identity_sha256(eligible),
+    }
+    if "accepted_game_ids" in source_receipt:
+        expected["accepted_game_ids"] = [
+            str(value) for value in source_receipt["accepted_game_ids"]
+        ]
+    if "source_files" in source_receipt:
+        expected["source_files"] = source_receipt["source_files"]
+    if any(value is None for value in expected.values()) or set(binding) != set(expected):
+        raise V2TierShadowError(f"{label} source binding is incomplete")
+    for field, value in expected.items():
+        actual = binding.get(field)
+        if field == "model_eligible_game_ids":
+            try:
+                actual = [str(item) for item in actual]
+            except (TypeError, ValueError):
+                actual = None
+        if actual != value:
+            raise V2TierShadowError(f"{label} source binding changed: {field}")
+
+
+def _verify_recorded_file_binding(binding: object, label: str) -> None:
+    if not isinstance(binding, Mapping):
+        raise V2TierShadowError(f"{label} file binding is missing")
+    path_value = binding.get("path")
+    if not isinstance(path_value, str) or not path_value.strip():
+        raise V2TierShadowError(f"{label} file path is missing")
+    path = _file(path_value, label)
+    if binding.get("bytes") != path.stat().st_size:
+        raise V2TierShadowError(f"{label} bytes changed")
+    _verify_file(path, binding.get("sha256"), label)
+
+
+def _verify_recorded_bindings(bindings: object, receipt: Mapping[str, Any]) -> None:
+    if not isinstance(bindings, Mapping):
+        raise V2TierShadowError("V2 Tier ledger input bindings are missing")
+    if receipt.get("bindings_sha256") != _canonical_sha256(bindings):
+        raise V2TierShadowError("V2 Tier ledger input bindings changed")
+    required = {
+        "source_receipt",
+        "source_files",
+        "final_model",
+        "final_model_receipt",
+        "final_run_receipt",
+        "current_rating_ledger",
+        "current_rating_receipt",
+        "implementation",
+    }
+    if not required.issubset(bindings):
+        raise V2TierShadowError("V2 Tier ledger input bindings are incomplete")
+    for field in required - {"source_files"}:
+        _verify_recorded_file_binding(bindings.get(field), f"V2 Tier binding {field}")
+    source_files = bindings.get("source_files")
+    if not isinstance(source_files, Mapping) or not {"maps", "players", "teams"}.issubset(source_files):
+        raise V2TierShadowError("V2 Tier source file bindings are incomplete")
+    for field, binding in source_files.items():
+        _verify_recorded_file_binding(binding, f"V2 Tier source file {field}")
 
 
 def _source_record_path(
@@ -219,9 +313,21 @@ def verify_final_v2_model(
         raise V2TierShadowError("final V2 run schema changed")
     if model.get("status") != "research_only_blocked" or run.get("status") != "research_only_blocked":
         raise V2TierShadowError("final V2 model status changed")
-    _verify_authority(model.get("authority"), "final V2 model")
-    _verify_authority(receipt.get("authority"), "final V2 receipt")
-    _verify_authority(run.get("authority"), "final V2 run")
+    _verify_authority(
+        model.get("authority"),
+        "final V2 model",
+        expected=FINAL_MODEL_AUTHORITY,
+    )
+    _verify_authority(
+        receipt.get("authority"),
+        "final V2 receipt",
+        expected=FINAL_MODEL_AUTHORITY,
+    )
+    _verify_authority(
+        run.get("authority"),
+        "final V2 run",
+        expected=FINAL_MODEL_AUTHORITY,
+    )
     receipt_hash = _verify_self_hash(receipt, "receipt_sha256", "final V2 receipt")
     if model.get("receipt_sha256") != receipt_hash or model.get("receipt") != receipt:
         raise V2TierShadowError("final V2 embedded receipt changed")
@@ -229,6 +335,12 @@ def verify_final_v2_model(
         raise V2TierShadowError("final V2 run receipt binding changed")
     if run.get("model_artifact_sha256") != model_sha:
         raise V2TierShadowError("final V2 run model binding changed")
+    _source_binding_check(
+        receipt.get("source_binding"),
+        source_receipt,
+        label="final V2 receipt",
+    )
+    _source_binding_check(model.get("source"), source_receipt, label="final V2 model")
     for field in ("source_receipt_sha256", "source_identity_sha256"):
         if run.get(field) != source_receipt.get(
             "receipt_sha256" if field == "source_receipt_sha256" else field
@@ -239,9 +351,16 @@ def verify_final_v2_model(
         tuple(str(value) for value in receipt.get("fit_game_ids", ())) != eligible
         or run.get("fit_game_count") != len(eligible)
         or run.get("fit_game_identity_sha256") != identity_sha256(eligible)
+        or tuple(str(value) for value in run.get("eligible_game_ids", ())) != eligible
+        or run.get("eligible_game_identity_sha256") != identity_sha256(eligible)
+        or receipt.get("fit_game_count") != len(eligible)
+        or receipt.get("fit_game_identity_sha256") != identity_sha256(eligible)
     ):
         raise V2TierShadowError("final V2 fit census changed")
-    if run.get("fit_window_end") != source_receipt.get("source_as_of"):
+    if (
+        receipt.get("fit_window_end") != source_receipt.get("source_as_of")
+        or run.get("fit_window_end") != source_receipt.get("source_as_of")
+    ):
         raise V2TierShadowError("final V2 fit cutoff changed")
     parameters = model.get("parameters")
     if not isinstance(parameters, Mapping):
@@ -468,9 +587,12 @@ def score_v2_design(
     matrix_rows = [
         {
             "game_id": game_id,
-            "values": [float(value) for value in matrix[index]],
+            "values": [float(value) for value in values],
         }
-        for index, game_id in enumerate(design["game_id"].astype(str))
+        for game_id, values in sorted(
+            zip(design["game_id"].astype(str), matrix),
+            key=lambda item: item[0],
+        )
     ]
     return rows, offsets, _canonical_sha256(matrix_rows)
 
@@ -495,8 +617,12 @@ def verify_target_parity(
     model_frame = _map_model_frame(maps)
     target_by_id = model_frame.set_index(model_frame["game_id"].astype(str))["target"]
     expected = tuple(sorted(str(value) for value in expected_game_ids))
-    if target_by_id.index.duplicated().any() or not set(expected).issubset(target_by_id.index):
+    target_ids = tuple(sorted(str(value) for value in target_by_id.index))
+    if target_by_id.index.duplicated().any() or target_ids != expected:
         raise V2TierShadowError("frozen target identities are incomplete")
+    row_ids = tuple(sorted(str(row.get("game_id") or "") for row in rows))
+    if row_ids != expected:
+        raise V2TierShadowError("V2 target rows do not cover the full census")
     for row in rows:
         game_id = str(row["game_id"])
         if float(row["target"]) != float(target_by_id.loc[game_id]):
@@ -574,6 +700,7 @@ def write_v2_tier_offset_ledger(
         },
         "implementation": {
             "path": str(Path(__file__).resolve()),
+            "bytes": Path(__file__).resolve().stat().st_size,
             "sha256": sha256_path(Path(__file__).resolve()),
         },
     }
@@ -668,6 +795,7 @@ def load_v2_tier_offset_ledger(
     _verify_authority(payload.get("authority"), "V2 Tier ledger")
     _verify_authority(receipt.get("authority"), "V2 Tier receipt")
     _verify_self_hash(receipt, "receipt_sha256", "V2 Tier receipt")
+    _verify_recorded_bindings(payload.get("bindings"), receipt)
     if receipt.get("artifact_locator") not in {ledger_file.name, str(ledger_file)}:
         raise V2TierShadowError("V2 Tier ledger locator changed")
     if int(receipt.get("artifact_bytes") or -1) != ledger_file.stat().st_size:
@@ -702,7 +830,13 @@ def load_v2_tier_offset_ledger(
         offsets[game_id] = value
     if offset_values_sha256(offsets) != payload.get("offsets_sha256") or payload.get("offsets_sha256") != receipt.get("offsets_sha256"):
         raise V2TierShadowError("V2 Tier offset values changed")
-    if payload.get("timing") != receipt.get("timing") or payload["timing"].get("chronological_evaluation_suitable") is not False:
+    expected_timing = {
+        "feature_state": "strict_prior_before_each_map",
+        "same_timestamp_policy": "batch_exclude_same_timestamp",
+        "model_fit_scope": "retrospective_full_model_eligible_census",
+        "chronological_evaluation_suitable": False,
+    }
+    if payload.get("timing") != expected_timing or receipt.get("timing") != expected_timing:
         raise V2TierShadowError("V2 Tier timing contract changed")
     provenance = make_offset_provenance(
         variant=RatingVariant.FUTURE_PLAYER_FORM.value,

@@ -72,6 +72,22 @@ AUTHORITY = {
     "promotion": False,
     "merge": False,
     "deployment": False,
+    "odds": False,
+    "expected_value": False,
+    "recommendation": False,
+    "betting": False,
+}
+FINAL_MODEL_AUTHORITY = {
+    "research_only": True,
+    "public_player_rating": False,
+    "public_team_rating": False,
+    "public_probability": False,
+    "promotion": False,
+    "merge": False,
+    "deployment": False,
+    "odds": False,
+    "expected_value": False,
+    "recommendation": False,
     "betting": False,
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
@@ -163,11 +179,14 @@ def _verify_file(path: Path, expected_sha256: object, label: str) -> str:
     return actual
 
 
-def _verify_authority(value: object, label: str) -> None:
-    if not isinstance(value, Mapping) or value.get("research_only") is not True:
-        raise TierShadowError(f"{label} research authority is missing")
-    if any(bool(flag) for name, flag in value.items() if name != "research_only"):
-        raise TierShadowError(f"{label} grants authority")
+def _verify_authority(
+    value: object,
+    label: str,
+    *,
+    expected: Mapping[str, bool] = AUTHORITY,
+) -> None:
+    if not isinstance(value, Mapping) or dict(value) != dict(expected):
+        raise TierShadowError(f"{label} authority is incomplete or changed")
 
 
 def _verify_self_hash(payload: Mapping[str, Any], field: str, label: str) -> str:
@@ -241,16 +260,107 @@ def _source_binding_check(
     *,
     label: str,
 ) -> None:
+    if not isinstance(binding, Mapping):
+        raise TierShadowError(f"{label} source binding is missing")
+    eligible = _source_ids(source_receipt)
     expected = {
+        "source_as_of": source_receipt.get("source_as_of"),
         "source_receipt_sha256": source_receipt.get("receipt_sha256"),
         "source_identity_sha256": source_receipt.get("source_identity_sha256"),
         "source_game_count": source_receipt.get("source_game_count"),
-        "model_eligible_game_count": len(_source_ids(source_receipt)),
-        "model_eligible_identity_sha256": identity_sha256(_source_ids(source_receipt)),
+        "model_eligible_game_count": len(eligible),
+        "model_eligible_game_ids": list(eligible),
+        "model_eligible_identity_sha256": identity_sha256(eligible),
     }
+    if "accepted_game_ids" in source_receipt:
+        expected["accepted_game_ids"] = [
+            str(item) for item in source_receipt["accepted_game_ids"]
+        ]
+    if "source_files" in source_receipt:
+        expected["source_files"] = source_receipt["source_files"]
+    if any(value is None for value in expected.values()):
+        raise TierShadowError(f"{label} source receipt is incomplete")
+    if set(binding) != set(expected):
+        raise TierShadowError(f"{label} source binding is incomplete")
     for field, value in expected.items():
-        if field in binding and binding.get(field) != value:
+        actual = binding.get(field)
+        if field == "model_eligible_game_ids":
+            try:
+                actual = [str(item) for item in actual]
+            except (TypeError, ValueError):
+                actual = None
+        if actual != value:
             raise TierShadowError(f"{label} source binding changed: {field}")
+
+
+def _verify_fit_binding(
+    payload: Mapping[str, Any],
+    label: str,
+    *,
+    ids_field: str,
+    identity_field: str,
+    eligible: tuple[str, ...],
+    fit_window_end: object,
+) -> None:
+    ids = payload.get(ids_field)
+    try:
+        actual_ids = tuple(str(item) for item in ids)
+    except (TypeError, ValueError):
+        actual_ids = ()
+    if actual_ids != eligible:
+        raise TierShadowError(f"{label} fit census is missing or changed")
+    if payload.get("fit_game_count") != len(eligible):
+        raise TierShadowError(f"{label} fit count is missing or changed")
+    if payload.get("fit_game_identity_sha256") != identity_sha256(eligible):
+        raise TierShadowError(f"{label} fit identity is missing or changed")
+    if payload.get(identity_field) != identity_sha256(eligible):
+        raise TierShadowError(f"{label} fit identity is missing or changed")
+    if payload.get("fit_window_end") != fit_window_end:
+        raise TierShadowError(f"{label} fit cutoff is missing or changed")
+
+
+def _verify_recorded_file_binding(binding: object, label: str) -> None:
+    if not isinstance(binding, Mapping):
+        raise TierShadowError(f"{label} file binding is missing")
+    path_value = binding.get("path")
+    if not isinstance(path_value, str) or not path_value.strip():
+        raise TierShadowError(f"{label} file path is missing")
+    path = _file(path_value, label)
+    if binding.get("bytes") != path.stat().st_size:
+        raise TierShadowError(f"{label} bytes changed")
+    _verify_file(path, binding.get("sha256"), label)
+
+
+def _verify_recorded_bindings(
+    bindings: object,
+    receipt: Mapping[str, Any],
+    *,
+    variant: str,
+) -> None:
+    if not isinstance(bindings, Mapping):
+        raise TierShadowError("Tier ledger input bindings are missing")
+    if receipt.get("bindings_sha256") != _canonical_sha256(bindings):
+        raise TierShadowError("Tier ledger input bindings changed")
+    required = {
+        "source_receipt",
+        "source_files",
+        "final_model",
+        "final_model_receipt",
+        "final_run_receipt",
+        "current_rating_ledger",
+        "current_rating_receipt",
+    }
+    if variant in SCALING_VARIANTS:
+        required.update({"full_scaling_ledger", "full_scaling_receipt"})
+    if not required.issubset(bindings):
+        raise TierShadowError("Tier ledger input bindings are incomplete")
+    for field in required - {"source_files"}:
+        _verify_recorded_file_binding(bindings.get(field), f"Tier binding {field}")
+    source_files = bindings.get("source_files")
+    if not isinstance(source_files, Mapping) or not {"maps", "players", "teams"}.issubset(source_files):
+        raise TierShadowError("Tier source file bindings are incomplete")
+    for field, binding in source_files.items():
+        _verify_recorded_file_binding(binding, f"Tier source file {field}")
 
 
 def _extract_parameters(model: Mapping[str, Any], receipt: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -339,7 +449,11 @@ def verify_final_model(
             raise TierShadowError(f"{label} schema changed")
         if payload.get("status") not in {"research_only", "research_only_blocked"}:
             raise TierShadowError(f"{label} status grants authority")
-        _verify_authority(payload.get("authority"), label)
+        _verify_authority(
+            payload.get("authority"),
+            label,
+            expected=FINAL_MODEL_AUTHORITY,
+        )
     receipt_hash = _verify_self_hash(receipt, "receipt_sha256", "final model receipt")
     if model.get("receipt_sha256") is not None and model.get("receipt_sha256") != receipt_hash:
         raise TierShadowError("final model receipt binding changed")
@@ -350,11 +464,13 @@ def verify_final_model(
     if run.get("model_artifact_sha256") is not None and run.get("model_artifact_sha256") != model_sha:
         raise TierShadowError("final run receipt artifact binding changed")
     source_binding = receipt.get("source_binding")
-    if isinstance(source_binding, Mapping):
-        _source_binding_check(source_binding, source_receipt, label="final model")
+    _source_binding_check(source_binding, source_receipt, label="final model receipt")
     source_summary = model.get("source")
-    if isinstance(source_summary, Mapping):
-        _source_binding_check(source_summary, source_receipt, label="final model")
+    _source_binding_check(source_summary, source_receipt, label="final model")
+    if run.get("source_receipt_sha256") != source_receipt.get("receipt_sha256"):
+        raise TierShadowError("final run source receipt binding is missing or changed")
+    if run.get("source_identity_sha256") != source_receipt.get("source_identity_sha256"):
+        raise TierShadowError("final run source identity binding is missing or changed")
     declared_variant = receipt.get("variant") or model.get("variant") or run.get("variant")
     if declared_variant is not None and str(declared_variant) != resolved.value:
         raise TierShadowError(f"{resolved.value} model variant changed")
@@ -389,21 +505,33 @@ def verify_final_model(
         if {str(key): bool(value) for key, value in dependencies.items()} != expected_dependencies:
             raise TierShadowError(f"{resolved.value} model dependency contract changed")
     eligible = _source_ids(source_receipt)
-    for payload, label in ((receipt, "final model receipt"), (run, "final run receipt")):
-        fit_ids = payload.get("fit_game_ids")
-        if fit_ids is not None and tuple(str(value) for value in fit_ids) != eligible:
-            raise TierShadowError(f"{label} fit census changed")
-        if payload.get("fit_game_count") is not None and payload.get("fit_game_count") != len(eligible):
-            raise TierShadowError(f"{label} fit count changed")
-        if payload.get("fit_game_identity_sha256") is not None and payload.get("fit_game_identity_sha256") != identity_sha256(eligible):
-            raise TierShadowError(f"{label} fit identity changed")
-    timing = receipt.get("timing") or run.get("timing") or {}
-    if not isinstance(timing, Mapping):
-        raise TierShadowError("final model timing receipt is invalid")
-    if timing.get("chronological_evaluation_suitable") is True:
-        raise TierShadowError("final model is marked chronological")
-    if "model_fit_scope" in timing and timing.get("model_fit_scope") != "retrospective_full_model_eligible_census":
-        raise TierShadowError("final model fit scope changed")
+    fit_window_end = source_receipt.get("source_as_of")
+    if fit_window_end is None:
+        raise TierShadowError("final model source cutoff is missing")
+    _verify_fit_binding(
+        receipt,
+        "final model receipt",
+        ids_field="fit_game_ids",
+        identity_field="fit_game_identity_sha256",
+        eligible=eligible,
+        fit_window_end=fit_window_end,
+    )
+    _verify_fit_binding(
+        run,
+        "final run receipt",
+        ids_field="eligible_game_ids",
+        identity_field="eligible_game_identity_sha256",
+        eligible=eligible,
+        fit_window_end=fit_window_end,
+    )
+    timing = receipt.get("timing") or run.get("timing")
+    if timing is not None:
+        if not isinstance(timing, Mapping):
+            raise TierShadowError("final model timing receipt is invalid")
+        if timing.get("chronological_evaluation_suitable") is True:
+            raise TierShadowError("final model is marked chronological")
+        if "model_fit_scope" in timing and timing.get("model_fit_scope") != "retrospective_full_model_eligible_census":
+            raise TierShadowError("final model fit scope changed")
     parameters = _extract_parameters(model, receipt)
     _verify_parameter_shape(parameters, resolved)
     if resolved in FORM_VARIANTS:
@@ -1017,6 +1145,11 @@ def load_tier_offset_ledger(
         raise TierShadowError("Tier offset variant changed")
     if receipt.get("variant") != resolved_name:
         raise TierShadowError("Tier receipt variant changed")
+    _verify_recorded_bindings(
+        payload.get("bindings"),
+        receipt,
+        variant=resolved_name,
+    )
     if receipt.get("artifact_locator") not in {ledger_file.name, str(ledger_file)}:
         raise TierShadowError("Tier ledger locator changed")
     if int(receipt.get("artifact_bytes") or -1) != ledger_file.stat().st_size:
@@ -1054,10 +1187,15 @@ def load_tier_offset_ledger(
     if offset_values_sha256(offsets) != payload.get("offsets_sha256") or payload.get("offsets_sha256") != receipt.get("offsets_sha256"):
         raise TierShadowError("Tier offset values changed")
     timing = payload.get("timing")
-    if timing != receipt.get("timing") or not isinstance(timing, Mapping):
+    expected_timing = {
+        "feature_state": "strict_prior_before_each_map",
+        "same_timestamp_policy": "batch_exclude_same_timestamp",
+        "model_fit_scope": "retrospective_full_model_eligible_census",
+        "chronological_evaluation_suitable": False,
+        "validation_offsets_used": False,
+    }
+    if timing != expected_timing or receipt.get("timing") != expected_timing:
         raise TierShadowError("Tier offset timing changed")
-    if timing.get("chronological_evaluation_suitable") is not False or timing.get("validation_offsets_used") is not False:
-        raise TierShadowError("Tier offset retrospective contract changed")
     provenance = make_offset_provenance(
         variant=resolved_name,
         offsets=offsets,
