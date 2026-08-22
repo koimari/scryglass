@@ -18,6 +18,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -45,6 +46,7 @@ SCALING_ARTIFACT_NAME = "scaling-feature-ledger-online.parquet"
 SCALING_RECEIPT_NAME = "scaling-feature-ledger-online-receipt.json"
 SCALING_MANIFEST_NAME = "scaling-feature-ledger-online-manifest.json"
 NESTED_SELECTION_BUNDLE_NAME = "nested-selection-bundle.json"
+SOURCE_FREEZE_RECEIPT_NAME = "future-value-source-receipt.json"
 VARIANTS = tuple(str(value) for value in FOURWAY_VARIANTS)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 DEFAULT_MAX_LOG_BYTES = 1_048_576
@@ -304,6 +306,7 @@ class ResolvedInputs:
     crosswalk: Path | None = None
     crosswalk_receipt: Path | None = None
     crosswalk_receipt_file_sha256: str | None = None
+    source_freeze_candidates: dict[str, Path] = field(default_factory=dict)
 
 
 def _fourway_config(root: Path) -> dict[str, Any]:
@@ -408,6 +411,152 @@ def _source_paths_from_receipt(
             raise DownstreamRunError(f"source {label} file hash changed")
 
 
+def _source_freeze_candidates(
+    source_root: Path,
+    source_receipt_path: Path,
+    source_receipt: Mapping[str, Any],
+) -> dict[str, Path]:
+    """Resolve every receipt locator from one exact, portable source root.
+
+    A four-way receipt can point at core parquet files below the declared
+    source root and auxiliary files beside the receipt.  The downstream
+    stage copies both families into one sealed root.  A locator must have one
+    exact byte-bound candidate.  A second candidate, a symlink, or a changed
+    candidate blocks the stage.
+    """
+
+    records = source_receipt.get("source_files")
+    if not isinstance(records, Mapping):
+        raise DownstreamRunError("source receipt file bindings are missing")
+    source_root = _safe_path(source_root, "source root", directory=True)
+    source_receipt_path = _safe_path(source_receipt_path, "source receipt")
+    origins = (source_root, source_receipt_path.parent)
+    expected_names = {
+        "maps": "maps.parquet",
+        "players": "oe_player_games.parquet",
+        "teams": "oe_team_games.parquet",
+    }
+    result: dict[str, Path] = {}
+    used: dict[Path, str] = {}
+    for label, raw_record in sorted(records.items(), key=lambda item: str(item[0])):
+        if not isinstance(label, str) or not isinstance(raw_record, Mapping):
+            raise DownstreamRunError("source receipt file binding is invalid")
+        locator = raw_record.get("locator") or raw_record.get("path")
+        if not isinstance(locator, str) or not locator.strip():
+            raise DownstreamRunError(f"source receipt locator is missing: {label}")
+        relative = Path(locator)
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise DownstreamRunError(f"source receipt locator is unsafe: {label}")
+        if label in expected_names and relative != Path(expected_names[label]):
+            raise DownstreamRunError(
+                f"source {label} locator is incompatible with the portable source root"
+            )
+        candidates: list[Path] = []
+        for origin in origins:
+            candidate = origin / relative
+            if any(parent.is_symlink() for parent in (candidate, *candidate.parents)):
+                raise DownstreamRunError(f"source {label} candidate is a symlink")
+            if candidate.is_symlink():
+                raise DownstreamRunError(f"source {label} candidate is a symlink")
+            if not candidate.exists():
+                continue
+            if not candidate.is_file():
+                raise DownstreamRunError(f"source {label} candidate is not a file")
+            checked = _safe_path(candidate, f"source {label} candidate")
+            declared_bytes = raw_record.get("bytes")
+            declared_sha = str(raw_record.get("sha256") or "").lower()
+            if (
+                isinstance(declared_bytes, bool)
+                or not isinstance(declared_bytes, int)
+                or declared_bytes < 0
+                or not SHA256_RE.fullmatch(declared_sha)
+            ):
+                raise DownstreamRunError(f"source file binding is invalid: {label}")
+            if checked.stat().st_size != declared_bytes or _sha256_path(checked) != declared_sha:
+                raise DownstreamRunError(f"source {label} candidate bytes changed")
+            candidates.append(checked.resolve())
+        unique = sorted({str(path): path for path in candidates}.values(), key=str)
+        if not unique:
+            raise DownstreamRunError(f"source {label} file is missing from source freeze")
+        if len(unique) != 1:
+            raise DownstreamRunError(f"source {label} file has ambiguous source candidates")
+        path = unique[0]
+        previous = used.get(path)
+        if previous is not None and previous != label:
+            raise DownstreamRunError(f"source files share one candidate: {previous}, {label}")
+        used[path] = label
+        result[label] = path
+    return result
+
+
+def _source_freeze_root(config: RunConfig) -> Path:
+    return _root(config, "source-freeze")
+
+
+def _source_freeze_receipt(config: RunConfig) -> Path:
+    return _source_freeze_root(config) / SOURCE_FREEZE_RECEIPT_NAME
+
+
+def _source_freeze_expected_files(
+    config: RunConfig,
+    source_receipt: Mapping[str, Any],
+) -> tuple[Path, ...]:
+    records = source_receipt.get("source_files")
+    if not isinstance(records, Mapping):
+        return (_source_freeze_receipt(config),)
+    paths = [_source_freeze_receipt(config)]
+    for raw_record in records.values():
+        if not isinstance(raw_record, Mapping):
+            continue
+        locator = raw_record.get("locator") or raw_record.get("path")
+        if isinstance(locator, str) and locator.strip():
+            paths.append(_source_freeze_root(config) / Path(locator))
+    return tuple(dict.fromkeys(paths))
+
+
+def _source_freeze_stage(config: RunConfig, inputs: ResolvedInputs) -> Stage:
+    root = _source_freeze_root(config)
+    receipt_path = _source_freeze_receipt(config)
+    try:
+        source_receipt = _load_json(inputs.source_receipt, "source receipt")
+        expected_files = _source_freeze_expected_files(config, source_receipt)
+    except DownstreamRunError:
+        source_receipt = {}
+        expected_files = (receipt_path,)
+    blockers: list[str] = []
+    candidates = dict(inputs.source_freeze_candidates)
+    if not candidates:
+        blockers.append("source_freeze_input_bindings_missing")
+    command = _python_module(
+        "benchmarks.run_future_value_downstream",
+        "--source-freeze-worker",
+        "--source-root", inputs.source_root,
+        "--source-receipt", inputs.source_receipt,
+        "--source-receipt-file-sha256", inputs.source_receipt_file_sha256,
+        "--source-receipt-sha256", inputs.source_receipt_sha256,
+        "--output-root", root,
+    )
+    input_paths = [inputs.source_receipt, *candidates.values()]
+    return Stage(
+        name="source_freeze",
+        jobs=()
+        if blockers
+        else (
+            Job(
+                name="source_freeze",
+                command=command,
+                output_roots=(root,),
+                expected_files=expected_files,
+                input_paths=tuple(dict.fromkeys(input_paths)),
+                output_dir_policy="absent",
+            ),
+        ),
+        output_roots=(root,),
+        expected_files=expected_files,
+        blockers=tuple(sorted(set(blockers))),
+    )
+
+
 def _source_binding(
     fourway_root: Path,
     config: Mapping[str, Any],
@@ -438,7 +587,11 @@ def _source_binding(
     except FutureValueSourceError as error:
         raise DownstreamRunError(f"source receipt is not verified: {error}") from error
     _authority_is_closed(source.get("authority"), "source receipt")
-    _source_paths_from_receipt(source_root, source_receipt_path, source)
+    source_freeze_candidates = _source_freeze_candidates(
+        source_root,
+        source_receipt_path,
+        source,
+    )
     accepted = tuple(str(value) for value in accepted)
     eligible = tuple(str(value) for value in eligible)
     if tuple(sorted(accepted)) != accepted or tuple(sorted(eligible)) != eligible:
@@ -680,6 +833,7 @@ def _source_binding(
             crosswalk=crosswalk,
             crosswalk_receipt=crosswalk_receipt,
             crosswalk_receipt_file_sha256=crosswalk_hash,
+            source_freeze_candidates=source_freeze_candidates,
         ),
         source,
     )
@@ -1028,6 +1182,80 @@ def _variant_file_arguments(values: Sequence[str], label: str) -> dict[str, Path
     return result
 
 
+def _source_freeze_worker(argv: Sequence[str]) -> int:
+    """Copy the exact source receipt files into one portable freeze root."""
+
+    parser = argparse.ArgumentParser(description="Stage a portable source freeze")
+    parser.add_argument("--source-freeze-worker", action="store_true")
+    parser.add_argument("--source-root", required=True, type=Path)
+    parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument("--source-receipt-file-sha256", required=True)
+    parser.add_argument("--source-receipt-sha256", required=True)
+    parser.add_argument("--output-root", required=True, type=Path)
+    args = parser.parse_args(list(argv))
+    try:
+        source_root = _safe_path(args.source_root, "source freeze source root", directory=True)
+        source_receipt_path = _safe_path(args.source_receipt, "source freeze source receipt")
+        output_root = _safe_output_root(args.output_root, "source freeze output root")
+        expected_file_hash = _require_hash(
+            args.source_receipt_file_sha256,
+            "source freeze source receipt file hash",
+        )
+        if _sha256_path(source_receipt_path) != expected_file_hash:
+            raise DownstreamRunError("source freeze source receipt file hash changed")
+        source = _load_json(source_receipt_path, "source freeze source receipt")
+        try:
+            validate_future_value_source_receipt_payload(
+                source,
+                expected_receipt_sha256=_require_hash(
+                    args.source_receipt_sha256,
+                    "source freeze source receipt hash",
+                ),
+            )
+        except FutureValueSourceError as error:
+            raise DownstreamRunError("source freeze source receipt is not verified") from error
+        _authority_is_closed(source.get("authority"), "source freeze source receipt")
+        candidates = _source_freeze_candidates(source_root, source_receipt_path, source)
+        records = source.get("source_files")
+        if not isinstance(records, Mapping):
+            raise DownstreamRunError("source freeze source file bindings are missing")
+        for label, candidate in candidates.items():
+            record = records.get(label)
+            if not isinstance(record, Mapping):
+                raise DownstreamRunError(f"source freeze source file binding is missing: {label}")
+            locator = record.get("locator") or record.get("path")
+            if not isinstance(locator, str) or not locator.strip():
+                raise DownstreamRunError(f"source freeze source locator is missing: {label}")
+            relative = Path(locator)
+            target = output_root / relative
+            if target == output_root / SOURCE_FREEZE_RECEIPT_NAME:
+                raise DownstreamRunError("source freeze locator collides with copied receipt")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists() or target.is_symlink():
+                raise DownstreamRunError(f"source freeze target already exists: {relative}")
+            shutil.copyfile(candidate, target)
+            if _file_record(target)["bytes"] != int(record.get("bytes", -1)) or _file_record(target)["sha256"] != str(record.get("sha256") or "").lower():
+                raise DownstreamRunError(f"source freeze copied bytes changed: {label}")
+        copied_receipt = output_root / SOURCE_FREEZE_RECEIPT_NAME
+        shutil.copyfile(source_receipt_path, copied_receipt)
+        if _sha256_path(copied_receipt) != expected_file_hash or copied_receipt.stat().st_size != source_receipt_path.stat().st_size:
+            raise DownstreamRunError("source freeze copied receipt changed")
+        print(
+            json.dumps(
+                {
+                    "status": "research_only",
+                    "source_files": len(candidates),
+                    "source_receipt_file_sha256": expected_file_hash,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    except (DownstreamRunError, FutureValueSourceError, OSError, ValueError, TypeError, KeyError) as error:
+        print(f"source freeze worker failed: {error}", file=sys.stderr)
+        return 1
+
+
 def _scaling_online_worker(argv: Sequence[str]) -> int:
     """Build the source-bound online full-census scaling feature ledger."""
 
@@ -1085,11 +1313,7 @@ def _scaling_online_worker(argv: Sequence[str]) -> int:
         manifest: dict[str, Any] = {
             "schema_version": "scryglass:scaling-ledger-artifact:v1",
             "status": "research_only",
-            "authority": {
-                "research_only": True,
-                "promotion": False,
-                "deployment": False,
-            },
+            "authority": dict(AUTHORITY),
             "artifact_path": str(artifact_path),
             "artifact_bytes": artifact_path.stat().st_size,
             "artifact_sha256": artifact_hash,
@@ -1152,7 +1376,38 @@ def _nested_selection_bundle_worker(argv: Sequence[str]) -> int:
         records: dict[str, dict[str, Any]] = {}
         variant_payloads: dict[str, dict[str, Any]] = {}
         top_source: Mapping[str, Any] | None = None
-        payload_source: Mapping[str, Any] | None = None
+        source_contract = {
+            "source_as_of": source.get("source_as_of"),
+            "source_game_count": source.get("source_game_count"),
+            "source_identity_sha256": source.get("source_identity_sha256"),
+            "source_receipt_sha256": source.get("receipt_sha256"),
+            "model_eligible_game_count": source.get("model_eligible_game_count"),
+            "model_eligible_identity_sha256": source.get("model_eligible_identity_sha256"),
+            "accepted_game_ids": list(source.get("accepted_game_ids", [])),
+            "model_eligible_game_ids": list(source.get("model_eligible_game_ids", [])),
+        }
+
+        def verify_artifact_records(value: Any, label: str) -> int:
+            if isinstance(value, Mapping):
+                if set(value) == {"path", "bytes", "sha256"}:
+                    artifact_path = _safe_path(str(value.get("path") or ""), label)
+                    if (
+                        int(value.get("bytes", -1)) != artifact_path.stat().st_size
+                        or str(value.get("sha256") or "").lower() != _sha256_path(artifact_path)
+                    ):
+                        raise DownstreamRunError(f"{label} bytes changed")
+                    return 1
+                return sum(
+                    verify_artifact_records(child, f"{label}.{key}")
+                    for key, child in value.items()
+                )
+            if isinstance(value, list):
+                return sum(
+                    verify_artifact_records(child, f"{label}[{index}]")
+                    for index, child in enumerate(value)
+                )
+            return 0
+
         for variant in VARIANTS:
             evaluation_path = _safe_path(
                 evaluation_paths[variant],
@@ -1169,14 +1424,35 @@ def _nested_selection_bundle_worker(argv: Sequence[str]) -> int:
             model_source = model.get("source")
             if not isinstance(model_source, Mapping):
                 raise DownstreamRunError(f"{variant} evaluation model source is missing")
-            required_source = {
-                "source_as_of": source.get("source_as_of"),
-                "source_game_count": source.get("source_game_count"),
-                "source_identity_sha256": source.get("source_identity_sha256"),
-                "source_receipt_sha256": source.get("receipt_sha256"),
-            }
-            if any(model_source.get(field) != expected for field, expected in required_source.items()):
+            if any(
+                model_source.get(field) != source_contract[field]
+                for field in (
+                    "source_as_of",
+                    "source_game_count",
+                    "source_identity_sha256",
+                    "source_receipt_sha256",
+                )
+            ):
                 raise DownstreamRunError(f"{variant} evaluation model source changed")
+            calibration_prior = model_source.get("calibration_prior")
+            if not isinstance(calibration_prior, Mapping):
+                raise DownstreamRunError(f"{variant} calibration prior binding is missing")
+            if calibration_prior.get("variant_keys") != [variant]:
+                raise DownstreamRunError(f"{variant} calibration prior variant binding changed")
+            if calibration_prior.get("source_receipt_sha256") != source_contract["source_receipt_sha256"]:
+                raise DownstreamRunError(f"{variant} calibration prior source changed")
+            prior_path = _safe_path(
+                str(calibration_prior.get("path") or ""),
+                f"{variant} calibration prior",
+            )
+            if (
+                int(calibration_prior.get("bytes", -1)) != prior_path.stat().st_size
+                or str(calibration_prior.get("sha256") or "").lower() != _sha256_path(prior_path)
+            ):
+                raise DownstreamRunError(f"{variant} calibration prior bytes changed")
+            prior_payload = _load_json(prior_path, f"{variant} calibration prior")
+            if prior_payload.get("receipt_sha256") != calibration_prior.get("payload_receipt_sha256"):
+                raise DownstreamRunError(f"{variant} calibration prior receipt changed")
             payloads = model.get("variants")
             payload = payloads.get(variant) if isinstance(payloads, Mapping) else None
             if not isinstance(payload, Mapping) or payload.get("variant") != variant:
@@ -1188,8 +1464,27 @@ def _nested_selection_bundle_worker(argv: Sequence[str]) -> int:
             current_payload_source = payload.get("source")
             if not isinstance(current_payload_source, Mapping):
                 raise DownstreamRunError(f"{variant} evaluation payload source is missing")
-            if current_payload_source.get("source_receipt_sha256") != source.get("receipt_sha256"):
+            if any(
+                current_payload_source.get(field) != expected
+                for field, expected in source_contract.items()
+                if field in {"source_as_of", "source_game_count", "source_identity_sha256", "source_receipt_sha256", "model_eligible_game_count", "model_eligible_identity_sha256"}
+            ):
                 raise DownstreamRunError(f"{variant} evaluation payload source changed")
+            if current_payload_source.get("accepted_game_ids") != source_contract["accepted_game_ids"]:
+                raise DownstreamRunError(f"{variant} evaluation payload accepted census changed")
+            if current_payload_source.get("model_eligible_game_ids") != source_contract["model_eligible_game_ids"]:
+                raise DownstreamRunError(f"{variant} evaluation payload eligible census changed")
+            variant_receipt = payload.get("variant_receipt")
+            if not isinstance(variant_receipt, Mapping):
+                raise DownstreamRunError(f"{variant} evaluation variant receipt is missing")
+            variant_receipt_hash = _require_hash(
+                variant_receipt.get("receipt_sha256"),
+                f"{variant} evaluation variant receipt hash",
+            )
+            variant_receipt_body = dict(variant_receipt)
+            variant_receipt_body.pop("receipt_sha256", None)
+            if _sha256_bytes(_canonical(variant_receipt_body)) != variant_receipt_hash:
+                raise DownstreamRunError(f"{variant} evaluation variant receipt hash changed")
             folds = payload.get("folds")
             if not isinstance(folds, list) or not folds:
                 raise DownstreamRunError(f"{variant} nested folds are missing")
@@ -1201,6 +1496,16 @@ def _nested_selection_bundle_worker(argv: Sequence[str]) -> int:
                 selection = fold.get("regularization_selection")
                 if not isinstance(selection, Mapping):
                     raise DownstreamRunError(f"{variant} nested selection is missing from a fold")
+                if fold.get("variant_receipt") != dict(variant_receipt):
+                    raise DownstreamRunError(f"{variant} fold variant receipt changed")
+                if selection.get("variant") != variant:
+                    raise DownstreamRunError(f"{variant} nested selection variant changed")
+                if selection.get("method") != "nested_chronological_whole_series_log_loss":
+                    raise DownstreamRunError(f"{variant} nested selection method changed")
+                if selection.get("inner_ledger_status") != "verified":
+                    raise DownstreamRunError(f"{variant} nested inner ledger is not verified")
+                if selection.get("blockers"):
+                    raise DownstreamRunError(f"{variant} nested selection carries blockers")
                 binding = selection.get("inner_feature_ledger_binding")
                 if not isinstance(binding, Mapping):
                     raise DownstreamRunError(f"{variant} nested inner ledger binding is missing")
@@ -1214,17 +1519,34 @@ def _nested_selection_bundle_worker(argv: Sequence[str]) -> int:
                 artifacts = binding.get("producer_artifacts")
                 if not isinstance(artifacts, Mapping) or not artifacts:
                     raise DownstreamRunError(f"{variant} nested producer artifacts are missing")
+                for field in (
+                    "producer_receipt_sha256",
+                    "ledger_rows_sha256",
+                    "feature_value_digest",
+                    "game_identity_sha256",
+                    "fit_game_identity_sha256",
+                    "validation_game_identity_sha256",
+                    "binding_sha256",
+                ):
+                    if not SHA256_RE.fullmatch(str(binding.get(field) or "")):
+                        raise DownstreamRunError(
+                            f"{variant} nested inner ledger binding is incomplete: {field}"
+                        )
+                binding_body = dict(binding)
+                binding_body.pop("binding_sha256", None)
+                if _sha256_bytes(_canonical(binding_body)) != str(binding.get("binding_sha256")).lower():
+                    raise DownstreamRunError(f"{variant} nested inner ledger binding hash changed")
+                if binding.get("source_receipt_sha256") != source_contract["source_receipt_sha256"] or binding.get("source_identity_sha256") != source_contract["source_identity_sha256"]:
+                    raise DownstreamRunError(f"{variant} nested inner ledger source changed")
+                if verify_artifact_records(artifacts, f"{variant} nested producer artifacts") < 1:
+                    raise DownstreamRunError(f"{variant} nested producer artifacts are missing")
                 copied_folds.append(json.loads(json.dumps(fold, allow_nan=False)))
             if feature_names is None:
                 raise DownstreamRunError(f"{variant} nested feature names are missing")
             if top_source is None:
-                top_source = dict(model_source)
-            elif dict(model_source) != dict(top_source):
+                top_source = dict(source_contract)
+            elif dict(top_source) != dict(source_contract):
                 raise DownstreamRunError("evaluation model source bindings differ")
-            if payload_source is None:
-                payload_source = dict(current_payload_source)
-            elif dict(current_payload_source) != dict(payload_source):
-                raise DownstreamRunError("evaluation payload source bindings differ")
             records[variant] = {
                 "path": str(evaluation_path),
                 "bytes": evaluation_path.stat().st_size,
@@ -1240,7 +1562,7 @@ def _nested_selection_bundle_worker(argv: Sequence[str]) -> int:
                 "folds": copied_folds,
                 "evaluation_artifact": dict(records[variant]),
             }
-        if top_source is None or payload_source is None:
+        if top_source is None:
             raise DownstreamRunError("nested selection source bindings are missing")
         body: dict[str, Any] = {
             "schema_version": "scryglass:future-value-nested-selection-bundle:v1",
@@ -1602,8 +1924,8 @@ def _nested_selection_bindings(config: RunConfig) -> dict[str, Any]:
 
 
 def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, ...]:
-    source = inputs.source_root
-    receipt = inputs.source_receipt
+    source = _source_freeze_root(config)
+    receipt = _source_freeze_receipt(config)
     current = _root(config, "current-rating-trust")
     final = _root(config, "final-fit")
     snapshots = _root(config, "snapshots")
@@ -1860,7 +2182,7 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
         output_roots=(snapshot_manifest_root,),
         expected_files=(capability_manifest,),
     )
-    stages: list[Stage] = [current_stage]
+    stages: list[Stage] = [_source_freeze_stage(config, inputs), current_stage]
     if scaling_stage is not None:
         stages.append(scaling_stage)
     if nested_stage is not None:
@@ -2416,7 +2738,7 @@ def _blocked_impact(path: Path, inputs: ResolvedInputs, blockers: Sequence[str])
 def _downstream_stage(config: RunConfig, inputs: ResolvedInputs, selection: Mapping[str, Any], previous_blockers: Sequence[str]) -> Stage:
     root = _root(config, "downstream-impact")
     output = root / "downstream-impact.json"
-    required: list[Path] = list(inputs.evaluation_paths.values()) + list(selection["receipt_paths"].values())
+    required: list[Path] = [_source_freeze_receipt(config)] + list(inputs.evaluation_paths.values()) + list(selection["receipt_paths"].values())
     required.append(inputs.paired_uncertainty)
     required.extend((_root(config, "final-fit-manifest") / "final-fit-manifest.json", _root(config, "snapshot-capabilities") / "snapshot-capability-manifest.json"))
     for variant in VARIANTS:
@@ -2446,7 +2768,7 @@ def _downstream_stage(config: RunConfig, inputs: ResolvedInputs, selection: Mapp
         eval_args.extend(("--evaluation-receipt", f"{variant}={selection['receipt_paths'][variant]}"))
     command = _python_module(
         "benchmarks.build_future_value_downstream_impact",
-        "--source-receipt", inputs.source_receipt,
+        "--source-receipt", _source_freeze_receipt(config),
         *eval_args,
         "--snapshot-capability-manifest", _root(config, "snapshot-capabilities") / "snapshot-capability-manifest.json",
         "--tier-diff", tier_diff,
@@ -2474,12 +2796,18 @@ def _optional_stage_plan(
     final = _root(config, "final-fit")
     current = _root(config, "current-rating-trust")
     stage_list: list[Stage] = []
-    tier_source = config.tier_source_root or inputs.freeze_root
-    tier_receipt = (
-        tier_source / "future-value-source-receipt.json"
-        if (tier_source / "future-value-source-receipt.json").is_file()
-        else inputs.source_receipt
-    )
+    staged_source = _source_freeze_root(config)
+    staged_receipt = _source_freeze_receipt(config)
+    tier_source = config.tier_source_root or staged_source
+    if config.tier_source_root is not None:
+        candidate_tier_receipt = config.tier_source_root / SOURCE_FREEZE_RECEIPT_NAME
+        tier_receipt = (
+            candidate_tier_receipt
+            if candidate_tier_receipt.is_file()
+            else inputs.source_receipt
+        )
+    else:
+        tier_receipt = staged_receipt
     tier_root = _root(config, "tier-shadow")
     scaling = _scaling_bindings(config)
     tier_blockers: list[str] = []
@@ -2604,11 +2932,11 @@ def _optional_stage_plan(
             draft_blockers.append("draft_score_folds_root_incomplete")
     draft_command = _python_module(
         "benchmarks.future_value_draft_score_fourway",
-        "--source-receipt", inputs.source_receipt,
+        "--source-receipt", staged_receipt,
         "--expected-source-receipt-sha256", inputs.source_receipt_file_sha256,
         "--trust-root", config.draft_trust_root or "",
         "--expected-trust-root-sha256", config.draft_trust_root_sha256 or "",
-        "--source-root", inputs.source_root,
+        "--source-root", staged_source,
         "--folds-root", config.draft_folds_root or "",
         "--evaluation-root", inputs.fourway_root / "stages/evaluation",
         "--public-pack-root", config.draft_public_pack_root or "",
@@ -2638,7 +2966,7 @@ def _optional_stage_plan(
             draft_command += ("--expected-strict-form-code-sha256", config.draft_strict_form_code_sha256)
     if config.draft_strict_fold_root is not None:
         draft_command += ("--strict-fold-root", config.draft_strict_fold_root)
-    draft_inputs = [inputs.source_receipt, *inputs.evaluation_paths.values()]
+    draft_inputs = [staged_receipt, *inputs.evaluation_paths.values()]
     for path in (
         config.draft_trust_root,
         config.draft_public_pack_root / "manifest.json" if config.draft_public_pack_root is not None else None,
@@ -2921,6 +3249,12 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
         stages = build_stage_plan(config, inputs) + _optional_stage_plan(config, inputs)
         return {"status": "plan_only", "selected_variant": config.selected_variant, "stages": [{"name": stage.name, "plan_sha256": _plan_digest(stage), "blockers": list(stage.blockers), "jobs": [list(job.command) for job in stage.jobs]} for stage in stages], "authority": dict(AUTHORITY)}
 
+    source_freeze_stage = _source_freeze_stage(config, inputs)
+    if resume and _stage_receipt_path(config, source_freeze_stage).exists():
+        source_freeze_receipt = _validate_stage_receipt(config, source_freeze_stage)
+    else:
+        source_freeze_receipt = _execute_stage(config, source_freeze_stage, resume=resume)
+
     selection_path = _root(config, "selection") / "selected-variant.json"
     selection_receipt_path = _stage_receipt_path(config, _selection_stage(config, inputs, source))
     if resume:
@@ -2939,11 +3273,12 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
             selection = _write_selection(config, inputs, source)
     else:
         selection = _write_selection(config, inputs, source)
-    receipts: list[dict[str, Any]] = []
+    receipts: list[dict[str, Any]] = [source_freeze_receipt]
     blockers: list[str] = _selected_variant_receipt_blockers(
         config,
         selection["receipt_paths"],
     )
+    blockers.extend(str(value) for value in source_freeze_receipt.get("blockers", []))
     for variant, receipt_path in sorted(selection["receipt_paths"].items()):
         _receipt_hash(
             receipt_path,
@@ -2981,10 +3316,13 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
     # Rebuild the plan after each dependency.  Child CLIs receive the raw
     # hashes of receipts produced by the preceding stage.
     failed_core_stages: set[str] = set()
+    if source_freeze_receipt.get("status") != "completed":
+        failed_core_stages.add("source_freeze")
     core_dependencies = {
-        "scaling_online": set(),
-        "nested_selection": set(),
-        "final_fit": {"current_rating_trust", "scaling_online", "nested_selection"},
+        "current_rating_trust": {"source_freeze"},
+        "scaling_online": {"source_freeze"},
+        "nested_selection": {"source_freeze"},
+        "final_fit": {"current_rating_trust", "scaling_online", "nested_selection", "source_freeze"},
         "final_fit_manifest": {"final_fit"},
         "snapshots": {"current_rating_trust", "final_fit"},
         "snapshot_capabilities": {"snapshots"},
@@ -3019,10 +3357,10 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
 
     failed_optional_stages: set[str] = set()
     optional_dependencies = {
-        "tier_shadow": {"current_rating_trust", "final_fit"},
-        "tier_fourway": set(),
+        "tier_shadow": {"current_rating_trust", "final_fit", "source_freeze"},
+        "tier_fourway": {"source_freeze"},
         "tier_diff": {"tier_fourway"},
-        "draft_score": set(),
+        "draft_score": {"source_freeze"},
     }
     for optional_name in ("tier_shadow", "tier_fourway", "tier_diff", "draft_score"):
         stage = next(
@@ -3170,6 +3508,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _final_fit_manifest_worker(raw_argv)
         if "--scaling-online-worker" in raw_argv:
             return _scaling_online_worker(raw_argv)
+        if "--source-freeze-worker" in raw_argv:
+            return _source_freeze_worker(raw_argv)
         if "--nested-selection-bundle-worker" in raw_argv:
             return _nested_selection_bundle_worker(raw_argv)
         if "--snapshot-capability-manifest-worker" in raw_argv:

@@ -106,11 +106,57 @@ def test_source_records_resolve_from_explicit_source_root(tmp_path: Path) -> Non
         downstream._source_paths_from_receipt(source_root, receipt_path, {"source_files": records})
 
 
+def test_source_freeze_accepts_mixed_roots_and_rejects_ambiguous_candidates(tmp_path: Path) -> None:
+    source_root = tmp_path / "freeze" / "source"
+    receipt_parent = tmp_path / "freeze" / "receipt"
+    source_root.mkdir(parents=True)
+    receipt_parent.mkdir(parents=True)
+    records: dict[str, dict[str, object]] = {}
+    for label, name, root in (
+        ("maps", "maps.parquet", source_root),
+        ("players", "oe_player_games.parquet", source_root),
+        ("teams", "oe_team_games.parquet", source_root),
+        ("accepted_census", "accepted-census.json", receipt_parent),
+    ):
+        path = root / name
+        path.write_bytes(f"{label}-bytes".encode("ascii"))
+        records[label] = {
+            "locator": name,
+            "bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    receipt_path = receipt_parent / "future-value-source-receipt.json"
+    receipt_path.write_bytes(b"receipt")
+
+    candidates = downstream._source_freeze_candidates(
+        source_root,
+        receipt_path,
+        {"source_files": records},
+    )
+
+    assert candidates["maps"] == (source_root / "maps.parquet").resolve()
+    assert candidates["accepted_census"] == (receipt_parent / "accepted-census.json").resolve()
+    (source_root / "accepted-census.json").write_bytes(
+        (receipt_parent / "accepted-census.json").read_bytes()
+    )
+    with pytest.raises(downstream.DownstreamRunError, match="ambiguous"):
+        downstream._source_freeze_candidates(source_root, receipt_path, {"source_files": records})
+
+
+def test_nested_selection_plan_binds_all_four_evaluation_models(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    inputs = _inputs(tmp_path)
+    nested = next(stage for stage in downstream._core_stage_plan(config, inputs) if stage.name == "nested_selection")
+    command = " ".join(nested.jobs[0].command)
+    assert all(f"{variant}={inputs.evaluation_paths[variant]}" in command for variant in downstream.VARIANTS)
+
+
 def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = _config(tmp_path)
     stages = downstream.build_stage_plan(config, _inputs(tmp_path))
 
     assert [stage.name for stage in stages] == [
+        "source_freeze",
         "current_rating_trust",
         "scaling_online",
         "nested_selection",
@@ -123,7 +169,10 @@ def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Pa
     assert "public_refresh" not in commands
     assert "--selected-variant" not in commands
     assert all(value is False for key, value in downstream.AUTHORITY.items() if key != "research_only")
-    assert stages[0].jobs[0].command[:3] == (
+    source_freeze = next(stage for stage in stages if stage.name == "source_freeze")
+    assert source_freeze.blockers == ("source_freeze_input_bindings_missing",)
+    current = next(stage for stage in stages if stage.name == "current_rating_trust")
+    assert current.jobs[0].command[:3] == (
         downstream.sys.executable,
         "-m",
         "benchmarks.build_full_current_rating_trust",
