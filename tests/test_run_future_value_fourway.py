@@ -7,6 +7,7 @@ import json
 import pytest
 
 from benchmarks import run_future_value_fourway as fourway
+from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
 def _config(tmp_path: Path) -> fourway.RunConfig:
@@ -329,11 +330,21 @@ def test_scaling_binding_rejects_crosswalk_or_assignment_change(tmp_path: Path) 
     producers = config.output_root / "stages/fold-producers"
     folds_root.mkdir(parents=True)
     for fold in range(1, 4):
+        train_series = [f"leaguepedia:train-{fold}"]
+        validation_series = [f"leaguepedia:validation-{fold}"]
         spec = {
             "fold": fold,
             "fit_window_end": "2026-08-01T00:00:00Z",
             "train_game_ids": [f"t{fold}"],
             "validation_game_ids": [f"v{fold}"],
+            "train_series_ids": train_series,
+            "train_series_count": len(train_series),
+            "train_series_identity_sha256": identity_sha256(train_series),
+            "validation_series_ids": validation_series,
+            "validation_series_count": len(validation_series),
+            "validation_series_identity_sha256": identity_sha256(
+                validation_series
+            ),
         }
         (folds_root / f"fold-{fold}-spec.json").write_text(
             json.dumps(spec), encoding="utf-8"
@@ -354,6 +365,16 @@ def test_scaling_binding_rejects_crosswalk_or_assignment_change(tmp_path: Path) 
             "crosswalk_assignment_sha256": "8" * 64,
             "eligible_series_assignment_sha256": "e" * 64,
             "fold_series_assignment_sha256": "f" * 64,
+            "train_series_ids": spec["train_series_ids"],
+            "train_series_count": spec["train_series_count"],
+            "train_series_identity_sha256": spec[
+                "train_series_identity_sha256"
+            ],
+            "validation_series_ids": spec["validation_series_ids"],
+            "validation_series_count": spec["validation_series_count"],
+            "validation_series_identity_sha256": spec[
+                "validation_series_identity_sha256"
+            ],
             "authority": {"research_only": True, "deployment": False},
         }
         binding["receipt_sha256"] = fourway._sha256_bytes(

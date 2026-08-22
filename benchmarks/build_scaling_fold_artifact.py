@@ -19,6 +19,7 @@ from lol_kills.research.future_value_rating import (
     build_rating_feature_producer_manifest,
     write_rating_feature_producer_receipt,
 )
+from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
 def _load_json(path: Path) -> dict[str, object]:
@@ -148,6 +149,37 @@ def main() -> int:
     ].copy()
     if tuple(sorted(fold_frame["game_id"].astype(str))) != output_ids:
         raise RuntimeError("series assignment does not cover the fold census")
+    train_series = tuple(
+        sorted(
+            set(
+                fold_frame.loc[
+                    fold_frame["game_id"].astype(str).isin(train_ids), "series_id"
+                ].astype(str)
+            )
+        )
+    )
+    validation_series = tuple(
+        sorted(
+            set(
+                fold_frame.loc[
+                    fold_frame["game_id"].astype(str).isin(validation_ids),
+                    "series_id",
+                ].astype(str)
+            )
+        )
+    )
+    fold_series_contract = {
+        "train_series_ids": list(train_series),
+        "train_series_count": len(train_series),
+        "train_series_identity_sha256": identity_sha256(train_series),
+        "validation_series_ids": list(validation_series),
+        "validation_series_count": len(validation_series),
+        "validation_series_identity_sha256": identity_sha256(validation_series),
+    }
+    if any(fold.get(key) != value for key, value in fold_series_contract.items()):
+        raise RuntimeError("scaling series partition differs from fold spec")
+    if set(train_series) & set(validation_series):
+        raise RuntimeError("scaling fold series overlap")
     crosswalk_binding = bound_maps.attrs.get(
         "verified_leaguepedia_series_crosswalk"
     )
@@ -213,6 +245,7 @@ def main() -> int:
             eligible_frame
         ),
         "fold_series_assignment_sha256": _series_assignment_sha256(fold_frame),
+        **fold_series_contract,
         "authority": {
             "research_only": True,
             "public_player_rating": False,

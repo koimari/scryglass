@@ -1072,6 +1072,17 @@ def _validate_scaling_series_bindings(config: RunConfig) -> None:
             raise FourwayRunError("scaling series validation IDs changed")
         if binding.get("fit_window_end") != spec.get("fit_window_end"):
             raise FourwayRunError("scaling series cutoff changed")
+        for prefix in ("train", "validation"):
+            for suffix in (
+                "series_ids",
+                "series_count",
+                "series_identity_sha256",
+            ):
+                key = f"{prefix}_{suffix}"
+                if binding.get(key) != spec.get(key):
+                    raise FourwayRunError(
+                        "scaling series partition differs from fold spec"
+                    )
         eligible_assignment = _require_hash(
             binding.get("eligible_series_assignment_sha256"),
             "eligible series assignment hash",

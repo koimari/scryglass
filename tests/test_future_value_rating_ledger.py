@@ -16,7 +16,10 @@ from lol_kills.research.future_value_rating_ledger import (
     build_fold_current_rating_feature_ledger,
     validate_fold_current_rating_feature_ledger,
 )
-from benchmarks.build_current_rating_fold_artifact import _accepted_map_frame
+from benchmarks.build_current_rating_fold_artifact import (
+    _accepted_map_frame,
+    _validate_fold_series_contract,
+)
 from benchmarks.build_scaling_fold_artifact import (
     _accepted_map_frame as _accepted_scaling_map_frame,
 )
@@ -219,6 +222,34 @@ def test_current_producer_series_scope_excludes_raw_source_extras() -> None:
         source_receipt=receipt,
     )
     assert set(scaling_scoped["game_uid"].astype(str)) == set(GAME_IDS)
+
+
+def test_current_producer_requires_exact_fold_series_hashes() -> None:
+    model_frame = pd.DataFrame(
+        {
+            "game_id": list(GAME_IDS),
+            "series_id": [f"leaguepedia:series-{game_id}" for game_id in GAME_IDS],
+        }
+    )
+    train_series = ("leaguepedia:series-g1", "leaguepedia:series-g2")
+    validation_series = ("leaguepedia:series-g3", "leaguepedia:series-g4")
+    fold = {
+        "train_game_ids": ["g1", "g2"],
+        "validation_game_ids": ["g3", "g4"],
+        "train_series_ids": list(train_series),
+        "train_series_count": 2,
+        "train_series_identity_sha256": identity_sha256(train_series),
+        "validation_series_ids": list(validation_series),
+        "validation_series_count": 2,
+        "validation_series_identity_sha256": identity_sha256(validation_series),
+    }
+    assert _validate_fold_series_contract(fold, model_frame) == (
+        train_series,
+        validation_series,
+    )
+    fold["validation_series_identity_sha256"] = "f" * 64
+    with pytest.raises(RuntimeError, match="differs from fold spec"):
+        _validate_fold_series_contract(fold, model_frame)
 
 
 def test_large_source_attrs_do_not_change_replay_values() -> None:

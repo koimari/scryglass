@@ -21,6 +21,7 @@ from lol_kills.research.future_value_rating_ledger import (
     build_fold_current_rating_feature_ledger,
     validate_fold_current_rating_feature_ledger,
 )
+from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
 def _load_json(path: Path) -> dict[str, object]:
@@ -64,6 +65,47 @@ def _accepted_map_frame(
     if selected_ids.duplicated().any() or set(selected_ids) != accepted_set:
         raise RuntimeError("maps do not match the accepted census for series binding")
     return selected
+
+
+def _validate_fold_series_contract(
+    fold: dict[str, object],
+    model_frame: pd.DataFrame,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    train_ids = {str(value) for value in fold["train_game_ids"]}
+    validation_ids = {str(value) for value in fold["validation_game_ids"]}
+    train_series = tuple(
+        sorted(
+            set(
+                model_frame.loc[
+                    model_frame["game_id"].astype(str).isin(train_ids),
+                    "series_id",
+                ].astype(str)
+            )
+        )
+    )
+    validation_series = tuple(
+        sorted(
+            set(
+                model_frame.loc[
+                    model_frame["game_id"].astype(str).isin(validation_ids),
+                    "series_id",
+                ].astype(str)
+            )
+        )
+    )
+    expected = {
+        "train_series_ids": list(train_series),
+        "train_series_count": len(train_series),
+        "train_series_identity_sha256": identity_sha256(train_series),
+        "validation_series_ids": list(validation_series),
+        "validation_series_count": len(validation_series),
+        "validation_series_identity_sha256": identity_sha256(validation_series),
+    }
+    if any(fold.get(key) != value for key, value in expected.items()):
+        raise RuntimeError("current-rating series partition differs from fold spec")
+    if set(train_series) & set(validation_series):
+        raise RuntimeError("current-rating fold series overlap")
+    return train_series, validation_series
 
 
 def main() -> int:
@@ -148,6 +190,7 @@ def main() -> int:
                 model_frame["series_id"].astype(str),
             )
         )
+        _validate_fold_series_contract(fold, model_frame)
         series_source = "verified_leaguepedia_series_crosswalk"
         series_receipt_file_sha256 = str(
             args.crosswalk_receipt_file_sha256
@@ -179,6 +222,18 @@ def main() -> int:
         validation_game_ids=validation_ids,
         fit_window_end=fold["fit_window_end"],
     )
+    if series_source == "verified_leaguepedia_series_crosswalk" and any(
+        native_receipt.get(key) != fold.get(key)
+        for key in (
+            "train_series_ids",
+            "train_series_count",
+            "train_series_identity_sha256",
+            "validation_series_ids",
+            "validation_series_count",
+            "validation_series_identity_sha256",
+        )
+    ):
+        raise RuntimeError("current-rating receipt series differs from fold spec")
     producer_receipt_path = output_dir / "current-rating-producer-receipt.json"
     adapter = write_rating_feature_producer_receipt(
         "current_sequential_rating",

@@ -703,6 +703,20 @@ def build_bundle(
             fit_window_end=fit_window_end,
             source_frames={"maps": maps, "players": players, "teams": teams},
         )
+        if any(
+            current_native.get(key) != fold_spec.get(key)
+            for key in (
+                "train_series_ids",
+                "train_series_count",
+                "train_series_identity_sha256",
+                "validation_series_ids",
+                "validation_series_count",
+                "validation_series_identity_sha256",
+            )
+        ):
+            raise FourVariantBundleError(
+                "current rating series partition differs from fold spec"
+            )
         current_manifest = _verify_manifest(
             _load_json(
                 current_root / "current-rating-producer-manifest.json",
