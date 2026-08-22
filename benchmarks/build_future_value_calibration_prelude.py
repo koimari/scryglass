@@ -88,6 +88,28 @@ def _validate_outer_evaluation_cutoff(
     return evaluation_start
 
 
+def _strict_prior_model_frame(
+    model_frame: pd.DataFrame,
+    *,
+    outer_evaluation_start: object,
+) -> tuple[pd.DataFrame, pd.Timestamp]:
+    """Return the model rows that exist before the outer evaluation starts."""
+
+    evaluation_start = _utc_timestamp(
+        outer_evaluation_start,
+        "outer evaluation start cutoff",
+    )
+    dates = pd.to_datetime(model_frame["date"], errors="coerce", utc=True)
+    if dates.isna().any():
+        raise PreludeError("prelude model frame has an invalid game date")
+    prior = model_frame.loc[dates.lt(evaluation_start)].copy()
+    if prior.empty:
+        raise PreludeError("prelude has no strict-prior model rows")
+    if not bool(pd.to_datetime(prior["date"], utc=True).lt(evaluation_start).all()):
+        raise PreludeError("prelude model frame is not strictly prior")
+    return prior, evaluation_start
+
+
 def _canonical(value: object) -> bytes:
     return json.dumps(
         value,
@@ -449,17 +471,21 @@ def build_prelude(
     model_frame = model_frame[model_frame["game_id"].astype(str).isin(eligible_ids)].copy()
     if tuple(sorted(model_frame["game_id"].astype(str))) != eligible_ids:
         raise PreludeError("prelude model frame does not match the accepted eligible census")
-    folds = chronological_whole_series_folds(
+    prelude_model_frame, evaluation_start = _strict_prior_model_frame(
         model_frame,
+        outer_evaluation_start=outer_evaluation_start,
+    )
+    folds = chronological_whole_series_folds(
+        prelude_model_frame,
         n_folds=fold_count,
-        verified_model_frame=model_frame,
+        verified_model_frame=prelude_model_frame,
     )
     if not folds or int(folds[0]["fold"]) != 1:
         raise PreludeError("prelude chronological fold is missing")
     prelude_fold = folds[0]
-    evaluation_start = _validate_outer_evaluation_cutoff(
+    validated_evaluation_start = _validate_outer_evaluation_cutoff(
         prelude_fold,
-        outer_evaluation_start=outer_evaluation_start,
+        outer_evaluation_start=evaluation_start,
     )
     identity = model_frame[["game_id", "date", "series_id"]].copy()
     series_by_game = dict(
@@ -494,7 +520,7 @@ def build_prelude(
         series_partition_receipt_file_sha256=crosswalk_receipt_file_sha256,
     )
     inner_spec = _derive_inner_fold_spec(
-        model_frame,
+        prelude_model_frame,
         outer_fold=1,
         outer_train_ids=tuple(str(value) for value in prelude_fold["train_game_ids"]),
         outer_validation_ids=tuple(
@@ -523,7 +549,7 @@ def build_prelude(
             source_receipt=source_receipt,
             source_receipt_sha256=str(source_receipt["receipt_sha256"]),
             crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
-            model_frame=model_frame,
+            model_frame=prelude_model_frame,
             players=players,
             fold=prelude_fold,
             outer_record=outer_records[variant_key],
@@ -565,7 +591,7 @@ def build_prelude(
         "fold_protocol": {
             "fold_count": int(fold_count),
             "prelude_fold": 0,
-            "outer_evaluation_start": evaluation_start.isoformat().replace(
+            "outer_evaluation_start": validated_evaluation_start.isoformat().replace(
                 "+00:00", "Z"
             ),
             "validation_interval": {
