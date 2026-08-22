@@ -64,6 +64,21 @@ BOOTSTRAP_COMPARISONS = (
     "both_vs_future_player_form",
 )
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+AUTHORITY_FIELDS = (
+    "research_only",
+    "public_player_rating",
+    "public_team_rating",
+    "public_tierlist",
+    "public_draft_score",
+    "public_probability",
+    "promotion",
+    "deployment",
+    "merge",
+    "odds",
+    "expected_value",
+    "recommendation",
+    "betting",
+)
 
 
 class DownstreamImpactError(ValueError):
@@ -138,11 +153,16 @@ def _hash_self(value: Mapping[str, Any], field: str) -> str:
 def _authority_blockers(value: Any, label: str) -> list[str]:
     if not isinstance(value, Mapping) or value.get("research_only") is not True:
         return [f"{label}_research_only_authority_missing"]
-    return [
+    blockers: list[str] = []
+    for key in AUTHORITY_FIELDS:
+        if key != "research_only" and value.get(key) is not False and key in value:
+            blockers.append(f"{label}_authority_{key}_enabled")
+    blockers.extend(
         f"{label}_authority_{key}_enabled"
         for key, flag in value.items()
-        if key != "research_only" and flag is True
-    ]
+        if key not in AUTHORITY_FIELDS and flag is True
+    )
+    return sorted(set(blockers))
 
 
 def _source_fields(receipt: Mapping[str, Any]) -> dict[str, Any]:
@@ -192,6 +212,23 @@ def _source_match(value: Mapping[str, Any], source: Mapping[str, Any], label: st
         if raw_ids != source.get("model_eligible_game_ids"):
             blockers.append(f"{label}_model_eligible_game_ids_mismatch")
     return blockers
+
+
+def _require_source_fields(
+    value: Any,
+    source: Mapping[str, Any],
+    label: str,
+    fields: Sequence[str],
+) -> list[str]:
+    """Require source identity fields before an artifact is accepted."""
+
+    if not isinstance(value, Mapping):
+        return [f"{label}_source_binding_missing"]
+    blockers = _source_match(value, source, label)
+    for field in fields:
+        if field not in value:
+            blockers.append(f"{label}_{field}_missing")
+    return sorted(set(blockers))
 
 
 def _load_source(path_value: Path | str) -> tuple[Path, dict[str, Any], dict[str, Any]]:
@@ -253,6 +290,7 @@ def _authority_summary(value: Any) -> dict[str, bool]:
         "public_probability": False,
         "promotion": False,
         "deployment": False,
+        "merge": False,
         "odds": False,
         "expected_value": False,
         "recommendation": False,
@@ -284,8 +322,11 @@ def _external_receipt(
                 key in value
                 for key in (
                     "source_receipt_sha256",
+                    "source_as_of",
                     "source_identity_sha256",
                     "source_game_count",
+                    "accepted_identity_sha256",
+                    "accepted_game_count",
                 )
             ):
                 yield value
@@ -302,7 +343,24 @@ def _external_receipt(
         blockers.append(f"{label}_receipt_source_binding_missing")
     if bindings:
         for binding in bindings:
-            blockers.extend(_source_match(binding, source, label))
+            complete_fields = (
+                "source_as_of",
+                "source_game_count",
+                "source_identity_sha256",
+                "source_receipt_sha256",
+            )
+            present = set(complete_fields).intersection(binding)
+            if present == {"source_receipt_sha256"}:
+                if binding.get("source_receipt_sha256") != source.get(
+                    "source_receipt_sha256"
+                ):
+                    blockers.append(f"{label}_source_receipt_sha256_mismatch")
+            elif present and present != set(complete_fields):
+                blockers.extend(
+                    _require_source_fields(binding, source, label, complete_fields)
+                )
+            elif not present:
+                blockers.append(f"{label}_receipt_source_binding_missing")
     blockers.extend(_authority_blockers(receipt.get("authority"), label))
     self_hash = None
     if "receipt_sha256" in receipt:
@@ -358,7 +416,19 @@ def _verify_evaluation(
     if not isinstance(model_source, Mapping):
         blockers.append(f"{variant}_evaluation_source_missing")
     else:
-        blockers.extend(_source_match(model_source, source, f"{variant}_evaluation"))
+        blockers.extend(
+            _require_source_fields(
+                model_source,
+                source,
+                f"{variant}_evaluation",
+                (
+                    "source_as_of",
+                    "source_game_count",
+                    "source_identity_sha256",
+                    "source_receipt_sha256",
+                ),
+            )
+        )
         if model_source.get("source_receipt_file_sha256") not in {
             None,
             source["source_receipt_file_sha256"],
@@ -369,6 +439,21 @@ def _verify_evaluation(
     if not isinstance(payload, Mapping):
         blockers.append(f"{variant}_evaluation_variant_missing")
         payload = {}
+    blockers.extend(
+        _require_source_fields(
+            payload.get("source"),
+            source,
+            f"{variant}_evaluation_payload",
+            (
+                "source_as_of",
+                "source_game_count",
+                "source_identity_sha256",
+                "source_receipt_sha256",
+                "model_eligible_game_count",
+                "model_eligible_identity_sha256",
+            ),
+        )
+    )
     blockers.extend(_authority_blockers(payload.get("authority"), f"{variant}_evaluation"))
     if payload.get("status") != "development_evaluated":
         blockers.append(f"{variant}_evaluation_status_not_complete")
@@ -471,7 +556,21 @@ def _verify_bootstrap(
     blockers: list[str] = []
     if value.get("schema_version") != BOOTSTRAP_SCHEMA_VERSION:
         blockers.append("paired_bootstrap_schema_invalid")
-    blockers.extend(_source_match(value.get("source", {}), source, "paired_bootstrap"))
+    blockers.extend(
+        _require_source_fields(
+            value.get("source", {}),
+            source,
+            "paired_bootstrap",
+            (
+                "source_as_of",
+                "source_game_count",
+                "source_identity_sha256",
+                "source_receipt_sha256",
+                "model_eligible_game_count",
+                "model_eligible_identity_sha256",
+            ),
+        )
+    )
     blockers.extend(_authority_blockers(value.get("authority"), "paired_bootstrap"))
     coverage = value.get("coverage")
     if not isinstance(coverage, Mapping):
@@ -520,7 +619,21 @@ def _verify_snapshot_bundle(
     blockers: list[str] = []
     if receipt.get("schema_version") != SNAPSHOT_RECEIPT_SCHEMA_VERSION:
         blockers.append("snapshot_receipt_schema_invalid")
-    blockers.extend(_source_match(receipt.get("source", {}), source, "snapshot_receipt"))
+    blockers.extend(
+        _require_source_fields(
+            receipt.get("source", {}),
+            source,
+            "snapshot_receipt",
+            (
+                "source_as_of",
+                "source_game_count",
+                "source_identity_sha256",
+                "source_receipt_sha256",
+                "model_eligible_game_count",
+                "model_eligible_identity_sha256",
+            ),
+        )
+    )
     current_inputs = receipt.get("current_rating_inputs", {})
     blockers.extend(_source_match(current_inputs, source, "snapshot_current_rating"))
     if isinstance(current_inputs, Mapping):
@@ -540,6 +653,13 @@ def _verify_snapshot_bundle(
             except DownstreamImpactError as error:
                 blockers.append(str(error))
     blockers.extend(_authority_blockers(receipt.get("authority"), "snapshot_receipt"))
+    receipt_blockers = receipt.get("blockers")
+    if isinstance(receipt_blockers, list):
+        blockers.extend(
+            f"snapshot_receipt_blocker:{item}"
+            for item in receipt_blockers
+            if str(item).strip()
+        )
     try:
         receipt_hash = _hash_self(receipt, "receipt_sha256")
     except DownstreamImpactError as error:
@@ -601,7 +721,24 @@ def _verify_snapshot_bundle(
                 except DownstreamImpactError as error:
                     blockers.append(str(error))
                 else:
-                    blockers.extend(_source_match(payload, source, f"snapshot_{name}"))
+                    if payload.get("schema_version") != "scryglass:future-value-snapshot:v1":
+                        blockers.append(f"snapshot_{name}_schema_invalid")
+                    if payload.get("status") not in {
+                        "research_only",
+                        "research_only_partial",
+                        "research_only_blocked",
+                    }:
+                        blockers.append(f"snapshot_{name}_status_invalid")
+                    blockers.extend(
+                        _require_source_fields(
+                            payload,
+                            source,
+                            f"snapshot_{name}",
+                            ("source_receipt_sha256",),
+                        )
+                    )
+                    if not isinstance(payload.get("rows"), list):
+                        blockers.append(f"snapshot_{name}_rows_missing")
                     blockers.extend(_authority_blockers(payload.get("authority"), f"snapshot_{name}"))
     # Rank-diff rows provide the exact movement counts.  The receipt and
     # comparison summary must agree with the bytes in the bundle.
@@ -711,6 +848,13 @@ def _verify_snapshot_variant(
     receipt = _read_json(receipt_path, f"{variant} snapshot receipt")
     manifest = _read_json(manifest_path, f"{variant} snapshot manifest")
     blockers: list[str] = []
+    receipt_blockers = receipt.get("blockers")
+    if isinstance(receipt_blockers, list):
+        blockers.extend(
+            f"{variant}_snapshot_receipt_blocker:{item}"
+            for item in receipt_blockers
+            if str(item).strip()
+        )
     if receipt.get("schema_version") != SNAPSHOT_RECEIPT_SCHEMA_VERSION:
         blockers.append(f"{variant}_snapshot_receipt_schema_invalid")
     if receipt.get("capability_schema_version") not in {None, SNAPSHOT_CAPABILITY_SCHEMA_VERSION}:
@@ -785,26 +929,116 @@ def _verify_snapshot_variant(
     if not isinstance(capability, Mapping):
         blockers.append(f"{variant}_snapshot_capability_missing")
         capability = {}
+    value_payloads: dict[str, Any] = {}
+    for kind, file_key in (("player", "player_snapshot"), ("team", "team_snapshot")):
+        record = files.get(file_key) if isinstance(files, Mapping) else None
+        if not isinstance(record, Mapping):
+            blockers.append(f"{variant}_{kind}_snapshot_value_file_missing")
+            continue
+        try:
+            value_path, value_file = _verify_file_record(
+                record, f"{variant} {kind} snapshot value"
+            )
+            value_payload = _read_json(value_path, f"{variant} {kind} snapshot value")
+        except DownstreamImpactError as error:
+            blockers.append(str(error))
+            continue
+        if value_payload.get("schema_version") != "scryglass:future-value-snapshot:v1":
+            blockers.append(f"{variant}_{kind}_snapshot_value_schema_invalid")
+        if value_payload.get("status") not in {
+            "research_only",
+            "research_only_partial",
+            "research_only_blocked",
+        }:
+            blockers.append(f"{variant}_{kind}_snapshot_value_status_invalid")
+        blockers.extend(
+            _require_source_fields(
+                value_payload,
+                source,
+                f"{variant}_{kind}_snapshot_value",
+                ("source_receipt_sha256",),
+            )
+        )
+        blockers.extend(
+            _authority_blockers(value_payload.get("authority"), f"{variant}_{kind}_snapshot_value")
+        )
+        rows = value_payload.get("rows")
+        if not isinstance(rows, list):
+            blockers.append(f"{variant}_{kind}_snapshot_value_rows_missing")
+            rows = []
+        payload_blockers = value_payload.get("blockers")
+        if isinstance(payload_blockers, list):
+            blockers.extend(
+                f"{variant}_{kind}_snapshot_value_blocker:{item}"
+                for item in payload_blockers
+                if str(item).strip()
+            )
+        value_payloads[kind] = {
+            "file": value_file,
+            "rows": len(rows),
+            "status": value_payload.get("status"),
+        }
     expected_component_scope = {
         "current_only": "current_mu_effective",
         "future_player_form": "future_player_form_component",
         "both": "future_player_form_component",
     }.get(variant)
+    expected_component_value_field = {
+        "current_only": "mu_effective",
+        "future_player_form": {
+            "player": "future_player_form_component_logit",
+            "team": "future_team_form_component_logit",
+        },
+        "both": {
+            "player": "future_player_form_component_logit",
+            "team": "future_team_form_component_logit",
+        },
+    }.get(variant)
     for kind in ("player", "team"):
         component = capability.get(kind)
         rank_capability = capability.get(f"{kind}_ranks")
         if variant == "scaling_curve":
-            if isinstance(component, Mapping) and component.get("status") != "not_applicable":
+            if (
+                not isinstance(component, Mapping)
+                or component.get("status") != "not_applicable"
+                or component.get("scope") != "scaling_curve_contextual"
+                or component.get("row_policy") != "no_rows"
+            ):
                 blockers.append(f"{variant}_{kind}_snapshot_component_na_invalid")
+            if (
+                not isinstance(rank_capability, Mapping)
+                or rank_capability.get("status") != "not_applicable"
+                or rank_capability.get("scope") != "scaling_curve_contextual"
+                or rank_capability.get("row_policy") != "no_rows"
+            ):
+                blockers.append(f"{variant}_{kind}_snapshot_rank_na_invalid")
         elif (
             not isinstance(component, Mapping)
             or component.get("status") != "available"
             or component.get("scope") != expected_component_scope
             or component.get("full_composite_rating") is True
+            or component.get("value_field")
+            != (
+                expected_component_value_field
+                if isinstance(expected_component_value_field, str)
+                else expected_component_value_field[kind]
+            )
         ):
             blockers.append(f"{variant}_{kind}_snapshot_component_scope_invalid")
         if not isinstance(rank_capability, Mapping):
             blockers.append(f"{variant}_{kind}_snapshot_rank_capability_missing")
+        elif variant in {"future_player_form", "both"} and (
+            rank_capability.get("status") != "available"
+            or rank_capability.get("scope") != "future_player_form_component"
+            or rank_capability.get("row_policy") != "common_verified_finite_ids"
+        ):
+            blockers.append(f"{variant}_{kind}_snapshot_rank_component_scope_invalid")
+        elif variant == "current_only" and (
+            rank_capability.get("status") != "available"
+            or rank_capability.get("scope") != "self_diff"
+            or rank_capability.get("self_diff") != "exact_zero"
+        ):
+            blockers.append(f"{variant}_{kind}_snapshot_rank_self_diff_contract_invalid")
     rank_movement: dict[str, Any] = {}
     rank_coverage = receipt.get("rank_coverage")
     if not isinstance(rank_coverage, Mapping):
@@ -870,6 +1104,8 @@ def _verify_snapshot_variant(
                 deltas.append(delta)
         if len(ids) != len(set(ids)):
             blockers.append(f"{variant}_{kind}_snapshot_rank_diff_duplicate_identity")
+        if variant == "current_only" and any(delta != 0 for delta in deltas):
+            blockers.append(f"{variant}_{kind}_snapshot_rank_self_diff_nonzero")
         rank_movement[kind] = {
             "status": status or "available",
             "rows": len(rows),
@@ -884,6 +1120,7 @@ def _verify_snapshot_variant(
         "variant": variant,
         "status": receipt.get("status"),
         "capability": capability,
+        "value_payloads": value_payloads,
         "receipt": {
             "path": str(receipt_path),
             "bytes": receipt_path.stat().st_size,
@@ -922,6 +1159,21 @@ def _verify_tier_shadow_manifest(
     if not isinstance(source_binding, Mapping):
         blockers.append("tier_shadow_source_binding_missing")
     else:
+        blockers.extend(
+            _require_source_fields(
+                source_binding,
+                source,
+                "tier_shadow",
+                (
+                    "source_as_of",
+                    "source_game_count",
+                    "source_identity_sha256",
+                    "source_receipt_sha256",
+                    "model_eligible_game_count",
+                    "model_eligible_identity_sha256",
+                ),
+            )
+        )
         if source_binding.get("source_receipt_sha256") not in {None, source.get("source_receipt_sha256")}:
             blockers.append("tier_shadow_source_receipt_mismatch")
         if source_binding.get("source_identity_sha256") not in {None, source.get("source_identity_sha256")}:
@@ -964,7 +1216,21 @@ def _verify_tier(
         blockers.append("tier_diff_schema_invalid")
     blockers.extend(_authority_blockers(report.get("authority"), "tier_diff"))
     report_source = report.get("source", {})
-    blockers.extend(_source_match(report_source, source, "tier_diff"))
+    blockers.extend(
+        _require_source_fields(
+            report_source,
+            source,
+            "tier_diff",
+            (
+                "source_as_of",
+                "source_receipt_sha256",
+                "accepted_game_count",
+                "accepted_identity_sha256",
+                "model_eligible_game_count",
+                "model_eligible_identity_sha256",
+            ),
+        )
+    )
     # The Tier producer uses accepted_* and model_eligible_* names.  Check both
     # counts and identities explicitly because the accepted and eligible
     # universes can differ.
@@ -1117,7 +1383,19 @@ def _verify_tier_chronological(
     if report.get("schema_version") != TIER_CHRONOLOGICAL_SCHEMA_VERSION:
         blockers.append("tier_fourway_schema_invalid")
     blockers.extend(_authority_blockers(report.get("authority"), "tier_fourway"))
-    blockers.extend(_source_match(report.get("source", {}), source, "tier_fourway"))
+    blockers.extend(
+        _require_source_fields(
+            report.get("source", {}),
+            source,
+            "tier_fourway",
+            (
+                "source_as_of",
+                "source_receipt_sha256",
+                "model_eligible_game_count",
+                "model_eligible_identity_sha256",
+            ),
+        )
+    )
     try:
         report_hash = _hash_self(report, "report_sha256")
     except DownstreamImpactError as error:
@@ -1191,7 +1469,21 @@ def _verify_draft(
     blockers: list[str] = []
     if report.get("schema_version") not in {DRAFT_SCHEMA_V1, DRAFT_SCHEMA_V2}:
         blockers.append("draft_score_schema_invalid")
-    blockers.extend(_source_match(report.get("source", {}), source, "draft_score"))
+    blockers.extend(
+        _require_source_fields(
+            report.get("source", {}),
+            source,
+            "draft_score",
+            (
+                "source_as_of",
+                "source_game_count",
+                "source_identity_sha256",
+                "source_receipt_sha256",
+                "model_eligible_game_count",
+                "model_eligible_identity_sha256",
+            ),
+        )
+    )
     blockers.extend(_authority_blockers(report.get("authority"), "draft_score"))
     try:
         claimed = report.get("report_sha256")
@@ -1419,8 +1711,29 @@ def build_downstream_impact_report(
             except DownstreamImpactError as error:
                 snapshot_blockers.append(str(error))
             snapshot_blockers.extend(_authority_blockers(cap.get("authority"), "snapshot_capability_manifest"))
+            manifest_blockers = cap.get("blockers")
+            if isinstance(manifest_blockers, list):
+                snapshot_blockers.extend(
+                    f"snapshot_capability_manifest_blocker:{item}"
+                    for item in manifest_blockers
+                    if str(item).strip()
+                )
             snapshot_cap_source = cap.get("source", {})
-            snapshot_blockers.extend(_source_match(snapshot_cap_source, source, "snapshot_capability_manifest"))
+            snapshot_blockers.extend(
+                _require_source_fields(
+                    snapshot_cap_source,
+                    source,
+                    "snapshot_capability_manifest",
+                    (
+                        "source_as_of",
+                        "source_game_count",
+                        "source_identity_sha256",
+                        "source_receipt_sha256",
+                        "model_eligible_game_count",
+                        "model_eligible_identity_sha256",
+                    ),
+                )
+            )
             if cap.get("schema_version") not in {
                 SNAPSHOT_CAPABILITY_MANIFEST_SCHEMA_VERSION,
                 SNAPSHOT_CAPABILITY_BUNDLE_MANIFEST_SCHEMA_VERSION,
@@ -1442,6 +1755,13 @@ def build_downstream_impact_report(
                         continue
                     if record.get("variant") not in {None, variant}:
                         snapshot_blockers.append(f"snapshot_capability_{variant}_variant_mismatch")
+                    record_blockers = record.get("blockers")
+                    if isinstance(record_blockers, list):
+                        snapshot_blockers.extend(
+                            f"snapshot_capability_{variant}_blocker:{item}"
+                            for item in record_blockers
+                            if str(item).strip()
+                        )
                     if variant == "scaling_curve":
                         coverage = record.get("rank_coverage", {})
                         if not isinstance(coverage, Mapping):

@@ -26,9 +26,12 @@ AUTHORITY = {
     "research_only": True,
     "public_player_rating": False,
     "public_team_rating": False,
+    "public_tierlist": False,
+    "public_draft_score": False,
     "public_probability": False,
     "promotion": False,
     "deployment": False,
+    "merge": False,
     "odds": False,
     "expected_value": False,
     "recommendation": False,
@@ -105,6 +108,11 @@ def _evaluation(root: Path, source: dict, source_fields: dict, variant: str) -> 
         "authority": dict(AUTHORITY),
         "status": "development_evaluated",
         "variant": variant,
+        "source": {
+            **source_fields,
+            "model_eligible_game_count": source["model_eligible_game_count"],
+            "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+        },
         "blockers": [],
         "evaluation": {
             "pooled_rows": len(rows),
@@ -132,6 +140,7 @@ def _evaluation(root: Path, source: dict, source_fields: dict, variant: str) -> 
     receipt = _self_hash(
         {
             "schema_version": "scryglass:future-value-model-receipt:v1",
+            "source": dict(source_fields),
             "source_receipt_sha256": source["receipt_sha256"],
             "authority": dict(AUTHORITY),
             "artifact": {
@@ -147,8 +156,8 @@ def _evaluation(root: Path, source: dict, source_fields: dict, variant: str) -> 
 
 
 def _snapshot_bundle(root: Path, source: dict, sf: dict) -> tuple[Path, Path, Path]:
-    player = _write(root / "player-snapshot.json", {"rows": [{"player_id": "p1"}], "source_receipt_sha256": source["receipt_sha256"], "authority": dict(AUTHORITY)})
-    team = _write(root / "team-snapshot.json", {"rows": [{"team_id": "t1"}], "source_receipt_sha256": source["receipt_sha256"], "authority": dict(AUTHORITY)})
+    player = _write(root / "player-snapshot.json", {"schema_version": "scryglass:future-value-snapshot:v1", "status": "research_only_partial", "rows": [{"player_id": "p1"}], "source_receipt_sha256": source["receipt_sha256"], "authority": dict(AUTHORITY)})
+    team = _write(root / "team-snapshot.json", {"schema_version": "scryglass:future-value-snapshot:v1", "status": "research_only_partial", "rows": [{"team_id": "t1"}], "source_receipt_sha256": source["receipt_sha256"], "authority": dict(AUTHORITY)})
     player_rank = _write(
         root / "player-rank-diffs.json",
         {
@@ -200,7 +209,7 @@ def _snapshot_bundle(root: Path, source: dict, sf: dict) -> tuple[Path, Path, Pa
             "player": {"matched_rows": 1, "rank_direction": "descending", "rank_universe": "common_verified_finite_ids", "full_snapshot_rank_status": "incomparable"},
             "team": {"matched_rows": 1, "rank_direction": "descending", "rank_universe": "common_verified_finite_ids", "full_snapshot_rank_status": "incomparable"},
         },
-        "blockers": ["research_only"],
+        "blockers": [],
         "fit": {"status": "blocked"},
         "model": {"variant": "future_player_form"},
         "tierlists": {"status": "unchanged"},
@@ -261,11 +270,11 @@ def _all_variant_snapshot_bundles(root: Path, source: dict, sf: dict) -> dict[st
         variant_root = root / variant
         player_snapshot = _write(
             variant_root / "future-player-value-snapshot.json",
-            {"rows": [] if variant == "scaling_curve" else [{"player_id": "p1"}]},
+            {"schema_version": "scryglass:future-value-snapshot:v1", "status": "research_only", "source_receipt_sha256": source["receipt_sha256"], "authority": dict(AUTHORITY), "rows": [] if variant == "scaling_curve" else [{"player_id": "p1"}]},
         )
         team_snapshot = _write(
             variant_root / "future-team-value-snapshot.json",
-            {"rows": [] if variant == "scaling_curve" else [{"team_id": "t1"}]},
+            {"schema_version": "scryglass:future-value-snapshot:v1", "status": "research_only", "source_receipt_sha256": source["receipt_sha256"], "authority": dict(AUTHORITY), "rows": [] if variant == "scaling_curve" else [{"team_id": "t1"}]},
         )
         rows = [] if variant == "scaling_curve" else [{"player_id": "p1", "rank_delta": 0}]
         team_rows = [] if variant == "scaling_curve" else [{"team_id": "t1", "rank_delta": 0}]
@@ -432,7 +441,11 @@ def _bootstrap(root: Path, source: dict, summaries: dict[str, dict]) -> Path:
         "schema_version": "scryglass:future-value-paired-uncertainty:v1",
         "status": "research_only",
         "authority": dict(AUTHORITY),
-        "source": {**source, "source_receipt_file_sha256": "ignored"},
+        "source": {
+            **source,
+            "source_receipt_sha256": source["receipt_sha256"],
+            "source_receipt_file_sha256": "ignored",
+        },
         "coverage": {"rows": rows, "game_identity_sha256": identity, "folds": {}, "series_count": 1},
         "comparisons": comparisons,
         "method": {"draws": 4},
