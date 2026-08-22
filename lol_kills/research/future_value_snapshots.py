@@ -54,6 +54,7 @@ from lol_kills.research.future_value_uncertainty import (
 
 SCHEMA_VERSION = "scryglass:future-value-snapshot:v1"
 SNAPSHOT_RECEIPT_SCHEMA_VERSION = "scryglass:future-value-snapshot-receipt:v1"
+SNAPSHOT_CAPABILITY_SCHEMA_VERSION = "scryglass:future-value-snapshot-capability:v1"
 SNAPSHOT_AUTHORITY = {
     "research_only": True,
     "public_player_rating": False,
@@ -67,6 +68,139 @@ SNAPSHOT_AUTHORITY = {
     "recommendation": False,
     "betting": False,
 }
+RANK_UNIVERSE = "common_verified_finite_ids"
+RANK_ELIGIBILITY_FILTER = "verified_nonempty_id_and_finite_value"
+RANK_DIRECTION = "descending_value_rank_1_highest"
+FULL_SNAPSHOT_RANK_STATUS = "incomparable"
+
+# The snapshot consumer has four named inputs.  The names match the rating
+# runner, but the snapshot contract gives each one a smaller, explicit claim
+# surface.  In particular, a player-form component is not a replacement for
+# the full current rating.
+SNAPSHOT_VARIANTS = tuple(value.value for value in RatingVariant)
+CURRENT_MU_EFFECTIVE_SCOPE = "current_mu_effective"
+FORM_COMPONENT_SCOPE = "future_player_form_component"
+SCALING_CONTEXT_SCOPE = "scaling_curve_contextual"
+SCALING_CONTEXT_BLOCKER = "scaling_context_required"
+SCALING_CONTEXT_FIELDS = (
+    "champions",
+    "lineup",
+    "opponent",
+    "side",
+)
+
+
+def _capability_matrix() -> dict[str, dict[str, Any]]:
+    """Return the closed capability matrix for the four snapshot variants."""
+
+    form_player = {
+        "status": "available",
+        "scope": FORM_COMPONENT_SCOPE,
+        "value_field": "future_player_form_component_logit",
+        "full_composite_rating": False,
+        "row_policy": "stable_id_sorted",
+    }
+    form_team = {
+        "status": "available",
+        "scope": FORM_COMPONENT_SCOPE,
+        "value_field": "future_team_form_component_logit",
+        "full_composite_rating": False,
+        "row_policy": "exact_five_stable_role_roster",
+    }
+    current_player = {
+        "status": "available",
+        "scope": CURRENT_MU_EFFECTIVE_SCOPE,
+        "value_field": "mu_effective",
+        "source": "verified_current_snapshot",
+        "row_policy": "stable_id_sorted",
+    }
+    current_team = {
+        "status": "available",
+        "scope": CURRENT_MU_EFFECTIVE_SCOPE,
+        "value_field": "mu_effective",
+        "source": "verified_current_snapshot",
+        "row_policy": "stable_id_sorted",
+    }
+    current_rank = {
+        "status": "available",
+        "scope": "self_diff",
+        "rank_universe": RANK_UNIVERSE,
+        "self_diff": "exact_zero",
+        "row_policy": "common_verified_finite_ids",
+    }
+    form_rank = {
+        "status": "available",
+        "scope": FORM_COMPONENT_SCOPE,
+        "rank_universe": RANK_UNIVERSE,
+        "row_policy": "common_verified_finite_ids",
+    }
+    scaling_rank = {
+        "status": "not_applicable",
+        "scope": SCALING_CONTEXT_SCOPE,
+        "rank_universe": RANK_UNIVERSE,
+        "row_policy": "no_rows",
+        "required_context": list(SCALING_CONTEXT_FIELDS),
+        "reason": "scaling depends on champions, lineup, opponent, and side",
+    }
+    omitted_scaling = dict(scaling_rank)
+    omitted_scaling.update(
+        {
+            "status": "omitted",
+            "blocker": SCALING_CONTEXT_BLOCKER,
+        }
+    )
+    return {
+        RatingVariant.CURRENT_ONLY.value: {
+            "label": "V1",
+            "player": current_player,
+            "team": current_team,
+            "player_ranks": current_rank,
+            "team_ranks": current_rank,
+            "scaling_context": scaling_rank,
+        },
+        RatingVariant.FUTURE_PLAYER_FORM.value: {
+            "label": "V2",
+            "player": form_player,
+            "team": form_team,
+            "player_ranks": form_rank,
+            "team_ranks": form_rank,
+            "scaling_context": scaling_rank,
+        },
+        RatingVariant.SCALING_CURVE.value: {
+            "label": "V3",
+            "player": scaling_rank,
+            "team": scaling_rank,
+            "player_ranks": scaling_rank,
+            "team_ranks": scaling_rank,
+            "scaling_context": scaling_rank,
+        },
+        RatingVariant.BOTH.value: {
+            "label": "V4",
+            "player": form_player,
+            "team": form_team,
+            "player_ranks": form_rank,
+            "team_ranks": form_rank,
+            "scaling_context": omitted_scaling,
+        },
+    }
+
+
+SNAPSHOT_CAPABILITY_MATRIX = _capability_matrix()
+
+
+def snapshot_capability_matrix() -> dict[str, dict[str, Any]]:
+    """Return a JSON-safe copy of the all-variant snapshot capability matrix."""
+
+    return json.loads(json.dumps(SNAPSHOT_CAPABILITY_MATRIX, sort_keys=True))
+
+
+def _snapshot_variant(value: RatingVariant | str | None) -> str:
+    if value is None:
+        return RatingVariant.FUTURE_PLAYER_FORM.value
+    try:
+        return RatingVariant(value).value
+    except (TypeError, ValueError) as error:
+        raise FutureValueSnapshotError(f"unknown snapshot variant: {value!r}") from error
 
 PLAYER_VALUE_FEATURE_PREFIXES = (
     "player_form_",
@@ -136,10 +270,6 @@ PROMOTION_ONLY_BLOCKERS = frozenset(
 RESEARCH_FIT_STATUSES = frozenset(
     {"research_only", "research_only_blocked", "research_only_partial"}
 )
-RANK_UNIVERSE = "common_verified_finite_ids"
-RANK_ELIGIBILITY_FILTER = "verified_nonempty_id_and_finite_value"
-RANK_DIRECTION = "descending_value_rank_1_highest"
-FULL_SNAPSHOT_RANK_STATUS = "incomparable"
 
 
 class FutureValueSnapshotError(FutureValueSourceError):
@@ -185,10 +315,13 @@ class FutureValueSnapshotResult:
         return {
             "status": self.status,
             "blockers": list(self.blockers),
+            "variant": self.receipt.get("variant"),
             "player_rows": [dict(row) for row in self.player_rows],
             "team_rows": [dict(row) for row in self.team_rows],
             "player_rank_diffs": [dict(row) for row in self.player_rank_diffs],
             "team_rank_diffs": [dict(row) for row in self.team_rank_diffs],
+            "capability": dict(self.receipt.get("capability") or {}),
+            "capabilities": dict(self.receipt.get("capabilities") or {}),
             "receipt": dict(self.receipt),
         }
 
@@ -1227,12 +1360,500 @@ def _json_row(row: Mapping[str, Any]) -> dict[str, Any]:
     for key, value in row.items():
         if isinstance(value, (np.generic,)):
             value = value.item()
+        if value is pd.NA:
+            value = None
         if isinstance(value, pd.Timestamp):
             value = _utc_text(value)
         if isinstance(value, float) and not math.isfinite(value):
             value = None
         output[str(key)] = value
     return output
+
+
+def _capability_for_variant(variant: RatingVariant | str) -> dict[str, Any]:
+    name = _snapshot_variant(variant)
+    return snapshot_capability_matrix()[name]
+
+
+def _current_rating_frame(
+    frame: pd.DataFrame | None,
+    *,
+    kind: str,
+) -> pd.DataFrame:
+    """Keep only finite, stable-ID rows from an independently verified table.
+
+    The command-line builder verifies the parquet bytes and receipt before it
+    calls this function.  This second check keeps the Python API fail-closed
+    when callers pass frames directly.
+    """
+
+    if kind == "player":
+        identity = "player_id"
+        required = {"player_id", "mu_effective"}
+        prefix = "oe:player:"
+    elif kind == "team":
+        identity = "team_id"
+        required = {"team_id", "mu_effective"}
+        prefix = "oe:team:"
+    else:
+        raise FutureValueSnapshotError(f"unknown current rating kind: {kind}")
+    if frame is None or not isinstance(frame, pd.DataFrame):
+        raise FutureValueSnapshotError(f"current {kind} rating snapshot is missing")
+    if not required.issubset(frame.columns):
+        raise FutureValueSnapshotError(
+            f"current {kind} rating snapshot requires {sorted(required)}"
+        )
+    work = frame.copy()
+    work[identity] = work[identity].astype("string")
+    verified = work[identity].notna() & work[identity].str.strip().ne("")
+    if not work.loc[verified, identity].map(
+        lambda value: _stable_identity(value, prefix)
+    ).all():
+        raise FutureValueSnapshotError(f"current {kind} rating snapshot has unstable IDs")
+    if kind == "player" and "team_id" in work.columns:
+        team_ids = work["team_id"].astype("string")
+        team_present = team_ids.notna() & team_ids.str.strip().ne("")
+        if not team_ids[team_present].map(
+            lambda value: _stable_identity(value, "oe:team:")
+        ).all():
+            raise FutureValueSnapshotError(
+                "current player rating snapshot has unstable team IDs"
+            )
+    work["mu_effective"] = pd.to_numeric(work["mu_effective"], errors="coerce")
+    finite = work["mu_effective"].map(lambda value: _finite(value) is not None)
+    work = work.loc[verified & finite].copy()
+    if work[identity].duplicated().any():
+        raise FutureValueSnapshotError(
+            f"current {kind} rating snapshot has duplicate verified IDs"
+        )
+    if work.empty:
+        raise FutureValueSnapshotError(
+            f"current {kind} rating snapshot has no verified finite rows"
+        )
+    work[identity] = work[identity].astype(str)
+    work = work.sort_values(identity, kind="mergesort").reset_index(drop=True)
+    return work
+
+
+def _validate_current_rating_input_binding(
+    binding: Mapping[str, Any] | None,
+    source: Mapping[str, Any],
+) -> None:
+    """Check source fields when a current snapshot binding is supplied."""
+
+    if binding is None:
+        return
+    if not isinstance(binding, Mapping):
+        raise FutureValueSnapshotError("current rating input binding is invalid")
+    expected = {
+        "source_receipt_sha256": source["source_receipt_sha256"],
+        "source_identity_sha256": source["source_identity_sha256"],
+        "source_as_of": source["source_as_of"],
+        "source_game_count": source["source_game_count"],
+    }
+    for key, expected_value in expected.items():
+        if key in binding and binding.get(key) != expected_value:
+            raise FutureValueSnapshotError(
+                f"current rating input {key} changed"
+            )
+
+
+def _current_snapshot_rows(
+    frame: pd.DataFrame,
+    *,
+    kind: str,
+) -> list[dict[str, Any]]:
+    identity = "player_id" if kind == "player" else "team_id"
+    name_column = "player" if kind == "player" else "team"
+    rows: list[dict[str, Any]] = []
+    for raw in frame.to_dict("records"):
+        identity_value = str(raw[identity])
+        value = float(raw["mu_effective"])
+        name = raw.get(name_column)
+        if name is None:
+            name = identity_value
+        row = {
+            identity: identity_value,
+            name_column: str(name),
+            "mu_effective": value,
+            "current_mu_effective": value,
+            "rating_scope": CURRENT_MU_EFFECTIVE_SCOPE,
+            "component_scope": CURRENT_MU_EFFECTIVE_SCOPE,
+            "value_field": "mu_effective",
+            "full_composite_rating": True,
+            "status": "research_only",
+            "blockers": [],
+            "rank_join_status": "pending",
+        }
+        if kind == "player":
+            raw_team_id = raw.get("team_id")
+            row["team_id"] = (
+                str(raw_team_id)
+                if raw_team_id is not None
+                and raw_team_id is not pd.NA
+                and _stable_identity(raw_team_id, "oe:team:")
+                else None
+            )
+        rows.append(_json_row(row))
+    return rows
+
+
+def _current_self_rank_diffs(
+    rows: Sequence[Mapping[str, Any]],
+    current: pd.DataFrame,
+    *,
+    identity: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    diffs, blockers, coverage, _assignments = _rank_diffs(
+        rows,
+        current,
+        identity=identity,
+        future_value="mu_effective",
+        current_value_candidates=("mu_effective",),
+    )
+    if blockers:
+        raise FutureValueSnapshotError(
+            "current-only self-diff cannot join verified current rows: "
+            + ", ".join(blockers)
+        )
+    if any(int(row["rank_delta"]) != 0 for row in diffs):
+        raise FutureValueSnapshotError("current-only self-diff is not exactly zero")
+    for row in diffs:
+        row.update(
+            {
+                "variant": RatingVariant.CURRENT_ONLY.value,
+                "rating_scope": CURRENT_MU_EFFECTIVE_SCOPE,
+                "component_scope": CURRENT_MU_EFFECTIVE_SCOPE,
+                "value_field": "mu_effective",
+                "self_diff": "exact_zero",
+                "full_composite_rating": True,
+                "full_snapshot_rank_status": "comparable",
+            }
+        )
+    coverage = dict(coverage)
+    coverage.update(
+        {
+            "variant": RatingVariant.CURRENT_ONLY.value,
+            "scope": CURRENT_MU_EFFECTIVE_SCOPE,
+            "self_diff": "exact_zero",
+            "full_snapshot_ranks": {
+                "status": "comparable",
+                "reason": "current-only compares the verified snapshot to itself",
+                "current_universe_size": int(coverage.get("current_rows", 0)),
+                "future_universe_size": int(coverage.get("future_rows", 0)),
+                "current_value_field": "mu_effective",
+                "future_value_field": "mu_effective",
+                "rank_direction": RANK_DIRECTION,
+            },
+        }
+    )
+    return diffs, coverage
+
+
+def _not_applicable_rank_coverage(
+    *,
+    variant: str,
+    identity: str,
+) -> dict[str, Any]:
+    return {
+        "variant": variant,
+        "status": "not_applicable",
+        "scope": SCALING_CONTEXT_SCOPE,
+        "reason": "scaling depends on champions, lineup, opponent, and side",
+        "required_context": list(SCALING_CONTEXT_FIELDS),
+        "rank_universe": RANK_UNIVERSE,
+        "eligibility_filter": RANK_ELIGIBILITY_FILTER,
+        "identity": identity,
+        "row_policy": "no_rows",
+        "future_rows": 0,
+        "current_rows": 0,
+        "matched_rows": 0,
+        "join_rate": None,
+        "full_snapshot_rank_status": "not_applicable",
+        "future_value_field": None,
+        "current_value_field": None,
+    }
+
+
+def _not_applicable_snapshot_result(
+    source_receipt: Mapping[str, Any],
+    *,
+    variant: RatingVariant | str,
+    current_rating_inputs: Mapping[str, Any] | None = None,
+) -> FutureValueSnapshotResult:
+    name = _snapshot_variant(variant)
+    source = _source_binding(source_receipt)
+    capability = _capability_for_variant(name)
+    payload: dict[str, Any] = {
+        "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+        "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+        "status": "research_only",
+        "authority": dict(SNAPSHOT_AUTHORITY),
+        "variant": name,
+        "source": source,
+        "as_of": source["source_as_of"],
+        "model": {
+            "schema_version": MODEL_FIT_SCHEMA_VERSION,
+            "variant": name,
+            "receipt_sha256": None,
+            "status": "not_applicable",
+        },
+        "fit": {
+            "status": "not_applicable",
+            "authorized": False,
+            "blockers": [],
+            "model_receipt_sha256": None,
+            "source_receipt_sha256": source["source_receipt_sha256"],
+        },
+        "player_row_count": 0,
+        "team_row_count": 0,
+        "player_rank_diff_count": 0,
+        "team_rank_diff_count": 0,
+        "rank_coverage": {
+            "player": _not_applicable_rank_coverage(
+                variant=name, identity="player_id"
+            ),
+            "team": _not_applicable_rank_coverage(
+                variant=name, identity="team_id"
+            ),
+        },
+        "capability": capability,
+        "capabilities": snapshot_capability_matrix(),
+        "exact_five": {
+            "source_map_rows": True,
+            "source_player_rows": True,
+            "team_aggregation": "not_applicable",
+        },
+        "blockers": [],
+        "tierlists": {"recalculated": False, "status": "unchanged"},
+    }
+    if current_rating_inputs is not None:
+        payload["current_rating_inputs"] = dict(current_rating_inputs)
+    payload["receipt_sha256"] = _sha256_bytes(_canonical_json_bytes(payload))
+    return FutureValueSnapshotResult(
+        "research_only", (), (), (), (), (), payload
+    )
+
+
+def _annotate_form_component_rows(
+    player_rows: list[dict[str, Any]],
+    team_rows: list[dict[str, Any]],
+) -> None:
+    """Add explicit component names while retaining old internal aliases."""
+
+    for row in player_rows:
+        value = _finite(row.get("future_player_value_logit"))
+        row["future_player_form_component_logit"] = value
+        row["rating_scope"] = FORM_COMPONENT_SCOPE
+        row["component_scope"] = FORM_COMPONENT_SCOPE
+        row["value_field"] = "future_player_form_component_logit"
+        row["rating_label"] = FORM_COMPONENT_SCOPE
+        row["full_composite_rating"] = False
+    for row in team_rows:
+        value = _finite(row.get("role_normalized_player_value_logit"))
+        row["future_team_form_component_logit"] = value
+        row["rating_scope"] = FORM_COMPONENT_SCOPE
+        row["component_scope"] = FORM_COMPONENT_SCOPE
+        row["value_field"] = "future_team_form_component_logit"
+        row["rating_label"] = FORM_COMPONENT_SCOPE
+        row["full_composite_rating"] = False
+
+
+def _component_rank_diffs(
+    rows: Sequence[Mapping[str, Any]],
+    current: pd.DataFrame | None,
+    *,
+    identity: str,
+    value_field: str,
+    current_value_candidates: Sequence[str],
+    variant: str,
+) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+    diffs, blockers, coverage, _assignments = _rank_diffs(
+        rows,
+        current,
+        identity=identity,
+        future_value=value_field,
+        current_value_candidates=current_value_candidates,
+    )
+    for row in diffs:
+        row.update(
+            {
+                "variant": variant,
+                "rating_scope": FORM_COMPONENT_SCOPE,
+                "component_scope": FORM_COMPONENT_SCOPE,
+                "value_field": value_field,
+                "rating_label": FORM_COMPONENT_SCOPE,
+                "full_composite_rating": False,
+            }
+        )
+    coverage = dict(coverage)
+    coverage.update(
+        {
+            "variant": variant,
+            "scope": FORM_COMPONENT_SCOPE,
+            "value_field": value_field,
+            "full_composite_rating": False,
+        }
+    )
+    return diffs, blockers, coverage
+
+
+def build_snapshot_capability_manifest(
+    source_receipt: Mapping[str, Any],
+    *,
+    results: Mapping[str, FutureValueSnapshotResult | Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build the source-bound manifest for all four snapshot capabilities."""
+
+    source = _source_binding(source_receipt)
+    supplied = results or {}
+    variants: dict[str, Any] = {}
+    for name in SNAPSHOT_VARIANTS:
+        capability = _capability_for_variant(name)
+        raw_result = supplied.get(name)
+        if isinstance(raw_result, FutureValueSnapshotResult):
+            receipt = raw_result.receipt
+            result_status = raw_result.status
+            blockers = list(raw_result.blockers)
+            output = {
+                "status": result_status,
+                "blockers": blockers,
+                "player_rows": len(raw_result.player_rows),
+                "team_rows": len(raw_result.team_rows),
+                "player_rank_rows": len(raw_result.player_rank_diffs),
+                "team_rank_rows": len(raw_result.team_rank_diffs),
+                "receipt_sha256": receipt.get("receipt_sha256"),
+            }
+        elif isinstance(raw_result, Mapping):
+            receipt = raw_result.get("receipt")
+            output = {
+                "status": raw_result.get("status"),
+                "blockers": list(raw_result.get("blockers") or ()),
+                "player_rows": len(raw_result.get("player_rows") or ()),
+                "team_rows": len(raw_result.get("team_rows") or ()),
+                "player_rank_rows": len(raw_result.get("player_rank_diffs") or ()),
+                "team_rank_rows": len(raw_result.get("team_rank_diffs") or ()),
+                "receipt_sha256": (
+                    receipt.get("receipt_sha256")
+                    if isinstance(receipt, Mapping)
+                    else None
+                ),
+            }
+        else:
+            receipt = None
+            output = {
+                "status": "declared_capability",
+                "blockers": [],
+                "player_rows": None,
+                "team_rows": None,
+                "player_rank_rows": None,
+                "team_rank_rows": None,
+                "receipt_sha256": None,
+            }
+        if isinstance(receipt, Mapping):
+            receipt_source = receipt.get("source")
+            if isinstance(receipt_source, Mapping) and receipt_source.get(
+                "source_receipt_sha256"
+            ) != source["source_receipt_sha256"]:
+                raise FutureValueSnapshotError(
+                    f"{name} capability result source binding changed"
+                )
+        variants[name] = {
+            "capability": capability,
+            "output": output,
+        }
+    manifest: dict[str, Any] = {
+        "schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+        "authority": dict(SNAPSHOT_AUTHORITY),
+        "source": source,
+        "variants": variants,
+        "capability_matrix": snapshot_capability_matrix(),
+    }
+    manifest["manifest_sha256"] = _sha256_bytes(_canonical_json_bytes(manifest))
+    return manifest
+
+
+# Keep the longer name available to callers that use the research namespace
+# wording in their pipeline manifests.
+build_future_value_snapshot_capability_manifest = build_snapshot_capability_manifest
+
+
+def _current_only_snapshot_result(
+    source_receipt: Mapping[str, Any],
+    *,
+    current_player_ratings: pd.DataFrame | None,
+    current_team_ratings: pd.DataFrame | None,
+    current_rating_inputs: Mapping[str, Any] | None,
+) -> FutureValueSnapshotResult:
+    """Build V1 by comparing each verified current table with itself."""
+
+    source = _source_binding(source_receipt)
+    _validate_current_rating_input_binding(current_rating_inputs, source)
+    player_frame = _current_rating_frame(current_player_ratings, kind="player")
+    team_frame = _current_rating_frame(current_team_ratings, kind="team")
+    player_rows = _current_snapshot_rows(player_frame, kind="player")
+    team_rows = _current_snapshot_rows(team_frame, kind="team")
+    player_rank_diffs, player_coverage = _current_self_rank_diffs(
+        player_rows,
+        player_frame,
+        identity="player_id",
+    )
+    team_rank_diffs, team_coverage = _current_self_rank_diffs(
+        team_rows,
+        team_frame,
+        identity="team_id",
+    )
+    capability = _capability_for_variant(RatingVariant.CURRENT_ONLY.value)
+    payload: dict[str, Any] = {
+        "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+        "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+        "status": "research_only",
+        "authority": dict(SNAPSHOT_AUTHORITY),
+        "variant": RatingVariant.CURRENT_ONLY.value,
+        "source": source,
+        "as_of": source["source_as_of"],
+        "model": {
+            "schema_version": MODEL_FIT_SCHEMA_VERSION,
+            "variant": RatingVariant.CURRENT_ONLY.value,
+            "receipt_sha256": None,
+            "status": "not_applicable",
+        },
+        "fit": {
+            "status": "not_applicable",
+            "authorized": False,
+            "blockers": [],
+            "model_receipt_sha256": None,
+            "source_receipt_sha256": source["source_receipt_sha256"],
+        },
+        "player_row_count": len(player_rows),
+        "team_row_count": len(team_rows),
+        "player_rank_diff_count": len(player_rank_diffs),
+        "team_rank_diff_count": len(team_rank_diffs),
+        "rank_coverage": {
+            "player": player_coverage,
+            "team": team_coverage,
+        },
+        "capability": capability,
+        "capabilities": snapshot_capability_matrix(),
+        "current_rating_inputs": dict(current_rating_inputs or {}),
+        "exact_five": {
+            "source_map_rows": True,
+            "source_player_rows": True,
+            "team_aggregation": "reused_verified_current_snapshot",
+        },
+        "blockers": [],
+        "tierlists": {"recalculated": False, "status": "unchanged"},
+    }
+    payload["receipt_sha256"] = _sha256_bytes(_canonical_json_bytes(payload))
+    return FutureValueSnapshotResult(
+        "research_only",
+        (),
+        tuple(player_rows),
+        tuple(team_rows),
+        tuple(player_rank_diffs),
+        tuple(team_rank_diffs),
+        payload,
+    )
 
 
 def _rank_diffs(
@@ -1477,12 +2098,17 @@ def _blocked_result(
     *,
     extra_blockers: Iterable[str] = (),
     current_rating_inputs: Mapping[str, Any] | None = None,
+    variant: RatingVariant | str | None = None,
 ) -> FutureValueSnapshotResult:
     blockers = tuple(sorted(set(authorization.blockers) | set(extra_blockers)))
+    variant_name = _snapshot_variant(variant)
+    capability = _capability_for_variant(variant_name)
     payload: dict[str, Any] = {
         "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+        "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
         "status": "blocked",
         "authority": dict(SNAPSHOT_AUTHORITY),
+        "variant": variant_name,
         "source": _source_binding(source),
         "fit": authorization.as_dict(),
         "as_of": source["source_as_of"],
@@ -1490,6 +2116,12 @@ def _blocked_result(
         "team_row_count": 0,
         "player_rank_diff_count": 0,
         "team_rank_diff_count": 0,
+        "capability": capability,
+        "capabilities": snapshot_capability_matrix(),
+        "rank_coverage": {
+            "player": {"status": "blocked", "variant": variant_name},
+            "team": {"status": "blocked", "variant": variant_name},
+        },
         "blockers": list(blockers),
         "tierlists": {"recalculated": False, "status": "unchanged"},
     }
@@ -1516,6 +2148,7 @@ def build_future_value_snapshots(
     baseline_cache: Any | None = None,
     support_calibration: Mapping[str, Any] | None = None,
     support_calibration_fold_id: Any | None = None,
+    variant: RatingVariant | str | None = None,
 ) -> FutureValueSnapshotResult:
     """Build one source-bound, research-only player/team snapshot.
 
@@ -1525,14 +2158,49 @@ def build_future_value_snapshots(
     """
 
     source = _source_binding(source_receipt)
+    _validate_current_rating_input_binding(current_rating_inputs, source)
     bound_model_receipt = _model_receipt_from(model, model_receipt)
+    variant_name = _snapshot_variant(variant)
+    if variant is None and isinstance(bound_model_receipt, Mapping):
+        declared_variant = bound_model_receipt.get("variant")
+        if declared_variant in SNAPSHOT_VARIANTS:
+            variant_name = str(declared_variant)
     _validate_model_object_binding(model, model_receipt)
-    auth = authorize_final_fit(bound_model_receipt, source_receipt)
     # Validate the source before the fit gate result is returned.  A blocked
     # model must not hide a malformed or future-dated accepted source.
     map_frame, player_frame, team_frame, cutoff = _normalise_source_frames(
         maps, players, teams, source_receipt, as_of
     )
+    if variant_name == RatingVariant.CURRENT_ONLY.value:
+        return _current_only_snapshot_result(
+            source_receipt,
+            current_player_ratings=current_player_ratings,
+            current_team_ratings=current_team_ratings,
+            current_rating_inputs=current_rating_inputs,
+        )
+    if variant_name == RatingVariant.SCALING_CURVE.value:
+        # A phase curve is a contextual map feature.  This endpoint has no
+        # opponent, lineup, side, or champion-state request, so it emits a
+        # typed N/A contract with no fabricated player or team ranks.
+        return _not_applicable_snapshot_result(
+            source_receipt,
+            variant=variant_name,
+            current_rating_inputs=current_rating_inputs,
+        )
+
+    auth = authorize_final_fit(bound_model_receipt, source_receipt)
+    declared_variant = (
+        str(bound_model_receipt.get("variant"))
+        if isinstance(bound_model_receipt, Mapping)
+        else None
+    )
+    if declared_variant and declared_variant != variant_name:
+        auth = FinalFitAuthorization(
+            auth.status,
+            tuple(sorted(set(auth.blockers) | {"snapshot_variant_model_receipt_mismatch"})),
+            auth.model_receipt_sha256,
+            auth.source_receipt_sha256,
+        )
     computation_blockers = _computation_blockers(auth)
     if computation_blockers:
         return _blocked_result(
@@ -1540,6 +2208,7 @@ def build_future_value_snapshots(
             auth,
             extra_blockers=computation_blockers,
             current_rating_inputs=current_rating_inputs,
+            variant=variant_name,
         )
     support_calibration_applied = False
     if support_calibration is not None:
@@ -1566,6 +2235,7 @@ def build_future_value_snapshots(
                 auth,
                 extra_blockers=("support_calibration_invalid", str(error)),
                 current_rating_inputs=current_rating_inputs,
+                variant=variant_name,
             )
     if model is None:
         return _blocked_result(
@@ -1573,6 +2243,7 @@ def build_future_value_snapshots(
             auth,
             extra_blockers=("final_fit_model_object_missing",),
             current_rating_inputs=current_rating_inputs,
+            variant=variant_name,
         )
 
     team_context_binding: dict[str, Any] | None = None
@@ -2008,6 +2679,84 @@ def build_future_value_snapshots(
                 if team_rank_coverage["status"] == "unavailable"
                 else "current_rating_unmatched"
             )
+
+    # The snapshot contract exposes only the form component for V2 and V4.
+    # Keep the older internal aliases above for downstream research readers,
+    # then rank the explicitly named component field.
+    _annotate_form_component_rows(player_rows, team_rows)
+    legacy_player_rank_coverage = dict(player_rank_coverage)
+    legacy_team_rank_coverage = dict(team_rank_coverage)
+    component_player_rank_diffs, component_player_rank_blockers, component_player_rank_coverage = _component_rank_diffs(
+        player_rows,
+        current_player_ratings,
+        identity="player_id",
+        value_field="future_player_form_component_logit",
+        current_value_candidates=("mu_effective", "mu_total", "rating"),
+        variant=variant_name,
+    )
+    component_team_rank_diffs, component_team_rank_blockers, component_team_rank_coverage = _component_rank_diffs(
+        team_rows,
+        current_team_ratings,
+        identity="team_id",
+        value_field="future_team_form_component_logit",
+        current_value_candidates=("mu_effective", "mu_total", "rating"),
+        variant=variant_name,
+    )
+    player_assignment_by_id = {
+        str(row["player_id"]): row for row in component_player_rank_diffs
+    }
+    team_assignment_by_id = {
+        str(row["team_id"]): row for row in component_team_rank_diffs
+    }
+    for row in player_rows:
+        assignment = player_assignment_by_id.get(str(row["player_id"]))
+        if assignment is not None:
+            row.update(
+                {
+                    key: assignment[key]
+                    for key in (
+                        "current_rank",
+                        "future_rank",
+                        "rank_delta",
+                        "rank_universe",
+                        "rank_comparability",
+                        "full_snapshot_rank_status",
+                    )
+                    if key in assignment
+                }
+            )
+            row["rank_join_status"] = "matched"
+    for row in team_rows:
+        assignment = team_assignment_by_id.get(str(row["team_id"]))
+        if assignment is not None:
+            row.update(
+                {
+                    key: assignment[key]
+                    for key in (
+                        "current_rank",
+                        "future_rank",
+                        "rank_delta",
+                        "rank_universe",
+                        "rank_comparability",
+                        "full_snapshot_rank_status",
+                    )
+                    if key in assignment
+                }
+            )
+            row["rank_join_status"] = "matched"
+    # Component rank coverage is the public shape for this research output.
+    # The legacy rank coverage is retained under an explicit diagnostic key.
+    player_rank_diffs = component_player_rank_diffs
+    team_rank_diffs = component_team_rank_diffs
+    player_rank_blockers = component_player_rank_blockers
+    team_rank_blockers = component_team_rank_blockers
+    player_rank_coverage = component_player_rank_coverage
+    team_rank_coverage = component_team_rank_coverage
+    scaling_blockers: tuple[str, ...] = (
+        (SCALING_CONTEXT_BLOCKER,)
+        if variant_name == RatingVariant.BOTH.value
+        else ()
+    )
     effective_auth_blockers = tuple(
         blocker
         for blocker in auth.blockers
@@ -2029,6 +2778,7 @@ def build_future_value_snapshots(
                     *team_blocker,
                     *player_rank_blockers,
                     *team_rank_blockers,
+                    *scaling_blockers,
                 )
             )
         )
@@ -2039,8 +2789,10 @@ def build_future_value_snapshots(
     }
     payload: dict[str, Any] = {
         "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+        "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
         "status": "research_only" if not blockers else "research_only_partial",
         "authority": dict(SNAPSHOT_AUTHORITY),
+        "variant": variant_name,
         "source": source,
         "as_of": _utc_text(cutoff),
         "model": {
@@ -2059,6 +2811,30 @@ def build_future_value_snapshots(
             "player": player_rank_coverage,
             "team": team_rank_coverage,
         },
+        "legacy_rank_coverage": {
+            "player": legacy_player_rank_coverage,
+            "team": legacy_team_rank_coverage,
+        },
+        "capability": _capability_for_variant(variant_name),
+        "capabilities": snapshot_capability_matrix(),
+        "exact_five": {
+            "source_map_rows": True,
+            "source_player_rows": True,
+            "team_aggregation": "verified_latest_exact_five",
+        },
+        "scaling_context": (
+            {
+                "status": "omitted",
+                "blocker": SCALING_CONTEXT_BLOCKER,
+                "required_context": list(SCALING_CONTEXT_FIELDS),
+                "reason": "scaling depends on champions, lineup, opponent, and side",
+            }
+            if variant_name == RatingVariant.BOTH.value
+            else {
+                "status": "not_applicable",
+                "required_context": list(SCALING_CONTEXT_FIELDS),
+            }
+        ),
         "rank_diff_extremes": rank_extremes,
         "team_context": {
             "status": (
@@ -2125,8 +2901,11 @@ def write_snapshot_bundle(destination: Path, result: FutureValueSnapshotResult) 
         if key in rows:
             payload = {
                 "schema_version": SCHEMA_VERSION,
+                "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
                 "status": result.status,
                 "authority": dict(SNAPSHOT_AUTHORITY),
+                "variant": result.receipt.get("variant"),
+                "capability": dict(result.receipt.get("capability") or {}),
                 "source_receipt_sha256": result.receipt["source"]["source_receipt_sha256"],
                 "rows": rows[key],
                 "blockers": list(result.blockers),
@@ -2149,8 +2928,12 @@ def write_snapshot_bundle(destination: Path, result: FutureValueSnapshotResult) 
         )
     manifest = {
         "schema_version": SCHEMA_VERSION,
+        "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
         "status": result.status,
         "authority": dict(SNAPSHOT_AUTHORITY),
+        "variant": result.receipt.get("variant"),
+        "capability": dict(result.receipt.get("capability") or {}),
+        "capability_matrix": snapshot_capability_matrix(),
         "source_receipt_sha256": result.receipt["source"]["source_receipt_sha256"],
         "team_context": dict(result.receipt.get("team_context") or {}),
         "files": {
@@ -2176,13 +2959,24 @@ __all__ = [
     "FinalFitAuthorization",
     "FutureValueSnapshotError",
     "FutureValueSnapshotResult",
+    "SNAPSHOT_CAPABILITY_MATRIX",
+    "SNAPSHOT_CAPABILITY_SCHEMA_VERSION",
     "SNAPSHOT_AUTHORITY",
+    "SNAPSHOT_VARIANTS",
     "SNAPSHOT_RECEIPT_SCHEMA_VERSION",
     "SCHEMA_VERSION",
+    "CURRENT_MU_EFFECTIVE_SCOPE",
+    "FORM_COMPONENT_SCOPE",
+    "SCALING_CONTEXT_BLOCKER",
+    "SCALING_CONTEXT_FIELDS",
+    "SCALING_CONTEXT_SCOPE",
     "TEAM_CONTEXT_BINDING_SCHEMA_VERSION",
     "TEAM_CONTEXT_MODEL_FEATURES",
     "authorize_final_fit",
     "build_future_value_snapshots",
+    "build_future_value_snapshot_capability_manifest",
+    "build_snapshot_capability_manifest",
     "load_final_fit_model",
+    "snapshot_capability_matrix",
     "write_snapshot_bundle",
 ]

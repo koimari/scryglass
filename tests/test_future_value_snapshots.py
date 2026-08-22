@@ -23,7 +23,11 @@ from lol_kills.research.future_value_rating import (
     build_strict_prior_player_form,
 )
 from lol_kills.research.future_value_snapshots import (
+    CURRENT_MU_EFFECTIVE_SCOPE,
+    FORM_COMPONENT_SCOPE,
+    SCALING_CONTEXT_BLOCKER,
     SNAPSHOT_AUTHORITY,
+    SNAPSHOT_CAPABILITY_MATRIX,
     SNAPSHOT_RECEIPT_SCHEMA_VERSION,
     TEAM_CONTEXT_BINDING_SCHEMA_VERSION,
     FutureValueSnapshotError,
@@ -31,7 +35,9 @@ from lol_kills.research.future_value_snapshots import (
     _latest_player_form,
     _player_contributions,
     authorize_final_fit,
+    build_snapshot_capability_manifest,
     build_future_value_snapshots,
+    snapshot_capability_matrix,
 )
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
@@ -153,6 +159,95 @@ def test_missing_final_fit_returns_exact_research_blocker() -> None:
         "betting": False,
     }
     assert result.receipt["receipt_sha256"]
+
+
+def test_snapshot_capability_matrix_is_closed_and_keeps_form_as_component() -> None:
+    matrix = snapshot_capability_matrix()
+    assert set(matrix) == {
+        "current_only",
+        "future_player_form",
+        "scaling_curve",
+        "both",
+    }
+    assert SNAPSHOT_CAPABILITY_MATRIX == matrix
+    assert matrix["current_only"]["player"]["scope"] == CURRENT_MU_EFFECTIVE_SCOPE
+    assert matrix["future_player_form"]["player"]["scope"] == FORM_COMPONENT_SCOPE
+    assert matrix["future_player_form"]["player"]["full_composite_rating"] is False
+    assert matrix["both"]["player"]["scope"] == FORM_COMPONENT_SCOPE
+    assert matrix["both"]["scaling_context"]["status"] == "omitted"
+    assert matrix["both"]["scaling_context"]["blocker"] == SCALING_CONTEXT_BLOCKER
+
+
+def test_current_only_reuses_mu_effective_and_self_diff_is_exact_zero() -> None:
+    maps, players, teams = _rows(2)
+    source = _source_receipt(["g1", "g2"])
+    current_players = pd.DataFrame(
+        {
+            "player": ["P1", "P0"],
+            "player_id": ["oe:player:p1", "oe:player:p0"],
+            "team_id": ["oe:team:red", "oe:team:blue"],
+            "mu_effective": [1.0, 2.0],
+        }
+    )
+    current_teams = pd.DataFrame(
+        {
+            "team": ["Red", "Blue"],
+            "team_id": ["oe:team:red", "oe:team:blue"],
+            "mu_effective": [1.0, 2.0],
+        }
+    )
+    result = build_future_value_snapshots(
+        maps,
+        players,
+        teams,
+        source_receipt=source,
+        current_player_ratings=current_players,
+        current_team_ratings=current_teams,
+        variant="current_only",
+    )
+    assert result.status == "research_only"
+    assert [row["player_id"] for row in result.player_rows] == [
+        "oe:player:p0",
+        "oe:player:p1",
+    ]
+    assert all(row["rating_scope"] == CURRENT_MU_EFFECTIVE_SCOPE for row in result.player_rows)
+    assert all(row["rank_delta"] == 0 for row in result.player_rank_diffs)
+    assert all(row["self_diff"] == "exact_zero" for row in result.team_rank_diffs)
+    assert result.receipt["source"]["source_receipt_sha256"] == source["receipt_sha256"]
+    assert result.receipt["authority"]["public_player_rating"] is False
+
+
+def test_scaling_curve_snapshot_is_typed_not_applicable_without_context() -> None:
+    maps, players, teams = _rows(2)
+    result = build_future_value_snapshots(
+        maps,
+        players,
+        teams,
+        source_receipt=_source_receipt(["g1", "g2"]),
+        variant="scaling_curve",
+    )
+    assert result.status == "research_only"
+    assert result.player_rows == ()
+    assert result.team_rows == ()
+    assert result.player_rank_diffs == ()
+    assert result.team_rank_diffs == ()
+    assert result.receipt["rank_coverage"]["player"]["status"] == "not_applicable"
+    assert result.receipt["rank_coverage"]["player"]["row_policy"] == "no_rows"
+    assert result.receipt["capability"]["player"]["status"] == "not_applicable"
+    assert result.receipt["authority"]["public_team_rating"] is False
+
+
+def test_capability_manifest_records_all_variants_and_source_binding() -> None:
+    source = _source_receipt(["g1", "g2"])
+    manifest = build_snapshot_capability_manifest(source)
+    assert set(manifest["variants"]) == {
+        "current_only",
+        "future_player_form",
+        "scaling_curve",
+        "both",
+    }
+    assert manifest["source"]["source_receipt_sha256"] == source["receipt_sha256"]
+    assert all(value is False for key, value in manifest["authority"].items() if key != "research_only")
 
 
 def test_final_fit_gate_rejects_fold_receipt_without_current_ledger() -> None:
@@ -277,9 +372,48 @@ def test_team_value_requires_exact_five_players_and_preserves_champion_split() -
         for row in result.player_rows
         if not row["model_feature_missing"]
     )
+    assert all(
+        row["rating_scope"] == FORM_COMPONENT_SCOPE
+        and row["full_composite_rating"] is False
+        for row in result.player_rows
+    )
+    assert all(row["rating_scope"] == FORM_COMPONENT_SCOPE for row in result.team_rows)
     assert any(row["status"] == "research_only_missing_features" for row in result.player_rows)
     assert all(row["team_context_logit"] is None for row in result.team_rows)
     assert "team_context_not_in_final_model" in result.blockers
+
+    both_receipt = dict(receipt)
+    both_receipt["variant"] = "both"
+    both_receipt.pop("receipt_sha256", None)
+    both_receipt["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(both_receipt)
+    ).hexdigest()
+    both_model = SimpleNamespace(
+        feature_names=model.feature_names,
+        scales=model.scales,
+        coefficients=model.coefficients,
+        imputation_values=model.imputation_values,
+        atom_model=model.atom_model,
+        receipt=lambda: both_receipt,
+    )
+    both = build_future_value_snapshots(
+        maps,
+        players,
+        teams,
+        source_receipt=source,
+        model=both_model,
+        model_receipt=both_receipt,
+        current_player_ratings=pd.DataFrame(
+            {"player_id": [f"oe:player:p{i}" for i in range(10)], "mu_total": list(range(10))}
+        ),
+        current_team_ratings=pd.DataFrame(
+            {"team_id": ["oe:team:blue", "oe:team:red"], "mu_total": [1.0, 0.0]}
+        ),
+        variant="both",
+    )
+    assert both.receipt["scaling_context"]["status"] == "omitted"
+    assert SCALING_CONTEXT_BLOCKER in both.blockers
+    assert all(row["rating_scope"] == FORM_COMPONENT_SCOPE for row in both.player_rows)
 
 
 def test_team_context_binding_requires_source_and_parameter_proof() -> None:

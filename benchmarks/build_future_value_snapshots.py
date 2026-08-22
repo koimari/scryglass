@@ -21,6 +21,7 @@ from lol_kills.research.future_value_rating import (
     validate_future_value_source_receipt_payload,
 )
 from lol_kills.research.future_value_snapshots import (
+    SNAPSHOT_VARIANTS,
     FutureValueSnapshotError,
     build_future_value_snapshots,
     load_final_fit_model,
@@ -370,6 +371,12 @@ def main() -> int:
     )
     parser.add_argument("--model-receipt", type=Path)
     parser.add_argument("--model-artifact", type=Path)
+    parser.add_argument(
+        "--variant",
+        choices=SNAPSHOT_VARIANTS,
+        default="future_player_form",
+        help="snapshot capability to emit; defaults to the future form component",
+    )
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
@@ -424,17 +431,20 @@ def main() -> int:
         current_player_ratings=current_player,
         current_team_ratings=current_team,
         current_rating_inputs=current_rating_inputs,
+        variant=args.variant,
     )
     manifest = write_snapshot_bundle(args.output_root.resolve(), result)
     print(
         json.dumps(
             {
                 "status": result.status,
+                "variant": args.variant,
                 "blockers": list(result.blockers),
                 "player_rows": len(result.player_rows),
                 "team_rows": len(result.team_rows),
                 "rank_coverage": result.receipt.get("rank_coverage", {}),
                 "team_context": result.receipt.get("team_context", {}),
+                "capability": result.receipt.get("capability", {}),
                 "rank_diff_extremes": result.receipt.get("rank_diff_extremes", {}),
                 "manifest_sha256": manifest["manifest_sha256"],
                 "output_root": str(args.output_root.resolve()),
