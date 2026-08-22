@@ -93,7 +93,7 @@ def _row(
         "rank": rank,
         "tier_bucket": tier,
         "tier_value_pp": float(rank),
-        "strength_score": float(rank) / 10.0,
+        "strength_score": 1.0 - float(rank) / 10.0,
         "strength_sd_logit": 0.1,
         "rating": 1500.0 - rank,
         "played_maps": 2,
@@ -649,4 +649,31 @@ def test_fourway_full_census_rejects_missing_or_extra_candidate_rows(
     inputs["expected_variant_candidate_sha256"]["both"] = sha256_path(path)
 
     with pytest.raises(FullCensusTierDiffError, match="manifest candidate bytes changed"):
+        build_full_census_fourway_diff(**inputs)
+
+
+def test_fourway_rejects_resealed_rank_mutation_against_strength_order(
+    tmp_path: Path,
+) -> None:
+    inputs = _fourway_fixture(tmp_path)
+    candidate_path = Path(inputs["variant_candidate_paths"]["current_only"])
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate["cells"][0]["rows"][0]["champion"] = "Irelia"
+    candidate["cells"][0]["rows"][0]["rank"] = 138
+    candidate = _seal(candidate, "artifact_sha256")
+    candidate_hash = _write_json(candidate_path, candidate)
+    inputs["expected_variant_candidate_sha256"]["current_only"] = candidate_hash
+
+    manifest_path = Path(inputs["fourway_candidate_manifest_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record = manifest["variants"]["current_only"]
+    record["candidate"]["bytes"] = candidate_path.stat().st_size
+    record["candidate"]["raw_sha256"] = candidate_hash
+    record["candidate"]["artifact_sha256"] = candidate["artifact_sha256"]
+    record["validation"]["artifact_sha256"] = candidate["artifact_sha256"]
+    manifest = _seal(manifest, "manifest_sha256")
+    manifest_hash = _write_json(manifest_path, manifest)
+    inputs["expected_fourway_candidate_manifest_sha256"] = manifest_hash
+
+    with pytest.raises(FullCensusTierDiffError, match="rank ordering changed"):
         build_full_census_fourway_diff(**inputs)

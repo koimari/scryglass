@@ -354,6 +354,113 @@ def _verify_fourway_manifest_variant(
     }
 
 
+def _normalized_champion(value: object) -> str:
+    return "".join(
+        character for character in str(value).strip().casefold() if character.isalnum()
+    )
+
+
+def _verify_candidate_rank_ordering(
+    candidate: Mapping[str, Any],
+    *,
+    label: str,
+) -> None:
+    cells = candidate.get("cells")
+    if not isinstance(cells, list):
+        raise FullCensusTierDiffError(f"{label} cells are missing")
+    for cell_index, cell in enumerate(cells):
+        if not isinstance(cell, Mapping):
+            raise FullCensusTierDiffError(f"{label} cell {cell_index} is invalid")
+        cell_label = f"{label} cell {cell_index}"
+        rows = cell.get("rows")
+        if not isinstance(rows, list) or not rows:
+            raise FullCensusTierDiffError(f"{cell_label} rows are missing")
+        global_rows: dict[str, Mapping[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise FullCensusTierDiffError(f"{cell_label} row is invalid")
+            champion_id = str(row.get("champion_id") or "").strip()
+            champion = str(row.get("champion") or champion_id).strip()
+            if not champion_id or not champion:
+                raise FullCensusTierDiffError(f"{cell_label} champion identity is missing")
+            try:
+                strength_score = float(row.get("strength_score"))
+            except (TypeError, ValueError) as error:
+                raise FullCensusTierDiffError(
+                    f"{cell_label} strength score is invalid"
+                ) from error
+            if not math.isfinite(strength_score):
+                raise FullCensusTierDiffError(f"{cell_label} strength score is non-finite")
+            if champion_id in global_rows:
+                raise FullCensusTierDiffError(f"{cell_label} champion identity is duplicate")
+            global_rows[champion_id] = row
+        expected_rows = sorted(
+            rows,
+            key=lambda row: (
+                -float(row["strength_score"]),
+                _normalized_champion(row.get("champion") or row.get("champion_id")),
+            ),
+        )
+        for expected_rank, row in enumerate(expected_rows, start=1):
+            if row.get("rank") != expected_rank:
+                champion = str(row.get("champion") or row.get("champion_id") or "")
+                raise FullCensusTierDiffError(
+                    f"{cell_label} rank ordering changed for {champion}"
+                )
+
+        regional_views = cell.get("regional_views", [])
+        if not isinstance(regional_views, list):
+            raise FullCensusTierDiffError(f"{cell_label} regional views are invalid")
+        for view_index, view in enumerate(regional_views):
+            if not isinstance(view, Mapping):
+                raise FullCensusTierDiffError(
+                    f"{cell_label} regional view {view_index} is invalid"
+                )
+            regional_rows = view.get("rows")
+            if not isinstance(regional_rows, list) or not regional_rows:
+                raise FullCensusTierDiffError(
+                    f"{cell_label} regional view {view_index} rows are missing"
+                )
+            regional_label = f"{cell_label} regional view {view_index}"
+            for row in regional_rows:
+                if not isinstance(row, Mapping):
+                    raise FullCensusTierDiffError(f"{regional_label} row is invalid")
+                champion_id = str(row.get("champion_id") or "").strip()
+                if champion_id not in global_rows:
+                    raise FullCensusTierDiffError(
+                        f"{regional_label} champion is outside the global cell"
+                    )
+                try:
+                    strength_score_pp = float(row.get("strength_score_pp"))
+                    played_maps = int(row.get("played_maps"))
+                except (TypeError, ValueError) as error:
+                    raise FullCensusTierDiffError(
+                        f"{regional_label} rank inputs are invalid"
+                    ) from error
+                if not math.isfinite(strength_score_pp) or played_maps < 0:
+                    raise FullCensusTierDiffError(
+                        f"{regional_label} rank inputs are invalid"
+                    )
+                if row.get("global_rank") != global_rows[champion_id].get("rank"):
+                    raise FullCensusTierDiffError(
+                        f"{regional_label} global rank changed for {champion_id}"
+                    )
+            expected_regional_rows = sorted(
+                regional_rows,
+                key=lambda row: (
+                    -float(row["strength_score_pp"]),
+                    -int(row["played_maps"]),
+                    _normalized_champion(row.get("champion") or row.get("champion_id")),
+                ),
+            )
+            for expected_rank, row in enumerate(expected_regional_rows, start=1):
+                if row.get("regional_rank") != expected_rank:
+                    champion = str(row.get("champion") or row.get("champion_id") or "")
+                    raise FullCensusTierDiffError(
+                        f"{regional_label} rank ordering changed for {champion}"
+                    )
+
+
 def _verify_candidate(
     candidate: Mapping[str, Any],
     *,
@@ -394,6 +501,7 @@ def _verify_candidate(
         raise FullCensusTierDiffError(f"{label} source identity changed")
     if source.get("source_latest_replayed") != expected_source_as_of:
         raise FullCensusTierDiffError(f"{label} source cutoff changed")
+    _verify_candidate_rank_ordering(candidate, label=label)
     try:
         rows = _candidate_rows(candidate)
     except FutureValueTierListError as error:
