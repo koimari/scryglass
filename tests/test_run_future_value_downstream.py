@@ -70,6 +70,42 @@ def test_variant_choice_is_explicit_and_closed() -> None:
         )
 
 
+def test_source_records_resolve_from_explicit_source_root(tmp_path: Path) -> None:
+    source_root = tmp_path / "freeze" / "source"
+    receipt_path = tmp_path / "run" / "future-value-source-receipt.json"
+    source_root.mkdir(parents=True)
+    receipt_path.parent.mkdir(parents=True)
+    records: dict[str, dict[str, object]] = {}
+    for label, name in {
+        "maps": "maps.parquet",
+        "players": "oe_player_games.parquet",
+        "teams": "oe_team_games.parquet",
+    }.items():
+        path = source_root / name
+        path.write_bytes(f"{label}-source".encode("ascii"))
+        records[label] = {
+            "locator": name,
+            "bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        # A same-named file beside the receipt must not be selected.
+        (receipt_path.parent / name).write_bytes(b"receipt-parent-decoy")
+
+    downstream._source_paths_from_receipt(
+        source_root,
+        receipt_path,
+        {"source_files": records},
+    )
+
+    (source_root / "maps.parquet").write_bytes(b"mutated-source")
+    with pytest.raises(downstream.DownstreamRunError, match="file hash changed"):
+        downstream._source_paths_from_receipt(source_root, receipt_path, {"source_files": records})
+
+    records["maps"]["locator"] = "../maps.parquet"
+    with pytest.raises(downstream.DownstreamRunError, match="locator is unsafe"):
+        downstream._source_paths_from_receipt(source_root, receipt_path, {"source_files": records})
+
+
 def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = _config(tmp_path)
     stages = downstream.build_stage_plan(config, _inputs(tmp_path))

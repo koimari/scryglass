@@ -370,22 +370,35 @@ def _source_paths_from_receipt(
     if not isinstance(records, Mapping):
         raise DownstreamRunError("source receipt file bindings are missing")
     expected_names = {"maps": "maps.parquet", "players": "oe_player_games.parquet", "teams": "oe_team_games.parquet"}
-    receipt_parent = source_receipt_path.parent.resolve()
+    source_root = Path(source_root).expanduser()
+    if source_root.is_symlink() or not source_root.is_dir():
+        raise DownstreamRunError(f"source root is missing or unsafe: {source_root}")
     source_root = source_root.resolve()
     for label, name in expected_names.items():
         record = records.get(label)
         if not isinstance(record, Mapping):
             raise DownstreamRunError(f"source receipt binding is missing: {label}")
-        locator = record.get("locator")
-        if isinstance(locator, str) and locator.strip():
-            rel = Path(locator)
-            if rel.is_absolute() or ".." in rel.parts:
-                raise DownstreamRunError(f"source receipt locator is unsafe: {label}")
-            bound = (receipt_parent / rel).resolve()
-        else:
-            bound = Path(str(record.get("path") or "")).expanduser().resolve()
-        path = (source_root / name).resolve()
-        if bound != path or path.is_symlink() or not path.is_file():
+        # Source locators are relative to the explicit source root.  The
+        # receipt can live in a separate run directory, so its parent is not
+        # a source-data root.
+        locator = record.get("locator") or record.get("path")
+        if not isinstance(locator, str) or not locator.strip():
+            raise DownstreamRunError(f"source receipt locator is missing: {label}")
+        relative = Path(locator)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise DownstreamRunError(f"source receipt locator is unsafe: {label}")
+        candidate = source_root / relative
+        if candidate.is_symlink() or not candidate.is_file():
+            raise DownstreamRunError(f"source {label} file does not match source root")
+        path = candidate.resolve()
+        try:
+            path.relative_to(source_root)
+        except ValueError as error:
+            raise DownstreamRunError(
+                f"source receipt locator escapes source root: {label}"
+            ) from error
+        expected_path = (source_root / name).resolve()
+        if path != expected_path:
             raise DownstreamRunError(f"source {label} file does not match source root")
         if int(record.get("bytes", -1)) != path.stat().st_size or str(record.get("sha256") or "").lower() != _sha256_path(path):
             raise DownstreamRunError(f"source {label} file hash changed")
