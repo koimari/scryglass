@@ -567,12 +567,49 @@ def _source_binding(
         ids = tuple(str(row.get("game_id") or "") for row in ledger["rows"] if isinstance(row, Mapping))
         if not ids or any(not value for value in ids) or len(set(ids)) != len(ids):
             raise DownstreamRunError(f"fourway {variant} prediction ledger identities are invalid")
-        if tuple(sorted(ids)) != eligible:
-            raise DownstreamRunError(
-                f"fourway {variant} prediction ledger identity differs from eligible census"
-            )
+        if ledger.get("row_count") != len(ids):
+            raise DownstreamRunError(f"fourway {variant} prediction ledger count changed")
         if ledger.get("game_identity_sha256") != identity_sha256(ids):
             raise DownstreamRunError(f"fourway {variant} prediction ledger identity changed")
+        if not set(ids).issubset(set(eligible)):
+            raise DownstreamRunError(
+                f"fourway {variant} prediction ledger contains IDs outside eligible census"
+            )
+        fold_ids: list[set[str]] = []
+        folds = payload.get("folds")
+        if not isinstance(folds, list) or not folds:
+            raise DownstreamRunError(f"fourway {variant} evaluation folds are missing")
+        for fold in folds:
+            if not isinstance(fold, Mapping):
+                raise DownstreamRunError(f"fourway {variant} evaluation fold is invalid")
+            raw_fold_ids = fold.get("paired_game_ids")
+            if not isinstance(raw_fold_ids, list) or not raw_fold_ids:
+                raise DownstreamRunError(f"fourway {variant} evaluation fold IDs are missing")
+            fold_values = [str(value) for value in raw_fold_ids]
+            if any(not value for value in fold_values) or len(set(fold_values)) != len(fold_values):
+                raise DownstreamRunError(f"fourway {variant} evaluation fold IDs are invalid")
+            if fold.get("paired_game_id_count") != len(fold_values):
+                raise DownstreamRunError(f"fourway {variant} evaluation fold count changed")
+            if fold.get("paired_game_identity_sha256") not in {None, identity_sha256(fold_values)}:
+                raise DownstreamRunError(f"fourway {variant} evaluation fold identity changed")
+            if not set(fold_values).issubset(set(eligible)):
+                raise DownstreamRunError(f"fourway {variant} evaluation fold exceeds eligible census")
+            fold_ids.append(set(fold_values))
+        if any(left & right for index, left in enumerate(fold_ids) for right in fold_ids[index + 1:]):
+            raise DownstreamRunError(f"fourway {variant} evaluation folds overlap")
+        if set().union(*fold_ids) != set(ids):
+            raise DownstreamRunError(
+                f"fourway {variant} prediction ledger differs from evaluation folds"
+            )
+        runtime_output = runtime_value.get("output")
+        if not isinstance(runtime_output, Mapping):
+            raise DownstreamRunError(f"fourway {variant} runtime ledger binding is missing")
+        runtime_rows = runtime_output.get("prediction_ledger_rows")
+        runtime_hashes = runtime_output.get("prediction_ledger_sha256")
+        if not isinstance(runtime_rows, Mapping) or runtime_rows.get(variant) != len(ids):
+            raise DownstreamRunError(f"fourway {variant} runtime ledger count changed")
+        if not isinstance(runtime_hashes, Mapping) or runtime_hashes.get(variant) != ledger.get("sha256"):
+            raise DownstreamRunError(f"fourway {variant} runtime ledger hash changed")
         eval_paths[variant] = path
         runtime_paths[variant] = runtime
 
