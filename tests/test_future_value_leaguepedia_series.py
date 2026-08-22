@@ -67,10 +67,13 @@ def _write_crosswalk(
 ) -> tuple[str, str, str]:
     accepted = list(source["accepted_game_ids"])
     requested = {str(row["oe_game_id"]): row for row in assignments}
+    base_stamp = pd.Timestamp("2026-01-01T00:00:00Z")
     oe_rows = [
         {
             "gameid": game_id,
-            "date": f"2026-01-01T00:{index * 10:02d}:00Z",
+            "date": (base_stamp + pd.Timedelta(minutes=index * 10))
+            .isoformat()
+            .replace("+00:00", "Z"),
             "league": "LEC",
             "tournament": "Spring",
             "patch": "16.1",
@@ -88,7 +91,9 @@ def _write_crosswalk(
         series_id = str(requested_row["series_id"])
         order = series_orders.get(series_id, 0) + 1
         series_orders[series_id] = order
-        stamp = f"2026-01-01 00:{index * 10:02d}:00"
+        stamp = (base_stamp + pd.Timedelta(minutes=index * 10)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         scoreboard_rows.append(
             {
                 "GameId": f"{series_id}_{order}",

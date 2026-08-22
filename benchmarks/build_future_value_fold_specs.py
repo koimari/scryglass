@@ -56,6 +56,98 @@ def _sha256_path(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _accepted_map_frame(
+    maps: pd.DataFrame,
+    source_receipt: Mapping[str, Any],
+) -> pd.DataFrame:
+    """Return one map row for each accepted game and exclude declared extras."""
+
+    game_column = "game_uid" if "game_uid" in maps.columns else "game_id"
+    if game_column not in maps.columns:
+        raise FoldSpecError("maps have no game identity column")
+    game_ids = maps[game_column].astype("string").str.strip()
+    if game_ids.isna().any() or game_ids.eq("").any():
+        raise FoldSpecError("maps contain missing game identities")
+    accepted_ids = tuple(str(value) for value in source_receipt["accepted_game_ids"])
+    accepted_set = set(accepted_ids)
+    extra_binding = source_receipt.get("source_extra_game_ids")
+    declared_extras = {
+        str(value)
+        for value in (
+            extra_binding.get("maps", ())
+            if isinstance(extra_binding, Mapping)
+            else ()
+        )
+    }
+    physical_ids = set(game_ids.astype(str))
+    unknown = physical_ids - accepted_set - declared_extras
+    if unknown:
+        raise FoldSpecError("maps contain undeclared game identities")
+    missing = accepted_set - physical_ids
+    if missing:
+        raise FoldSpecError("maps are missing accepted game identities")
+    accepted_mask = game_ids.astype(str).isin(accepted_set)
+    accepted = maps.loc[accepted_mask].copy()
+    accepted_game_ids = accepted[game_column].astype("string").str.strip()
+    if accepted_game_ids.duplicated().any():
+        raise FoldSpecError("maps contain duplicate accepted game identities")
+    if set(accepted_game_ids.astype(str)) != accepted_set:
+        raise FoldSpecError("accepted map frame differs from source receipt")
+    return accepted.reset_index(drop=True)
+
+
+def _eligible_series_audit(model_frame: pd.DataFrame) -> dict[str, Any]:
+    """Scope crosswalk authority to the exact eligible model rows."""
+
+    audit = dict(model_frame.attrs.get("series_cluster_audit") or {})
+    required_hashes = (
+        "crosswalk_assignment_sha256",
+        "crosswalk_sha256",
+        "crosswalk_artifact_sha256",
+        "crosswalk_receipt_sha256",
+    )
+    if any(not str(audit.get(field) or "") for field in required_hashes):
+        raise FoldSpecError("series partition provenance is incomplete")
+    if "_series_crosswalk_mapped" not in model_frame.columns:
+        raise FoldSpecError("series partition has no exact crosswalk flags")
+    mapped = model_frame["_series_crosswalk_mapped"]
+    if not pd.api.types.is_bool_dtype(mapped.dtype) or mapped.isna().any():
+        raise FoldSpecError("series partition crosswalk flags are invalid")
+    series = model_frame["series_id"].astype("string").str.strip()
+    if series.isna().any() or series.eq("").any():
+        raise FoldSpecError("series partition assignments are incomplete")
+    exact = mapped.astype(bool) & series.str.startswith("leaguepedia:")
+    counts = series.value_counts(sort=False)
+    proxy_series = series.loc[~exact]
+    audit.update(
+        {
+            "scope": "model_eligible_census",
+            "map_count": int(len(model_frame)),
+            "mapped_game_count": int(exact.sum()),
+            "unmatched_game_count": int((~exact).sum()),
+            "mapped_series_count": int(series.loc[exact].nunique()),
+            "promoted_game_count": int(exact.sum()),
+            "promoted_series_count": int(series.loc[exact].nunique()),
+            "retained_proxy_game_count": int((~exact).sum()),
+            "retained_proxy_cluster_count": int(proxy_series.nunique()),
+            "partial_series_blocker": bool((~exact).any()),
+            "authoritative": bool(exact.all()),
+            "authoritative_series_blocker": (
+                None
+                if bool(exact.all())
+                else "authoritative_series_id_missing_proxy_cluster_used"
+            ),
+            "cluster_count": int(series.nunique()),
+            "colliding_cluster_count": int(counts.gt(1).sum()),
+            "collision_extra_map_count": int(
+                counts.loc[counts.gt(1)].sub(1).sum()
+            ),
+            "max_cluster_size": int(counts.max()),
+        }
+    )
+    return audit
+
+
 def build_fold_specs(
     *,
     maps: pd.DataFrame,
@@ -68,8 +160,9 @@ def build_fold_specs(
     """Build chronological folds from one verified mixed series partition."""
 
     validate_future_value_source_receipt_payload(source_receipt)
+    accepted_maps = _accepted_map_frame(maps, source_receipt)
     bound_maps = bind_verified_leaguepedia_series_crosswalk(
-        maps,
+        accepted_maps,
         crosswalk_path=crosswalk_path,
         receipt_path=crosswalk_receipt_path,
         source_receipt=source_receipt,
@@ -140,7 +233,7 @@ def build_fold_specs(
                 "overlap_audit": dict(raw["overlap_audit"]),
             }
         )
-    audit = dict(model_frame.attrs.get("series_cluster_audit") or {})
+    audit = _eligible_series_audit(model_frame)
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": "research_only",
