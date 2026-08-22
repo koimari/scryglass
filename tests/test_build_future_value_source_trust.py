@@ -16,6 +16,7 @@ from benchmarks.build_future_value_source_trust import (
     SourceTrustError,
     build_source_trust,
 )
+from benchmarks.rebuild_future_phase import verify_source_bundle
 from lol_kills.research.future_value_rating import validate_future_value_source_receipt_payload
 from lol_kills.research.future_value_training import _load_freeze
 from lol_kills.research.future_value_training import verify_research_source
@@ -88,6 +89,13 @@ def _source(tmp_path: Path) -> tuple[Path, dict[str, object]]:
         "gameid,date\nbridge-1,2026-08-20T10:00:00Z\nannual-1,2026-08-20T10:00:00Z\nannual-2,2026-08-20T10:00:00Z\n",
         encoding="utf-8",
     )
+    (raw / "2025_LoL_esports_match_data_from_OraclesElixir.csv").write_text(
+        "gameid,date\n",
+        encoding="utf-8",
+    )
+    (bridge / "oe_api_meta.json").write_text("{}\n", encoding="utf-8")
+    (bridge / "oe_api_player_games.parquet").write_bytes(b"bridge-player-fixture\n")
+    (bridge / "oe_api_team_games.parquet").write_bytes(b"bridge-team-fixture\n")
     audit = {
         "schema_version": "scryglass:duplicate-audit:v1",
         "assignments": [
@@ -229,6 +237,28 @@ def test_source_trust_round_trips_through_research_verifier(tmp_path: Path) -> N
         output_root=tmp_path / "verified",
     )
     assert verified["source_receipt_sha256"] == run["source_receipt_sha256"]
+
+
+def test_source_trust_receipt_round_trips_through_phase_bundle_verifier(tmp_path: Path) -> None:
+    root, values, _ = _make_fixture(tmp_path)
+    output = tmp_path / "out"
+    build_source_trust(
+        source_root=root,
+        output_root=output,
+        resolution_spec=values["spec"],
+        expected_unfiltered_count=3,
+        expected_accepted_count=2,
+    )
+    receipt, resolved = verify_source_bundle(
+        output / SOURCE_RECEIPT_FILE,
+        freeze_root=output,
+        source_root=root,
+    )
+    assert receipt["source_files"]["maps"]["locator"] == "maps.parquet"
+    assert receipt["source_files"]["accepted_census"]["locator"] == "accepted-census.json"
+    assert receipt["source_files"]["annual_2025"]["locator"].startswith("raw/")
+    assert receipt["source_files"]["bridge_oe_api_meta.json"]["locator"].startswith("bridge/")
+    assert resolved["maps"] == root / "maps.parquet"
 
 
 def test_source_trust_rejects_changed_audit_receipt(tmp_path: Path) -> None:

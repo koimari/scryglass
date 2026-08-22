@@ -942,19 +942,46 @@ def build_source_trust(
     census_path = out / CENSUS_FILE
     census_bytes = _write_json(census_path, accepted)
     census_record = _file_record(census_path, "accepted census")
-    source_files: dict[str, dict[str, Any]] = {
+    absolute_source_files: dict[str, dict[str, Any]] = {
         "maps": _file_record(paths["maps"], "source maps"),
         "players": _file_record(paths["players"], "source players"),
         "teams": _file_record(paths["teams"], "source teams"),
         "accepted_census": census_record,
     }
     for record in annual_records:
-        source_files[f"annual_{record['year']}"] = {
+        absolute_source_files[f"annual_{record['year']}"] = {
             key: value for key, value in record.items() if key in {"path", "bytes", "sha256", "year"}
         }
     for record in bridge_records:
-        source_files[f"bridge_{record['name']}"] = {
+        absolute_source_files[f"bridge_{record['name']}"] = {
             key: value for key, value in record.items() if key in {"path", "bytes", "sha256"}
+        }
+
+    receipt_source_files: dict[str, dict[str, Any]] = {
+        label: {
+            "locator": locator,
+            "bytes": record["bytes"],
+            "sha256": record["sha256"],
+        }
+        for label, locator, record in (
+            ("maps", "maps.parquet", absolute_source_files["maps"]),
+            ("players", "oe_player_games.parquet", absolute_source_files["players"]),
+            ("teams", "oe_team_games.parquet", absolute_source_files["teams"]),
+            ("accepted_census", CENSUS_FILE, absolute_source_files["accepted_census"]),
+        )
+    }
+    for record in annual_records:
+        receipt_source_files[f"annual_{record['year']}"] = {
+            "locator": f"raw/{record['name']}",
+            "bytes": record["bytes"],
+            "sha256": record["sha256"],
+            "year": record["year"],
+        }
+    for record in bridge_records:
+        receipt_source_files[f"bridge_{record['name']}"] = {
+            "locator": f"bridge/{record['name']}",
+            "bytes": record["bytes"],
+            "sha256": record["sha256"],
         }
 
     try:
@@ -964,7 +991,7 @@ def build_source_trust(
             teams,
             census=accepted,
             source_as_of=cutoff,
-            source_files=source_files,
+            source_files=receipt_source_files,
         )
         validate_future_value_source_receipt_payload(source.receipt)
     except (FutureValueSourceError, ValueError) as error:
@@ -1020,9 +1047,10 @@ def build_source_trust(
             "game_ids": list(source.receipt["model_eligible_game_ids"]),
         },
         "normalized_source_files": {
-            label: source_files[label] for label in ("maps", "players", "teams")
+            label: absolute_source_files[label] for label in ("maps", "players", "teams")
         },
-        "source_file_records": dict(source_files),
+        "source_file_records": dict(absolute_source_files),
+        "source_receipt_file_records": dict(receipt_source_files),
         "oe_annual_sources": [
             {
                 "name": record["name"],
@@ -1126,7 +1154,8 @@ def build_source_trust(
         "resolution_spec": resolution_spec_record,
         "freeze": {**freeze_record, "payload_sha256": freeze_hash},
         "accepted_census": {**census_record, "payload_sha256": census_record["sha256"]},
-        "normalized_source_files": source_files,
+        "normalized_source_files": absolute_source_files,
+        "source_receipt_file_records": receipt_source_files,
         "annual_sources": annual_records,
         "bridge_sources": bridge_records,
         "source_records": {"oe": map_record},

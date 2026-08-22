@@ -956,7 +956,7 @@ def _source_file_records(
 
 
 def _verified_v2_source_file_records(freeze: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    """Read the absolute source-file bindings carried by a v2 freeze."""
+    """Verify absolute v2 bindings and return the safe receipt locators."""
 
     raw_records = freeze.get("source_file_records")
     if not isinstance(raw_records, Mapping):
@@ -964,7 +964,7 @@ def _verified_v2_source_file_records(freeze: Mapping[str, Any]) -> dict[str, dic
     required = {"maps", "players", "teams", "accepted_census"}
     if not required.issubset(raw_records):
         raise FutureValueTrainingError("v2 source freeze file records are incomplete")
-    records: dict[str, dict[str, Any]] = {}
+    absolute: dict[str, dict[str, Any]] = {}
     for label, record in raw_records.items():
         if not isinstance(label, str) or not label.strip():
             raise FutureValueTrainingError("v2 source freeze file label is invalid")
@@ -976,7 +976,7 @@ def _verified_v2_source_file_records(freeze: Mapping[str, Any]) -> dict[str, dic
         )
         if "year" in record:
             normalized["year"] = record["year"]
-        records[label] = normalized
+        absolute[label] = normalized
     accepted_record = freeze.get("accepted_census_file")
     if not isinstance(accepted_record, Mapping):
         raise FutureValueTrainingError("v2 accepted census file binding is missing")
@@ -984,12 +984,45 @@ def _verified_v2_source_file_records(freeze: Mapping[str, Any]) -> dict[str, dic
         accepted_record,
         label="v2 accepted census file",
     )
-    declared = records.get("accepted_census")
+    declared = absolute.get("accepted_census")
     if declared is None or declared != accepted_normalized:
         raise FutureValueTrainingError("v2 accepted census file binding changed")
     if not accepted_path.is_file():
         raise FutureValueTrainingError("v2 accepted census file is missing")
-    return records
+
+    raw_receipt_records = freeze.get("source_receipt_file_records")
+    if not isinstance(raw_receipt_records, Mapping):
+        raise FutureValueTrainingError("v2 source receipt file records are missing")
+    if set(raw_receipt_records) != set(absolute):
+        raise FutureValueTrainingError("v2 source receipt file records are incomplete")
+    receipt_records: dict[str, dict[str, Any]] = {}
+    for label, record in raw_receipt_records.items():
+        if not isinstance(record, Mapping):
+            raise FutureValueTrainingError(f"v2 source receipt file record is invalid: {label}")
+        locator = record.get("locator")
+        if (
+            not isinstance(locator, str)
+            or not locator.strip()
+            or Path(locator).is_absolute()
+            or ".." in Path(locator).parts
+        ):
+            raise FutureValueTrainingError(f"v2 source receipt locator is unsafe: {label}")
+        expected = absolute[label]
+        if (
+            record.get("bytes") != expected["bytes"]
+            or str(record.get("sha256") or "").lower() != expected["sha256"]
+            or ("year" in record and record.get("year") != expected.get("year"))
+        ):
+            raise FutureValueTrainingError(f"v2 source receipt file binding changed: {label}")
+        normalized = {
+            "locator": locator,
+            "bytes": expected["bytes"],
+            "sha256": expected["sha256"],
+        }
+        if "year" in expected:
+            normalized["year"] = expected["year"]
+        receipt_records[label] = normalized
+    return receipt_records
 
 
 def _write_json(path: Path, value: Mapping[str, Any]) -> None:
