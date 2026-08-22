@@ -15,6 +15,7 @@ from benchmarks.future_value_draft_score_fourway import (
     FourWayDraftScoreError,
     VARIANTS,
     _canonical_bytes,
+    _fold_census_audit,
     _fit_zero_intercept,
     _fit_zero_intercept_log_loss,
     _load_current,
@@ -78,6 +79,9 @@ def _source(tmp_path: Path, game_ids: list[str]) -> tuple[Path, Path]:
         "source_game_count": len(game_ids),
         "source_identity_sha256": identity_sha256(game_ids),
         "accepted_game_ids": game_ids,
+        "model_eligible_game_count": len(game_ids),
+        "model_eligible_game_ids": game_ids,
+        "model_eligible_identity_sha256": identity_sha256(game_ids),
         "source_files": {
             "maps": {"bytes": len(maps_raw), "sha256": hashlib.sha256(maps_raw).hexdigest()},
             "players": {"bytes": len(players_raw), "sha256": hashlib.sha256(players_raw).hexdigest()},
@@ -565,6 +569,55 @@ def test_regularized_log_loss_rejects_non_binary_targets() -> None:
         )
 
 
+def test_fold_census_audit_records_boundary_exclusions() -> None:
+    eligible = ["g1", "g2", "g3", "g4"]
+    source = {
+        "model_eligible_game_count": len(eligible),
+        "model_eligible_game_ids": eligible,
+        "model_eligible_identity_sha256": identity_sha256(eligible),
+    }
+    audit = _fold_census_audit(
+        source,
+        {
+            1: (("g1", "g2"), ("g3",)),
+            2: (("g1", "g2"), ("g3",)),
+            3: (("g1",), ("g2",)),
+        },
+    )
+    assert audit["model_eligible_game_count"] == 4
+    assert audit["model_eligible_identity_sha256"] == identity_sha256(eligible)
+    assert audit["assigned_fold_game_count"] == 3
+    assert audit["assigned_fold_game_identity_sha256"] == identity_sha256(
+        ["g1", "g2", "g3"]
+    )
+    assert audit["boundary_excluded_game_count"] == 1
+    assert audit["boundary_excluded_game_ids"] == ["g4"]
+    assert audit["boundary_excluded_game_identity_sha256"] == identity_sha256(["g4"])
+
+
+def test_fold_census_audit_rejects_ids_outside_eligible_census() -> None:
+    eligible = ["g1", "g2"]
+    source = {
+        "model_eligible_game_count": len(eligible),
+        "model_eligible_game_ids": eligible,
+        "model_eligible_identity_sha256": identity_sha256(eligible),
+    }
+    with pytest.raises(FourWayDraftScoreError, match="outside the exact eligible census"):
+        _fold_census_audit(source, {1: (("g1", "g3"), ("g2",))})
+
+
+def test_source_receipt_rejects_mutated_model_eligible_identity(tmp_path: Path) -> None:
+    source_path, _ = _source(tmp_path, ["g1", "g2"])
+    source = json.loads(source_path.read_text())
+    source["model_eligible_game_ids"] = ["g1"]
+    source["model_eligible_game_count"] = 1
+    source.pop("receipt_sha256")
+    source["receipt_sha256"] = hashlib.sha256(_canonical(source)).hexdigest()
+    file_hash = _write_json(source_path, source)
+    with pytest.raises(FourWayDraftScoreError, match="model eligible identity"):
+        _load_source(source_path, expected_file_sha256=file_hash)
+
+
 def test_fourway_evaluation_fits_all_variants_on_complete_fixture(tmp_path: Path) -> None:
     game_ids = [f"g{i}" for i in range(1, 7)]
     source_path, source_root = _source(tmp_path, game_ids)
@@ -590,6 +643,10 @@ def test_fourway_evaluation_fits_all_variants_on_complete_fixture(tmp_path: Path
     )
     assert report["status"] == "research_only"
     assert report["coverage"]["descriptive_subset_game_count"] == 6
+    assert report["source"]["model_eligible_game_count"] == 6
+    assert report["coverage"]["assigned_fold_game_count"] == 6
+    assert report["coverage"]["boundary_excluded_game_count"] == 0
+    assert report["coverage"]["boundary_excluded_game_ids"] == []
     assert not report["blockers"]
     bootstrap = report["paired_bootstrap"]
     assert bootstrap["status"] == "evaluated"

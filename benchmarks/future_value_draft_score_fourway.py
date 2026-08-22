@@ -170,6 +170,9 @@ def _load_source(
         "source_game_count",
         "source_identity_sha256",
         "accepted_game_ids",
+        "model_eligible_game_count",
+        "model_eligible_game_ids",
+        "model_eligible_identity_sha256",
         "receipt_sha256",
     }
     if not required.issubset(source):
@@ -187,6 +190,21 @@ def _load_source(
     _require_hash(source["source_identity_sha256"], "source identity")
     if str(source["source_identity_sha256"]).lower() != identity_sha256(accepted):
         raise FourWayDraftScoreError("source receipt identity does not match accepted IDs")
+    eligible_values = source["model_eligible_game_ids"]
+    if not isinstance(eligible_values, list):
+        raise FourWayDraftScoreError("source model eligible IDs are invalid")
+    eligible = tuple(str(value) for value in eligible_values)
+    if not eligible or len(set(eligible)) != len(eligible):
+        raise FourWayDraftScoreError("source model eligible IDs are invalid")
+    if not set(eligible).issubset(set(accepted)):
+        raise FourWayDraftScoreError("source model eligible IDs are outside accepted IDs")
+    if int(source["model_eligible_game_count"]) != len(eligible):
+        raise FourWayDraftScoreError("source model eligible count changed")
+    _require_hash(source["model_eligible_identity_sha256"], "model eligible identity")
+    if str(source["model_eligible_identity_sha256"]).lower() != identity_sha256(eligible):
+        raise FourWayDraftScoreError(
+            "source model eligible identity does not match IDs"
+        )
     source_files = source.get("source_files")
     if not isinstance(source_files, Mapping):
         raise FourWayDraftScoreError("source receipt file bindings are required")
@@ -843,6 +861,55 @@ def _fold_spec(path: Path, fold: int) -> tuple[tuple[str, ...], tuple[str, ...],
     if not train or not validation or not cutoff or set(train) & set(validation):
         raise FourWayDraftScoreError(f"fold {fold} specification is invalid")
     return train, validation, cutoff
+
+
+def _fold_census_audit(
+    source: Mapping[str, Any],
+    fold_ids: Mapping[int, tuple[Sequence[str], Sequence[str]]],
+) -> dict[str, Any]:
+    """Bind the fold union and boundary exclusions to the eligible census."""
+
+    eligible_ids = {
+        str(value) for value in source.get("model_eligible_game_ids", ())
+    }
+    assigned_ids: set[str] = set()
+    for fold, (train_ids, validation_ids) in fold_ids.items():
+        fold_assigned_ids = {
+            str(value) for value in (*train_ids, *validation_ids)
+        }
+        outside = sorted(fold_assigned_ids - eligible_ids)
+        if outside:
+            raise FourWayDraftScoreError(
+                f"fold {fold} assigns IDs outside the exact eligible census"
+            )
+        assigned_ids.update(fold_assigned_ids)
+
+    assigned = tuple(sorted(assigned_ids))
+    boundary_excluded = tuple(sorted(eligible_ids - assigned_ids))
+    reconstructed = set(assigned) | set(boundary_excluded)
+    if reconstructed != eligible_ids:
+        raise FourWayDraftScoreError(
+            "assigned fold IDs plus boundary exclusions do not match the exact eligible census"
+        )
+    eligible_count = int(source.get("model_eligible_game_count", -1))
+    eligible_identity = str(source.get("model_eligible_identity_sha256") or "").lower()
+    if len(assigned) + len(boundary_excluded) != eligible_count:
+        raise FourWayDraftScoreError(
+            "assigned fold count plus boundary exclusions do not match model eligible count"
+        )
+    if identity_sha256(reconstructed) != eligible_identity:
+        raise FourWayDraftScoreError(
+            "assigned fold IDs plus boundary exclusions do not match model eligible identity"
+        )
+    return {
+        "model_eligible_game_count": eligible_count,
+        "model_eligible_identity_sha256": eligible_identity,
+        "assigned_fold_game_count": len(assigned),
+        "assigned_fold_game_identity_sha256": identity_sha256(assigned),
+        "boundary_excluded_game_count": len(boundary_excluded),
+        "boundary_excluded_game_identity_sha256": identity_sha256(boundary_excluded),
+        "boundary_excluded_game_ids": list(boundary_excluded),
+    }
 
 
 def _series_partition_assignment_sha256(frame: pd.DataFrame) -> str:
@@ -2204,6 +2271,7 @@ def build_report(
     atom_fit_through = None if pd.isna(atom_fit_through_value) else atom_fit_through_value
     joined_by_fold: dict[int, pd.DataFrame] = {}
     fold_reports: list[dict[str, Any]] = []
+    fold_census_ids: dict[int, tuple[tuple[str, ...], tuple[str, ...]]] = {}
     blockers: set[str] = set()
     if strict_atom_path is None and strict_fold_root is None and not atom_receipt["authority_verified"]:
         blockers.add("public_atom_authority_receipt_unverified")
@@ -2217,6 +2285,7 @@ def build_report(
         spec_path = folds_root.resolve() / f"fold-{fold}-spec.json"
         _verify_pinned_file(spec_path, fold_trust.get("spec"), label=f"fold {fold} specification")
         fold_train_ids, fold_validation_ids, fold_cutoff = _fold_spec(folds_root.resolve(), fold)
+        fold_census_ids[fold] = (fold_train_ids, fold_validation_ids)
         fold_atom = atom
         fold_atom_receipt = atom_receipt
         fold_form = strict_form
@@ -2319,6 +2388,7 @@ def build_report(
         if fold_report["scaling_contract"].get("receipt_present") and not fold_report["scaling_contract"].get("verified"):
             blockers.add(f"fold_{fold}_scaling_contract_unverified")
         prior_validation_ids.update(fold_validation_ids)
+    census_audit = _fold_census_audit(source, fold_census_ids)
     descriptive_frame = pd.concat(list(joined_by_fold.values()), ignore_index=True)
     # Each public atom row is retained once.  A later fold may contain a row
     # that was a validation row in an earlier fold, so deduplicate by ID.
@@ -2535,11 +2605,32 @@ def build_report(
             "source_game_count": source["source_game_count"],
             "source_identity_sha256": source["source_identity_sha256"],
             "source_receipt_sha256": source["receipt_sha256"],
+            "model_eligible_game_count": census_audit["model_eligible_game_count"],
+            "model_eligible_identity_sha256": census_audit[
+                "model_eligible_identity_sha256"
+            ],
         },
         "static_atom": fold_atom_receipts if strict_fold_root is not None else atom_receipt,
         "future_player_form": fold_form_receipts if strict_fold_root is not None else strict_form_receipt,
         "coverage": {
             "accepted_game_count": int(source["source_game_count"]),
+            "model_eligible_game_count": census_audit["model_eligible_game_count"],
+            "model_eligible_identity_sha256": census_audit[
+                "model_eligible_identity_sha256"
+            ],
+            "assigned_fold_game_count": census_audit["assigned_fold_game_count"],
+            "assigned_fold_game_identity_sha256": census_audit[
+                "assigned_fold_game_identity_sha256"
+            ],
+            "boundary_excluded_game_count": census_audit[
+                "boundary_excluded_game_count"
+            ],
+            "boundary_excluded_game_identity_sha256": census_audit[
+                "boundary_excluded_game_identity_sha256"
+            ],
+            "boundary_excluded_game_ids": census_audit[
+                "boundary_excluded_game_ids"
+            ],
             "public_atom_game_count": int(len(atom)) if strict_fold_root is None else 0,
             "static_atom_available_game_count": static_atom_available_count,
             "static_atom_cold_start_neutral_game_count": static_atom_cold_start_count,
