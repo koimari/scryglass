@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,6 +19,221 @@ def _write(path: Path, value: object) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_canonical(value) + b"\n")
     return path
+
+
+def _seal(value: dict[str, Any], field: str) -> dict[str, Any]:
+    body = dict(value)
+    body.pop(field, None)
+    value[field] = hashlib.sha256(_canonical(body)).hexdigest()
+    return value
+
+
+def _rank_digest(rows: list[dict[str, Any]], identity: str) -> str:
+    paired = [
+        {
+            identity: row[identity],
+            "current_rank": row["current_rank"],
+            "future_rank": row["future_rank"],
+            "rank_delta": row["rank_delta"],
+            "current_value": row["current_value"],
+            "future_value": row["future_value"],
+        }
+        for row in sorted(rows, key=lambda item: str(item[identity]))
+    ]
+    return hashlib.sha256(_canonical(paired)).hexdigest()
+
+
+def _snapshot_capability_fixture(
+    tmp_path: Path,
+) -> tuple[Path, dict[str, Path], Path]:
+    from lol_kills.research.future_value_snapshots import (
+        SNAPSHOT_AUTHORITY,
+        SNAPSHOT_CAPABILITY_MATRIX,
+        SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+        SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+    )
+
+    source: dict[str, Any] = {
+        "schema_version": "fixture-source-v1",
+        "source_as_of": "2026-08-20T00:00:00Z",
+        "source_game_count": 1,
+        "source_identity_sha256": "a" * 64,
+        "model_eligible_game_count": 1,
+        "model_eligible_identity_sha256": "b" * 64,
+        "authority": dict(downstream.AUTHORITY),
+        "receipt_sha256": "c" * 64,
+    }
+    source_path = _write(tmp_path / "source-receipt.json", source)
+    roots: dict[str, Path] = {}
+    for variant in downstream.VARIANTS:
+        root = tmp_path / "snapshots" / variant
+        root.mkdir(parents=True)
+        roots[variant] = root
+        capability = SNAPSHOT_CAPABILITY_MATRIX[variant]
+        if variant == "scaling_curve":
+            player_rows: list[dict[str, Any]] = []
+            team_rows: list[dict[str, Any]] = []
+            player_rank_rows: list[dict[str, Any]] = []
+            team_rank_rows: list[dict[str, Any]] = []
+            player_coverage = {
+                "status": "not_applicable",
+                "matched_rows": 0,
+                "row_policy": "no_rows",
+            }
+            team_coverage = dict(player_coverage)
+        else:
+            player_rows = [{"player_id": "oe:player:p1", "value": 0.25}]
+            team_rows = [{"team_id": "oe:team:t1", "value": 0.5}]
+            player_rank_rows = [{
+                "player_id": "oe:player:p1",
+                "current_rank": 2,
+                "future_rank": 1,
+                "rank_delta": 1,
+                "current_value": 0.25,
+                "future_value": 0.5,
+            }]
+            team_rank_rows = [{
+                "team_id": "oe:team:t1",
+                "current_rank": 1,
+                "future_rank": 1,
+                "rank_delta": 0,
+                "current_value": 0.5,
+                "future_value": 0.75,
+            }]
+            player_digest = _rank_digest(player_rank_rows, "player_id")
+            team_digest = _rank_digest(team_rank_rows, "team_id")
+            player_coverage = {
+                "status": "complete",
+                "matched_rows": 1,
+                "paired_row_digest_sha256": player_digest,
+                "paired_row_digest": player_digest,
+            }
+            team_coverage = {
+                "status": "complete",
+                "matched_rows": 1,
+                "paired_row_digest_sha256": team_digest,
+                "paired_row_digest": team_digest,
+            }
+        source_binding = {
+            "source_as_of": source["source_as_of"],
+            "source_game_count": source["source_game_count"],
+            "source_identity_sha256": source["source_identity_sha256"],
+            "source_receipt_sha256": source["receipt_sha256"],
+            "model_eligible_game_count": source["model_eligible_game_count"],
+            "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+        }
+        receipt: dict[str, Any] = {
+            "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
+            "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+            "status": "research_only",
+            "authority": dict(SNAPSHOT_AUTHORITY),
+            "variant": variant,
+            "source": source_binding,
+            "player_row_count": len(player_rows),
+            "team_row_count": len(team_rows),
+            "player_rank_diff_count": len(player_rank_rows),
+            "team_rank_diff_count": len(team_rank_rows),
+            "rank_coverage": {
+                "player": player_coverage,
+                "team": team_coverage,
+            },
+            "capability": capability,
+            "blockers": [],
+        }
+        _write(
+            root / "future-value-snapshot-receipt.json",
+            _seal(receipt, "receipt_sha256"),
+        )
+        rows_by_name = {
+            "future-player-value-snapshot.json": player_rows,
+            "future-team-value-snapshot.json": team_rows,
+            "future-player-rank-diffs.json": player_rank_rows,
+            "future-team-rank-diffs.json": team_rank_rows,
+        }
+        for name, rows in rows_by_name.items():
+            payload: dict[str, Any] = {
+                "schema_version": "scryglass:future-value-snapshot:v1",
+                "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+                "status": "research_only",
+                "authority": dict(SNAPSHOT_AUTHORITY),
+                "variant": variant,
+                "capability": capability,
+                "source_receipt_sha256": source["receipt_sha256"],
+                "rows": rows,
+                "blockers": [],
+            }
+            if "rank-diffs" in name:
+                payload["rank_coverage"] = (
+                    player_coverage if "player" in name else team_coverage
+                )
+            _write(root / name, payload)
+        files = {
+            "player_snapshot": root / "future-player-value-snapshot.json",
+            "team_snapshot": root / "future-team-value-snapshot.json",
+            "player_rank_diffs": root / "future-player-rank-diffs.json",
+            "team_rank_diffs": root / "future-team-rank-diffs.json",
+            "receipt": root / "future-value-snapshot-receipt.json",
+        }
+        manifest: dict[str, Any] = {
+            "schema_version": "scryglass:future-value-snapshot:v1",
+            "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+            "status": "research_only",
+            "authority": dict(SNAPSHOT_AUTHORITY),
+            "variant": variant,
+            "capability": capability,
+            "source_receipt_sha256": source["receipt_sha256"],
+            "files": {
+                key: {
+                    "path": str(path),
+                    "bytes": path.stat().st_size,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+                for key, path in files.items()
+            },
+            "blockers": [],
+        }
+        _write(root / "manifest.json", _seal(manifest, "manifest_sha256"))
+    return source_path, roots, tmp_path / "snapshot-capability-manifest.json"
+
+
+def _snapshot_capability_args(
+    source_path: Path,
+    roots: dict[str, Path],
+    output: Path,
+) -> list[str]:
+    args = [
+        "--snapshot-capability-manifest-worker",
+        "--source-receipt",
+        str(source_path),
+        "--source-receipt-file-sha256",
+        hashlib.sha256(source_path.read_bytes()).hexdigest(),
+    ]
+    for variant in downstream.VARIANTS:
+        root = roots[variant]
+        receipt = root / "future-value-snapshot-receipt.json"
+        manifest = root / "manifest.json"
+        args.extend(("--variant-output", f"{variant}={root}"))
+        args.extend((
+            "--variant-receipt-sha256",
+            f"{variant}={hashlib.sha256(receipt.read_bytes()).hexdigest()}",
+        ))
+        args.extend((
+            "--variant-manifest-sha256",
+            f"{variant}={hashlib.sha256(manifest.read_bytes()).hexdigest()}",
+        ))
+    args.extend(("--output", str(output)))
+    return args
+
+
+def _refresh_snapshot_manifest(root: Path, key: str, path: Path) -> None:
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"][key] = {
+        "path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+    _write(manifest_path, _seal(manifest, "manifest_sha256"))
 
 
 def _config(tmp_path: Path, *, variant: str = "future_player_form") -> downstream.RunConfig:
@@ -200,7 +416,141 @@ def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Pa
     assert [job.name for job in snapshots.jobs] == [f"snapshot_{variant}" for variant in downstream.VARIANTS]
     capabilities = next(stage for stage in stages if stage.name == "snapshot_capabilities").jobs[0]
     assert "--snapshot-capability-manifest-worker" in capabilities.command
+    assert "--snapshot-stage-receipt" in capabilities.command
+    stage_receipt_index = capabilities.command.index("--snapshot-stage-receipt") + 1
+    assert capabilities.command[stage_receipt_index] == str(
+        config.output_root / "receipts" / "snapshots.json"
+    )
     assert all(variant in " ".join(capabilities.command) for variant in downstream.VARIANTS)
+
+
+def test_snapshot_capability_accepts_independent_bundle_hashes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, roots, output = _snapshot_capability_fixture(tmp_path)
+    monkeypatch.setattr(
+        downstream,
+        "validate_future_value_source_receipt_payload",
+        lambda payload: payload,
+    )
+
+    result = downstream._snapshot_capability_manifest_worker(
+        _snapshot_capability_args(source, roots, output)
+    )
+
+    assert result == 0
+    manifest = json.loads(output.read_text(encoding="utf-8"))
+    assert manifest["status"] == "research_only"
+    assert manifest["snapshot_producer_binding"]["mode"] == (
+        "independent_per_bundle_raw_hashes"
+    )
+
+
+def test_snapshot_capability_accepts_source_bound_snapshot_stage_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, roots, output = _snapshot_capability_fixture(tmp_path)
+    monkeypatch.setattr(
+        downstream,
+        "validate_future_value_source_receipt_payload",
+        lambda payload: payload,
+    )
+    stage_receipt_path = tmp_path / "receipts" / "snapshots.json"
+    outputs = [
+        downstream._file_record(roots[variant] / name)
+        for variant in downstream.VARIANTS
+        for name in downstream.SNAPSHOT_BUNDLE_FILE_NAMES
+    ]
+    stage_receipt: dict[str, Any] = {
+        "schema_version": downstream.STAGE_RECEIPT_SCHEMA_VERSION,
+        "status": "completed",
+        "stage": "snapshots",
+        "stage_plan_sha256": "d" * 64,
+        "inputs": {str(source.resolve()): downstream._file_record(source)},
+        "outputs": outputs,
+        "blockers": [],
+        "authority": dict(downstream.AUTHORITY),
+    }
+    _write(
+        stage_receipt_path,
+        _seal(stage_receipt, "receipt_sha256"),
+    )
+    args = [
+        "--snapshot-capability-manifest-worker",
+        "--source-receipt",
+        str(source),
+        "--source-receipt-file-sha256",
+        hashlib.sha256(source.read_bytes()).hexdigest(),
+        "--snapshot-stage-receipt",
+        str(stage_receipt_path),
+    ]
+    for variant in downstream.VARIANTS:
+        args.extend(("--variant-output", f"{variant}={roots[variant]}"))
+    args.extend(("--output", str(output)))
+
+    result = downstream._snapshot_capability_manifest_worker(args)
+
+    assert result == 0
+    manifest = json.loads(output.read_text(encoding="utf-8"))
+    assert manifest["snapshot_producer_binding"]["mode"] == (
+        "snapshot_stage_receipt"
+    )
+
+
+def test_snapshot_capability_rejects_resealed_rank_delta_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source, roots, output = _snapshot_capability_fixture(tmp_path)
+    monkeypatch.setattr(
+        downstream,
+        "validate_future_value_source_receipt_payload",
+        lambda payload: payload,
+    )
+    root = roots["future_player_form"]
+    rank_path = root / "future-player-rank-diffs.json"
+    payload = json.loads(rank_path.read_text(encoding="utf-8"))
+    payload["rows"][0]["rank_delta"] = 999
+    _write(rank_path, payload)
+    _refresh_snapshot_manifest(root, "player_rank_diffs", rank_path)
+
+    result = downstream._snapshot_capability_manifest_worker(
+        _snapshot_capability_args(source, roots, output)
+    )
+
+    assert result == 1
+    assert "rank values changed" in capsys.readouterr().err
+    assert not output.exists()
+
+
+def test_snapshot_capability_rejects_resealed_child_public_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source, roots, output = _snapshot_capability_fixture(tmp_path)
+    monkeypatch.setattr(
+        downstream,
+        "validate_future_value_source_receipt_payload",
+        lambda payload: payload,
+    )
+    root = roots["future_player_form"]
+    receipt_path = root / "future-value-snapshot-receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["authority"]["public_player_rating"] = True
+    _write(receipt_path, _seal(receipt, "receipt_sha256"))
+    _refresh_snapshot_manifest(root, "receipt", receipt_path)
+
+    result = downstream._snapshot_capability_manifest_worker(
+        _snapshot_capability_args(source, roots, output)
+    )
+
+    assert result == 1
+    assert "child authority changed" in capsys.readouterr().err
+    assert not output.exists()
 
 
 def test_plan_only_commands_are_canonical_json(tmp_path: Path) -> None:

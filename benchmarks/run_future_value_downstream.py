@@ -42,6 +42,14 @@ FINAL_FIT_MANIFEST_SCHEMA_VERSION = "scryglass:future-value-final-fit-manifest:v
 # snapshot producer.  Keep the name local to the runner so callers do not
 # need to import the producer module just to inspect a plan.
 SNAPSHOT_CAPABILITY_MANIFEST_SCHEMA_VERSION = "scryglass:future-value-snapshot-capability:v1"
+SNAPSHOT_BUNDLE_FILE_NAMES = (
+    "future-player-value-snapshot.json",
+    "future-team-value-snapshot.json",
+    "future-player-rank-diffs.json",
+    "future-team-rank-diffs.json",
+    "future-value-snapshot-receipt.json",
+    "manifest.json",
+)
 SCALING_ARTIFACT_NAME = "scaling-feature-ledger-online.parquet"
 SCALING_RECEIPT_NAME = "scaling-feature-ledger-online-receipt.json"
 SCALING_MANIFEST_NAME = "scaling-feature-ledger-online-manifest.json"
@@ -1072,6 +1080,225 @@ def _variant_directory_arguments(values: Sequence[str], label: str) -> dict[str,
     return result
 
 
+def _variant_hash_arguments(values: Sequence[str], label: str) -> dict[str, str]:
+    """Parse a closed ``variant=sha256`` worker argument set."""
+
+    result: dict[str, str] = {}
+    for raw in values:
+        if "=" not in raw:
+            raise DownstreamRunError(f"{label} must use VARIANT=SHA256")
+        variant, value = raw.split("=", 1)
+        variant = variant.strip()
+        if variant not in VARIANTS or variant in result:
+            raise DownstreamRunError(f"{label} has an invalid variant binding")
+        result[variant] = _require_hash(value.strip(), f"{label} {variant}")
+    if set(result) != set(VARIANTS):
+        raise DownstreamRunError(
+            f"{label} must cover: {', '.join(VARIANTS)}"
+        )
+    return result
+
+
+def _snapshot_stage_output_hashes(
+    stage_receipt_path: Path,
+    *,
+    directories: Mapping[str, Path],
+    source_receipt_path: Path,
+) -> dict[Path, str]:
+    """Read independent snapshot file hashes from the completed stage receipt."""
+
+    receipt = _receipt_hash(stage_receipt_path, "snapshot producer stage receipt")
+    if (
+        receipt.get("schema_version") != STAGE_RECEIPT_SCHEMA_VERSION
+        or receipt.get("stage") != "snapshots"
+        or receipt.get("status") != "completed"
+    ):
+        raise DownstreamRunError("snapshot producer stage receipt is not completed")
+    if receipt.get("authority") != AUTHORITY:
+        raise DownstreamRunError("snapshot producer stage authority changed")
+    if receipt.get("blockers") != []:
+        raise DownstreamRunError("snapshot producer stage has blockers")
+    _require_hash(
+        receipt.get("stage_plan_sha256"),
+        "snapshot producer stage plan hash",
+    )
+    inputs = receipt.get("inputs")
+    if not isinstance(inputs, Mapping):
+        raise DownstreamRunError("snapshot producer stage inputs are missing")
+    source_record = inputs.get(str(source_receipt_path))
+    if not isinstance(source_record, Mapping):
+        raise DownstreamRunError("snapshot producer stage source receipt is missing")
+    if (
+        int(source_record.get("bytes", -1)) != source_receipt_path.stat().st_size
+        or str(source_record.get("sha256") or "").lower()
+        != _sha256_path(source_receipt_path)
+    ):
+        raise DownstreamRunError("snapshot producer stage source receipt changed")
+
+    outputs = receipt.get("outputs")
+    if not isinstance(outputs, list):
+        raise DownstreamRunError("snapshot producer stage outputs are missing")
+    expected_paths = {
+        (directories[variant] / name).resolve()
+        for variant in VARIANTS
+        for name in SNAPSHOT_BUNDLE_FILE_NAMES
+    }
+    output_hashes: dict[Path, str] = {}
+    for raw in outputs:
+        if not isinstance(raw, Mapping):
+            raise DownstreamRunError("snapshot producer stage output is invalid")
+        path = _safe_path(
+            str(raw.get("path") or ""),
+            "snapshot producer stage output",
+        )
+        if path in output_hashes:
+            raise DownstreamRunError("snapshot producer stage output is duplicate")
+        declared_hash = _require_hash(
+            raw.get("sha256"),
+            "snapshot producer stage output hash",
+        )
+        if (
+            int(raw.get("bytes", -1)) != path.stat().st_size
+            or declared_hash != _sha256_path(path)
+        ):
+            raise DownstreamRunError("snapshot producer stage output changed")
+        output_hashes[path] = declared_hash
+    if set(output_hashes) != expected_paths:
+        raise DownstreamRunError("snapshot producer stage output set changed")
+    return output_hashes
+
+
+def _rank_row_digest(
+    rows: object,
+    *,
+    identity: str,
+    label: str,
+) -> str:
+    """Rebuild the canonical paired-rank digest stored in snapshot coverage."""
+
+    if not isinstance(rows, list):
+        raise DownstreamRunError(f"{label} rows are missing")
+    paired: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in rows:
+        if not isinstance(raw, Mapping):
+            raise DownstreamRunError(f"{label} row is invalid")
+        row_id = str(raw.get(identity) or "").strip()
+        if not row_id or row_id in seen:
+            raise DownstreamRunError(f"{label} identity is missing or duplicate")
+        seen.add(row_id)
+        try:
+            current_rank = int(raw["current_rank"])
+            future_rank = int(raw["future_rank"])
+            rank_delta = int(raw["rank_delta"])
+            current_value = float(raw["current_value"])
+            future_value = float(raw["future_value"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise DownstreamRunError(f"{label} rank row is invalid") from error
+        if (
+            current_rank <= 0
+            or future_rank <= 0
+            or rank_delta != current_rank - future_rank
+            or not math.isfinite(current_value)
+            or not math.isfinite(future_value)
+        ):
+            raise DownstreamRunError(f"{label} rank values changed")
+        paired.append(
+            {
+                identity: row_id,
+                "current_rank": current_rank,
+                "future_rank": future_rank,
+                "rank_delta": rank_delta,
+                "current_value": current_value,
+                "future_value": future_value,
+            }
+        )
+    paired.sort(key=lambda row: str(row[identity]))
+    return _sha256_bytes(_canonical(paired))
+
+
+def _verify_snapshot_payloads(
+    *,
+    variant: str,
+    root: Path,
+    receipt: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    child_authority: Mapping[str, bool],
+    source_receipt_sha256: str,
+) -> None:
+    """Cross-check child authority, status, rows, and receipt coverage."""
+
+    if (
+        receipt.get("authority") != child_authority
+        or manifest.get("authority") != child_authority
+    ):
+        raise DownstreamRunError(f"{variant} snapshot child authority changed")
+    for field in ("status", "variant", "blockers", "capability"):
+        if manifest.get(field) != receipt.get(field):
+            raise DownstreamRunError(f"{variant} snapshot manifest {field} changed")
+    if manifest.get("source_receipt_sha256") != source_receipt_sha256:
+        raise DownstreamRunError(f"{variant} snapshot manifest source receipt changed")
+
+    receipt_files = {
+        "player_snapshot": ("future-player-value-snapshot.json", "player_row_count"),
+        "team_snapshot": ("future-team-value-snapshot.json", "team_row_count"),
+        "player_rank_diffs": ("future-player-rank-diffs.json", "player_rank_diff_count"),
+        "team_rank_diffs": ("future-team-rank-diffs.json", "team_rank_diff_count"),
+    }
+    for key, (name, count_field) in receipt_files.items():
+        payload = _load_json(root / name, f"{variant} snapshot {key}")
+        if (
+            payload.get("schema_version")
+            != "scryglass:future-value-snapshot:v1"
+            or payload.get("capability_schema_version")
+            != receipt.get("capability_schema_version")
+        ):
+            raise DownstreamRunError(f"{variant} snapshot {key} schema changed")
+        if payload.get("authority") != child_authority:
+            raise DownstreamRunError(f"{variant} snapshot {key} authority changed")
+        for field, expected in (
+            ("status", receipt.get("status")),
+            ("variant", variant),
+            ("source_receipt_sha256", source_receipt_sha256),
+            ("blockers", receipt.get("blockers")),
+            ("capability", receipt.get("capability")),
+        ):
+            if payload.get(field) != expected:
+                raise DownstreamRunError(
+                    f"{variant} snapshot {key} {field} changed"
+                )
+        rows = payload.get("rows")
+        if not isinstance(rows, list) or len(rows) != int(receipt.get(count_field, -1)):
+            raise DownstreamRunError(f"{variant} snapshot {key} row count changed")
+        if key not in {"player_rank_diffs", "team_rank_diffs"}:
+            continue
+        scope = "player" if key.startswith("player") else "team"
+        coverage = receipt.get("rank_coverage", {}).get(scope, {})
+        if not isinstance(coverage, Mapping) or payload.get("rank_coverage") != coverage:
+            raise DownstreamRunError(f"{variant} snapshot {scope} rank coverage changed")
+        matched_rows = int(coverage.get("matched_rows", 0) or 0)
+        if matched_rows != len(rows):
+            raise DownstreamRunError(f"{variant} snapshot {scope} matched rows changed")
+        if not rows and coverage.get("status") == "not_applicable":
+            if coverage.get("row_policy") != "no_rows":
+                raise DownstreamRunError(
+                    f"{variant} snapshot {scope} N/A row policy changed"
+                )
+            continue
+        expected_digest = _require_hash(
+            coverage.get("paired_row_digest_sha256")
+            or coverage.get("paired_row_digest"),
+            f"{variant} snapshot {scope} paired row digest",
+        )
+        actual_digest = _rank_row_digest(
+            rows,
+            identity="player_id" if scope == "player" else "team_id",
+            label=f"{variant} snapshot {scope}",
+        )
+        if actual_digest != expected_digest:
+            raise DownstreamRunError(f"{variant} snapshot {scope} paired rows changed")
+
+
 def _final_fit_manifest_worker(argv: Sequence[str]) -> int:
     """Seal four final-fit directories into one source-bound manifest."""
 
@@ -1602,12 +1829,17 @@ def _snapshot_capability_manifest_worker(argv: Sequence[str]) -> int:
     parser.add_argument("--source-receipt", required=True, type=Path)
     parser.add_argument("--source-receipt-file-sha256", required=True)
     parser.add_argument("--variant-output", action="append", default=[])
+    parser.add_argument("--snapshot-stage-receipt", type=Path)
+    parser.add_argument("--variant-receipt-sha256", action="append", default=[])
+    parser.add_argument("--variant-manifest-sha256", action="append", default=[])
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(list(argv))
     try:
         from lol_kills.research.future_value_snapshots import (
+            SNAPSHOT_AUTHORITY,
             SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
             SNAPSHOT_CAPABILITY_MATRIX,
+            SNAPSHOT_RECEIPT_SCHEMA_VERSION,
         )
 
         source_path = args.source_receipt.resolve()
@@ -1620,6 +1852,54 @@ def _snapshot_capability_manifest_worker(argv: Sequence[str]) -> int:
         if _sha256_path(source_path) != expected_source_file:
             raise DownstreamRunError("snapshot capability source receipt file changed")
         directories = _variant_directory_arguments(args.variant_output, "--variant-output")
+        direct_hash_mode = bool(
+            args.variant_receipt_sha256 or args.variant_manifest_sha256
+        )
+        if (args.snapshot_stage_receipt is None) == (not direct_hash_mode):
+            raise DownstreamRunError(
+                "snapshot capability requires either --snapshot-stage-receipt "
+                "or complete per-variant receipt and manifest hashes"
+            )
+        direct_receipt_hashes: dict[str, str] = {}
+        direct_manifest_hashes: dict[str, str] = {}
+        stage_output_hashes: dict[Path, str] = {}
+        producer_binding: dict[str, Any]
+        if args.snapshot_stage_receipt is not None:
+            if direct_hash_mode:
+                raise DownstreamRunError(
+                    "snapshot stage receipt and direct bundle hashes cannot be combined"
+                )
+            stage_receipt_path = _safe_path(
+                args.snapshot_stage_receipt,
+                "snapshot producer stage receipt",
+            )
+            stage_output_hashes = _snapshot_stage_output_hashes(
+                stage_receipt_path,
+                directories=directories,
+                source_receipt_path=source_path,
+            )
+            producer_binding = {
+                "mode": "snapshot_stage_receipt",
+                **_file_record(stage_receipt_path),
+                "receipt_sha256": _receipt_hash(
+                    stage_receipt_path,
+                    "snapshot producer stage receipt",
+                ).get("receipt_sha256"),
+            }
+        else:
+            direct_receipt_hashes = _variant_hash_arguments(
+                args.variant_receipt_sha256,
+                "--variant-receipt-sha256",
+            )
+            direct_manifest_hashes = _variant_hash_arguments(
+                args.variant_manifest_sha256,
+                "--variant-manifest-sha256",
+            )
+            producer_binding = {
+                "mode": "independent_per_bundle_raw_hashes",
+                "receipt_sha256": dict(direct_receipt_hashes),
+                "manifest_sha256": dict(direct_manifest_hashes),
+            }
         source_binding = {
             "source_as_of": source.get("source_as_of"),
             "source_game_count": source.get("source_game_count"),
@@ -1635,11 +1915,34 @@ def _snapshot_capability_manifest_worker(argv: Sequence[str]) -> int:
             root = _safe_path(directories[variant], f"{variant} snapshot root", directory=True)
             receipt_path = _safe_path(root / "future-value-snapshot-receipt.json", f"{variant} snapshot receipt")
             manifest_path = _safe_path(root / "manifest.json", f"{variant} snapshot manifest")
+            expected_receipt_file_hash = (
+                stage_output_hashes.get(receipt_path)
+                if stage_output_hashes
+                else direct_receipt_hashes.get(variant)
+            )
+            expected_manifest_file_hash = (
+                stage_output_hashes.get(manifest_path)
+                if stage_output_hashes
+                else direct_manifest_hashes.get(variant)
+            )
+            if (
+                expected_receipt_file_hash != _sha256_path(receipt_path)
+                or expected_manifest_file_hash != _sha256_path(manifest_path)
+            ):
+                raise DownstreamRunError(
+                    f"{variant} snapshot independent bundle hash changed"
+                )
             receipt = _receipt_hash(receipt_path, f"{variant} snapshot receipt")
             manifest = _load_json(manifest_path, f"{variant} snapshot manifest")
             if manifest.get("schema_version") != "scryglass:future-value-snapshot:v1":
                 raise DownstreamRunError(f"{variant} snapshot manifest schema changed")
-            if receipt.get("capability_schema_version") != SNAPSHOT_CAPABILITY_SCHEMA_VERSION:
+            if (
+                receipt.get("schema_version") != SNAPSHOT_RECEIPT_SCHEMA_VERSION
+                or receipt.get("capability_schema_version")
+                != SNAPSHOT_CAPABILITY_SCHEMA_VERSION
+                or manifest.get("capability_schema_version")
+                != SNAPSHOT_CAPABILITY_SCHEMA_VERSION
+            ):
                 raise DownstreamRunError(f"{variant} snapshot capability schema changed")
             manifest_hash = _require_hash(manifest.get("manifest_sha256"), f"{variant} snapshot manifest hash")
             body = dict(manifest)
@@ -1695,6 +1998,14 @@ def _snapshot_capability_manifest_worker(argv: Sequence[str]) -> int:
                 if int(raw.get("bytes", -1)) != path.stat().st_size or str(raw.get("sha256") or "").lower() != _sha256_path(path):
                     raise DownstreamRunError(f"{variant} snapshot file changed: {name}")
                 file_records[str(name)] = {"path": str(path), "bytes": path.stat().st_size, "sha256": _sha256_path(path)}
+            _verify_snapshot_payloads(
+                variant=variant,
+                root=root,
+                receipt=receipt,
+                manifest=manifest,
+                child_authority=SNAPSHOT_AUTHORITY,
+                source_receipt_sha256=str(source.get("receipt_sha256") or ""),
+            )
             capability = manifest.get("capability")
             if not isinstance(capability, Mapping):
                 capability = receipt.get("capability")
@@ -1737,6 +2048,7 @@ def _snapshot_capability_manifest_worker(argv: Sequence[str]) -> int:
             "status": "blocked" if manifest_blockers else "research_only",
             "authority": dict(AUTHORITY),
             "source": source_binding,
+            "snapshot_producer_binding": producer_binding,
             "variants": variants,
             "capability_matrix": json.loads(json.dumps(SNAPSHOT_CAPABILITY_MATRIX, sort_keys=True)),
             "blockers": sorted(set(manifest_blockers)),
@@ -2163,12 +2475,17 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
         expected_files=tuple(snapshot_expected),
     )
     capability_manifest = snapshot_manifest_root / "snapshot-capability-manifest.json"
+    snapshot_stage_receipt = config.output_root / "receipts" / "snapshots.json"
     capability_command: list[str] = list(
         _python_module("benchmarks.run_future_value_downstream", "--snapshot-capability-manifest-worker")
-    ) + ["--source-receipt", receipt, "--source-receipt-file-sha256", inputs.source_receipt_file_sha256]
+    ) + [
+        "--source-receipt", receipt,
+        "--source-receipt-file-sha256", inputs.source_receipt_file_sha256,
+        "--snapshot-stage-receipt", snapshot_stage_receipt,
+    ]
     for variant in VARIANTS:
         capability_command.extend(("--variant-output", f"{variant}={snapshots / variant}"))
-    capability_inputs = [receipt]
+    capability_inputs = [receipt, snapshot_stage_receipt]
     capability_inputs.extend(snapshot_expected)
     comparison_stage = Stage(
         name="snapshot_capabilities",
