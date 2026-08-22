@@ -10,9 +10,11 @@ from benchmarks.build_future_value_downstream_impact import (
     BOOTSTRAP_COMPARISONS,
     DownstreamImpactError,
     VARIANTS,
+    _verify_snapshot_variant,
     build_downstream_impact_report,
     write_report,
 )
+from lol_kills.research.future_value_snapshots import snapshot_capability_matrix
 from lol_kills.research.future_value_rating import (
     SCHEMA_VERSION,
     SOURCE_RECEIPT_AUTHORITY,
@@ -245,6 +247,106 @@ def _snapshot_bundle(root: Path, source: dict, sf: dict) -> tuple[Path, Path, Pa
     return snapshot_path, comparison_path, manifest_path
 
 
+def _all_variant_snapshot_bundles(root: Path, source: dict, sf: dict) -> dict[str, tuple[Path, Path]]:
+    """Create compact source-bound bundles for the all-variant verifier tests."""
+
+    source_binding = {
+        **sf,
+        "model_eligible_game_count": source["model_eligible_game_count"],
+        "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+    }
+    matrix = snapshot_capability_matrix()
+    outputs: dict[str, tuple[Path, Path]] = {}
+    for variant in VARIANTS:
+        variant_root = root / variant
+        player_snapshot = _write(
+            variant_root / "future-player-value-snapshot.json",
+            {"rows": [] if variant == "scaling_curve" else [{"player_id": "p1"}]},
+        )
+        team_snapshot = _write(
+            variant_root / "future-team-value-snapshot.json",
+            {"rows": [] if variant == "scaling_curve" else [{"team_id": "t1"}]},
+        )
+        rows = [] if variant == "scaling_curve" else [{"player_id": "p1", "rank_delta": 0}]
+        team_rows = [] if variant == "scaling_curve" else [{"team_id": "t1", "rank_delta": 0}]
+        player_rank = _write(
+            variant_root / "future-player-rank-diffs.json",
+            {
+                "schema_version": "scryglass:future-value-snapshot:v1",
+                "source_receipt_sha256": source["receipt_sha256"],
+                "authority": dict(AUTHORITY),
+                "rows": rows,
+            },
+        )
+        team_rank = _write(
+            variant_root / "future-team-rank-diffs.json",
+            {
+                "schema_version": "scryglass:future-value-snapshot:v1",
+                "source_receipt_sha256": source["receipt_sha256"],
+                "authority": dict(AUTHORITY),
+                "rows": team_rows,
+            },
+        )
+        coverage = {
+            "player": {
+                "status": "not_applicable" if variant == "scaling_curve" else "complete",
+                "row_policy": "no_rows" if variant == "scaling_curve" else "common_verified_finite_ids",
+                "rank_universe": "common_verified_finite_ids",
+            },
+            "team": {
+                "status": "not_applicable" if variant == "scaling_curve" else "complete",
+                "row_policy": "no_rows" if variant == "scaling_curve" else "common_verified_finite_ids",
+                "rank_universe": "common_verified_finite_ids",
+            },
+        }
+        receipt = {
+            "schema_version": "scryglass:future-value-snapshot-receipt:v1",
+            "capability_schema_version": "scryglass:future-value-snapshot-capability:v1",
+            "status": "research_only",
+            "authority": dict(AUTHORITY),
+            "variant": variant,
+            "source": source_binding,
+            "capability": matrix[variant],
+            "player_row_count": 0 if variant == "scaling_curve" else 1,
+            "team_row_count": 0 if variant == "scaling_curve" else 1,
+            "player_rank_diff_count": len(rows),
+            "team_rank_diff_count": len(team_rows),
+            "rank_coverage": coverage,
+            "blockers": [],
+        }
+        receipt["receipt_sha256"] = hashlib.sha256(_canonical(receipt)).hexdigest()
+        receipt_path = _write(variant_root / "future-value-snapshot-receipt.json", receipt)
+        files = {
+            "player_snapshot": player_snapshot,
+            "team_snapshot": team_snapshot,
+            "player_rank_diffs": player_rank,
+            "team_rank_diffs": team_rank,
+            "receipt": receipt_path,
+        }
+        manifest = {
+            "schema_version": "scryglass:future-value-snapshot:v1",
+            "capability_schema_version": "scryglass:future-value-snapshot-capability:v1",
+            "status": "research_only",
+            "authority": dict(AUTHORITY),
+            "variant": variant,
+            "capability": matrix[variant],
+            "source_receipt_sha256": source["receipt_sha256"],
+            "files": {
+                name: {
+                    "path": str(path),
+                    "bytes": path.stat().st_size,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+                for name, path in files.items()
+            },
+            "blockers": [],
+        }
+        manifest["manifest_sha256"] = hashlib.sha256(_canonical(manifest)).hexdigest()
+        manifest_path = _write(variant_root / "manifest.json", manifest)
+        outputs[variant] = (receipt_path, manifest_path)
+    return outputs
+
+
 def _tier(root: Path, source: dict, sf: dict) -> tuple[Path, Path]:
     key = {"scope_id": "s", "patch": "p", "role": "mid", "champion_id": "c"}
     rows = [{"key": key, "baseline": {"rank": 1}, "v2": {"rank": 2}, "delta": {"rank_delta": -1, "tier_changed": True}}]
@@ -373,8 +475,50 @@ def test_report_binds_dynamic_universes_and_preserves_research_authority(tmp_pat
     assert report["snapshots"]["rank_movement"]["player"]["rows"] == 1
     assert report["tierlist"]["comparison"]["common_row_count"] == 1
     assert report["draft_score"]["coverage"]["descriptive_subset_game_count"] == 3
+    assert set(report["variant_impacts"]) == set(VARIANTS)
+    assert all("metrics" in report["variant_impacts"][variant]["prediction"] for variant in VARIANTS)
+    assert all("tier" in report["variant_impacts"][variant] and "draft" in report["variant_impacts"][variant] for variant in VARIANTS)
+    assert report["variant_impacts"]["scaling_curve"]["snapshot"]["intrinsic_rank_status"] == "not_applicable"
     assert not any(value is True for value in report["authority"].values() if isinstance(value, bool) and value is not report["authority"].get("research_only"))
     assert all(value is False for key, value in report["downstream_public_change_flags"].items() if key != "measured_changes_present")
+
+
+def test_all_variant_snapshot_verifier_accepts_typed_scaling_na(tmp_path: Path) -> None:
+    _source_path, source, sf = _source(tmp_path)
+    bundles = _all_variant_snapshot_bundles(tmp_path / "snapshots", source, sf)
+
+    summary, blockers = _verify_snapshot_variant(
+        *bundles["scaling_curve"],
+        variant="scaling_curve",
+        source={
+            **sf,
+            "model_eligible_game_count": source["model_eligible_game_count"],
+            "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+        },
+    )
+
+    assert blockers == []
+    assert summary["rank_movement"]["player"]["status"] == "not_applicable"
+    assert summary["rank_movement"]["team"]["rows"] == 0
+
+
+def test_all_variant_snapshot_verifier_blocks_source_mismatch(tmp_path: Path) -> None:
+    source_path, source, sf = _source(tmp_path)
+    bundles = _all_variant_snapshot_bundles(tmp_path / "snapshots", source, sf)
+    wrong_source = {
+        **sf,
+        "source_game_count": source["source_game_count"] + 1,
+        "model_eligible_game_count": source["model_eligible_game_count"],
+        "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+    }
+
+    _, blockers = _verify_snapshot_variant(
+        *bundles["current_only"],
+        variant="current_only",
+        source=wrong_source,
+    )
+
+    assert any("current_only_snapshot_source_game_count_mismatch" in blocker for blocker in blockers)
 
 
 def test_model_bytes_mutation_is_rejected_by_external_receipt(tmp_path: Path) -> None:

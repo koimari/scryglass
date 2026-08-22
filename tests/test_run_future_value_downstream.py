@@ -77,9 +77,9 @@ def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Pa
     assert [stage.name for stage in stages] == [
         "current_rating_trust",
         "final_fit",
-        "future_team_context",
+        "final_fit_manifest",
         "snapshots",
-        "snapshot_comparison",
+        "snapshot_capabilities",
     ]
     commands = [token for stage in stages for job in stage.jobs for token in job.command]
     assert "public_refresh" not in commands
@@ -99,16 +99,21 @@ def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Pa
     )
     monkeypatch.setattr(downstream, "_nested_selection_blockers", lambda path, inputs: ())
     stages = downstream._core_stage_plan(config_with_nested, _inputs(tmp_path))
-    final = stages[1].jobs[0]
-    assert final.output_dir_policy == "absent"
-    team = stages[2].jobs[0]
-    assert team.command[team.command.index("--model-receipt") + 1] == str(
-        config.output_root / "stages" / "final-fit" / "final-v2-model-receipt.json"
+    final = stages[1]
+    assert len(final.jobs) == 4
+    assert final.jobs[1].output_dir_policy == "absent"
+    assert all(
+        f"--variant" in job.command and downstream.VARIANTS[index] in job.command
+        for index, job in enumerate(final.jobs)
     )
-    assert team.command[team.command.index("--model-artifact") + 1] == str(
-        config.output_root / "stages" / "final-fit" / "final-v2-model.json"
-    )
-    assert "--snapshot-comparison-worker" in stages[4].jobs[0].command
+    manifest = stages[2].jobs[0]
+    assert "--final-fit-manifest-worker" in manifest.command
+    assert all(variant in " ".join(manifest.command) for variant in downstream.VARIANTS)
+    snapshots = stages[3]
+    assert [job.name for job in snapshots.jobs] == [f"snapshot_{variant}" for variant in downstream.VARIANTS]
+    capabilities = stages[4].jobs[0]
+    assert "--snapshot-capability-manifest-worker" in capabilities.command
+    assert all(variant in " ".join(capabilities.command) for variant in downstream.VARIANTS)
 
 
 def test_plan_only_commands_are_canonical_json(tmp_path: Path) -> None:
@@ -176,26 +181,21 @@ def test_selection_sidecars_bind_exact_artifact_bytes(tmp_path: Path) -> None:
         receipt = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
         assert receipt["variant"] == variant
         assert receipt["artifact"]["sha256"] == hashlib.sha256(inputs.evaluation_paths[variant].read_bytes()).hexdigest()
-        if variant == "future_player_form":
-            assert receipt["status"] == "research_only"
-        else:
-            assert receipt["status"] == "blocked"
-            assert receipt["blockers"] == ["final_fit_builder_supports_future_player_form_only"]
+        assert receipt["status"] == "research_only"
+        assert receipt["blockers"] == []
         body = dict(receipt)
         claimed = body.pop("receipt_sha256")
         assert hashlib.sha256(_canonical(body)).hexdigest() == claimed
 
 
-def test_unselected_variant_capability_blocker_does_not_block_selected_chain(tmp_path: Path) -> None:
+def test_selected_variant_is_manual_annotation_and_never_blocks_any_chain(tmp_path: Path) -> None:
     config = _config(tmp_path, variant="future_player_form")
     inputs = _inputs(tmp_path)
     selection = downstream._write_selection(config, inputs, {})
 
     assert downstream._selected_variant_receipt_blockers(config, selection["receipt_paths"]) == []
     blocked_config = replace(config, selected_variant="current_only")
-    assert downstream._selected_variant_receipt_blockers(blocked_config, selection["receipt_paths"]) == [
-        "selection:current_only:final_fit_builder_supports_future_player_form_only"
-    ]
+    assert downstream._selected_variant_receipt_blockers(blocked_config, selection["receipt_paths"]) == []
 
 
 def test_resume_receipt_detects_output_mutation(tmp_path: Path) -> None:
@@ -300,13 +300,23 @@ def test_tier_diff_binds_candidate_hash_after_shadow(tmp_path: Path) -> None:
     (config.tier_source_root / "source" / "oe_player_games.parquet").write_bytes(b"")
     (config.tier_source_root / "source" / "meta.json").write_bytes(b"{}")
     _write(config.tier_source_root / "future-value-source-receipt.json", {})
-    candidate = config.output_root / "stages" / "tier-shadow" / "v2-tier-candidate.json"
-    candidate.parent.mkdir(parents=True)
-    candidate.write_text("candidate", encoding="utf-8")
-    expected = hashlib.sha256(candidate.read_bytes()).hexdigest()
-    stages = {stage.name: stage for stage in downstream._optional_stage_plan(config, _inputs(tmp_path), tier_candidate_sha256=expected)}
+    candidate_root = config.output_root / "stages" / "tier-fourway" / "candidates"
+    candidates = {}
+    for variant in downstream.VARIANTS:
+        candidate = candidate_root / f"{variant}.json"
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_text(f"candidate:{variant}", encoding="utf-8")
+        candidates[variant] = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    stages = {stage.name: stage for stage in downstream._optional_stage_plan(config, _inputs(tmp_path))}
     command = list(stages["tier_diff"].jobs[0].command)
-    assert command[command.index("--expected-v2-candidate-sha256") + 1] == expected
+    for variant in downstream.VARIANTS:
+        values = [
+            command[index + 1]
+            for index, token in enumerate(command)
+            if token == "--expected-variant-candidate-sha256"
+            and command[index + 1].startswith(f"{variant}=")
+        ]
+        assert values == [f"{variant}={candidates[variant]}"]
 
 
 def test_final_receipt_stays_blocked_when_stage_status_is_blocked(tmp_path: Path) -> None:

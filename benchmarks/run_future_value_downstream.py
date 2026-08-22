@@ -1,10 +1,10 @@
 """Run the closed downstream stages for a completed four-way experiment.
 
-The runner is a research receipt coordinator.  It binds one completed
-``run_future_value_fourway`` result to a caller-selected variant, then runs
-the available downstream producers.  A variant is never selected from a
-metric.  Missing producer inputs create a receipt blocker.  The runner does
-not publish a pack and it never changes an authority flag.
+The runner is a research receipt coordinator.  It builds evidence for every
+registered rating variant.  The selected variant is a caller annotation for
+later manual review.  It never gates model evaluation or downstream evidence.
+Missing producer inputs create a receipt blocker.  The runner does not publish
+a pack and it never changes an authority flag.
 """
 
 from __future__ import annotations
@@ -36,6 +36,11 @@ RUN_CONFIG_SCHEMA_VERSION = "scryglass:future-value-downstream-config:v1"
 STAGE_RECEIPT_SCHEMA_VERSION = "scryglass:future-value-downstream-stage:v1"
 SELECTION_SCHEMA_VERSION = "scryglass:future-value-downstream-selection:v1"
 EVALUATION_RECEIPT_SCHEMA_VERSION = "scryglass:future-value-evaluation-receipt:v1"
+FINAL_FIT_MANIFEST_SCHEMA_VERSION = "scryglass:future-value-final-fit-manifest:v1"
+# The all-variant manifest uses the capability schema introduced by the
+# snapshot producer.  Keep the name local to the runner so callers do not
+# need to import the producer module just to inspect a plan.
+SNAPSHOT_CAPABILITY_MANIFEST_SCHEMA_VERSION = "scryglass:future-value-snapshot-capability:v1"
 VARIANTS = tuple(str(value) for value in FOURWAY_VARIANTS)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 DEFAULT_MAX_LOG_BYTES = 1_048_576
@@ -222,6 +227,13 @@ class RunConfig:
     nested_selection: Path | None = None
     nested_selection_sha256: str | None = None
     baseline_cache: Path | None = None
+    scaling_root: Path | None = None
+    scaling_artifact: Path | None = None
+    scaling_artifact_sha256: str | None = None
+    scaling_receipt: Path | None = None
+    scaling_receipt_sha256: str | None = None
+    scaling_manifest: Path | None = None
+    scaling_manifest_sha256: str | None = None
     tier_source_root: Path | None = None
     tier_repository_root: Path | None = None
     tier_trust_manifest: Path | None = None
@@ -626,6 +638,9 @@ def _validate_optional_inputs(config: RunConfig, inputs: ResolvedInputs | None =
         (config.draft_authority_path, config.draft_authority_sha256, "Draft Score authority"),
         (config.draft_model_artifact, config.draft_model_artifact_sha256, "Draft Score model artifact"),
         (config.nested_selection, config.nested_selection_sha256, "nested selection evidence"),
+        (config.scaling_artifact, config.scaling_artifact_sha256, "scaling feature artifact"),
+        (config.scaling_receipt, config.scaling_receipt_sha256, "scaling feature receipt"),
+        (config.scaling_manifest, config.scaling_manifest_sha256, "scaling feature manifest"),
         (config.draft_strict_atom, config.draft_strict_atom_sha256, "Draft Score strict atom"),
         (config.draft_strict_form, config.draft_strict_form_sha256, "Draft Score strict form"),
     )
@@ -647,6 +662,7 @@ def _validate_optional_inputs(config: RunConfig, inputs: ResolvedInputs | None =
         (config.draft_public_pack_root, "Draft Score public-pack root"),
         (config.draft_strict_fold_root, "Draft Score strict fold root"),
         (config.baseline_cache, "baseline cache"),
+        (config.scaling_root, "scaling feature root"),
     ):
         if path is None:
             continue
@@ -661,6 +677,12 @@ def _validate_optional_inputs(config: RunConfig, inputs: ResolvedInputs | None =
             raise DownstreamRunError("Draft Score public manifest file hash changed")
     if config.draft_manifest_sha256 is not None and config.draft_public_pack_root is None:
         raise DownstreamRunError("Draft Score public manifest root is required")
+    if config.scaling_artifact_sha256 is not None and config.scaling_artifact is None:
+        raise DownstreamRunError("scaling feature artifact is required for its hash")
+    if config.scaling_receipt_sha256 is not None and config.scaling_receipt is None:
+        raise DownstreamRunError("scaling feature receipt is required for its hash")
+    if config.scaling_manifest_sha256 is not None and config.scaling_manifest is None:
+        raise DownstreamRunError("scaling feature manifest is required for its hash")
 
 
 def _python_module(module: str, *args: object) -> tuple[str, ...]:
@@ -705,11 +727,19 @@ def _nested_selection_blockers(
             blockers.append(f"nested_selection_{field}_mismatch")
     variants = value.get("variants")
     if isinstance(variants, Mapping):
-        payload = variants.get("future_player_form")
-        if not isinstance(payload, Mapping) or not isinstance(payload.get("folds"), list):
-            blockers.append("nested_selection_future_player_form_missing")
-    elif value.get("variant") != "future_player_form" or not isinstance(value.get("folds"), list):
-        blockers.append("nested_selection_future_player_form_missing")
+        for variant in VARIANTS:
+            payload = variants.get(variant)
+            if not isinstance(payload, Mapping) or not isinstance(payload.get("folds"), list):
+                blockers.append(f"nested_selection_{variant}_missing")
+    elif value.get("variant") in VARIANTS and isinstance(value.get("folds"), list):
+        # A single-variant nested receipt is valid only for its own final fit.
+        # The all-variant runner keeps the receipt visible as a blocker for the
+        # other three jobs instead of silently reusing V2 evidence.
+        for variant in VARIANTS:
+            if variant != value.get("variant"):
+                blockers.append(f"nested_selection_{variant}_missing")
+    else:
+        blockers.append("nested_selection_variants_missing")
     return tuple(sorted(set(blockers)))
 
 
@@ -794,19 +824,360 @@ def _snapshot_comparison_worker(argv: Sequence[str]) -> int:
         return 1
 
 
+def _variant_directory_arguments(values: Sequence[str], label: str) -> dict[str, Path]:
+    """Parse the closed ``variant=directory`` worker argument set."""
+
+    result: dict[str, Path] = {}
+    for raw in values:
+        if "=" not in raw:
+            raise DownstreamRunError(f"{label} must use VARIANT=PATH")
+        variant, value = raw.split("=", 1)
+        variant = variant.strip()
+        if variant not in VARIANTS or not value.strip() or variant in result:
+            raise DownstreamRunError(f"{label} has an invalid variant binding")
+        result[variant] = Path(value).expanduser().resolve()
+    if set(result) != set(VARIANTS):
+        raise DownstreamRunError(
+            f"{label} must cover: {', '.join(VARIANTS)}"
+        )
+    return result
+
+
+def _final_fit_manifest_worker(argv: Sequence[str]) -> int:
+    """Seal four final-fit directories into one source-bound manifest."""
+
+    parser = argparse.ArgumentParser(description="Build an all-variant final-fit manifest")
+    parser.add_argument("--final-fit-manifest-worker", action="store_true")
+    parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument("--source-receipt-file-sha256", required=True)
+    parser.add_argument("--variant-output", action="append", default=[])
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args(list(argv))
+    try:
+        source_path = args.source_receipt.resolve()
+        source = _load_json(source_path, "source receipt")
+        validate_future_value_source_receipt_payload(source)
+        _authority_is_closed(source.get("authority"), "final-fit manifest source")
+        expected_source_file = _require_hash(
+            args.source_receipt_file_sha256, "source receipt file hash"
+        )
+        if _sha256_path(source_path) != expected_source_file:
+            raise DownstreamRunError("final-fit manifest source receipt file changed")
+        directories = _variant_directory_arguments(args.variant_output, "--variant-output")
+        variants: dict[str, Any] = {}
+        for ordinal, variant in enumerate(VARIANTS, start=1):
+            root = _safe_path(directories[variant], f"{variant} final-fit root", directory=True)
+            model_path = _safe_path(root / f"final-v{ordinal}-model.json", f"{variant} final-fit model")
+            receipt_path = _safe_path(root / f"final-v{ordinal}-model-receipt.json", f"{variant} final-fit receipt")
+            run_path = _safe_path(root / "final-fit-run.json", f"{variant} final-fit run")
+            model = _load_json(model_path, f"{variant} final-fit model")
+            receipt = _receipt_hash(receipt_path, f"{variant} final-fit receipt")
+            run = _load_json(run_path, f"{variant} final-fit run")
+            if model.get("schema_version") != "scryglass:future-value-final-fit:v1":
+                raise DownstreamRunError(f"{variant} final-fit model schema changed")
+            if model.get("variant") != variant or receipt.get("variant") != variant or run.get("variant") != variant:
+                raise DownstreamRunError(f"{variant} final-fit variant binding changed")
+            for label, value in (("model", model), ("receipt", receipt), ("run", run)):
+                binding = value.get("source") or value.get("source_binding")
+                if isinstance(binding, Mapping):
+                    for field, expected in (
+                        ("source_as_of", source.get("source_as_of")),
+                        ("source_game_count", source.get("source_game_count")),
+                        ("source_identity_sha256", source.get("source_identity_sha256")),
+                        ("source_receipt_sha256", source.get("receipt_sha256")),
+                    ):
+                        if field in binding and binding.get(field) != expected:
+                            raise DownstreamRunError(f"{variant} final-fit {label} source changed: {field}")
+            if run.get("model_artifact_sha256") not in {None, _sha256_path(model_path)}:
+                raise DownstreamRunError(f"{variant} final-fit model artifact hash changed")
+            variants[variant] = {
+                "status": receipt.get("status"),
+                "blockers": list(receipt.get("blockers", [])) if isinstance(receipt.get("blockers"), list) else [],
+                "model": _file_record(model_path),
+                "receipt": _file_record(receipt_path),
+                "run": _file_record(run_path),
+                "model_receipt_sha256": receipt.get("receipt_sha256"),
+                "fit_game_count": run.get("fit_game_count"),
+                "fit_game_identity_sha256": run.get("fit_game_identity_sha256"),
+            }
+        payload: dict[str, Any] = {
+            "schema_version": FINAL_FIT_MANIFEST_SCHEMA_VERSION,
+            "status": "research_only",
+            "authority": dict(AUTHORITY),
+            "source": {
+                "source_as_of": source.get("source_as_of"),
+                "source_game_count": source.get("source_game_count"),
+                "source_identity_sha256": source.get("source_identity_sha256"),
+                "source_receipt_sha256": source.get("receipt_sha256"),
+                "source_receipt_file_sha256": expected_source_file,
+                "model_eligible_game_count": source.get("model_eligible_game_count"),
+                "model_eligible_identity_sha256": source.get("model_eligible_identity_sha256"),
+                "accepted_game_ids": list(source.get("accepted_game_ids", [])),
+                "model_eligible_game_ids": list(source.get("model_eligible_game_ids", [])),
+            },
+            "variants": variants,
+            "blockers": [],
+        }
+        payload["manifest_sha256"] = _sha256_bytes(_canonical(payload))
+        _write_json(args.output.resolve(), payload)
+        print(json.dumps({"status": payload["status"], "variants": list(VARIANTS)}, sort_keys=True))
+        return 0
+    except (DownstreamRunError, OSError, ValueError, TypeError, KeyError) as error:
+        print(f"final-fit manifest worker failed: {error}", file=sys.stderr)
+        return 1
+
+
+def _snapshot_capability_manifest_worker(argv: Sequence[str]) -> int:
+    """Seal per-variant snapshot bundles and accept typed N/A capability rows."""
+
+    parser = argparse.ArgumentParser(description="Build an all-variant snapshot capability manifest")
+    parser.add_argument("--snapshot-capability-manifest-worker", action="store_true")
+    parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument("--source-receipt-file-sha256", required=True)
+    parser.add_argument("--variant-output", action="append", default=[])
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args(list(argv))
+    try:
+        from lol_kills.research.future_value_snapshots import (
+            SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+            SNAPSHOT_CAPABILITY_MATRIX,
+        )
+
+        source_path = args.source_receipt.resolve()
+        source = _load_json(source_path, "source receipt")
+        validate_future_value_source_receipt_payload(source)
+        _authority_is_closed(source.get("authority"), "snapshot capability source")
+        expected_source_file = _require_hash(
+            args.source_receipt_file_sha256, "source receipt file hash"
+        )
+        if _sha256_path(source_path) != expected_source_file:
+            raise DownstreamRunError("snapshot capability source receipt file changed")
+        directories = _variant_directory_arguments(args.variant_output, "--variant-output")
+        source_binding = {
+            "source_as_of": source.get("source_as_of"),
+            "source_game_count": source.get("source_game_count"),
+            "source_identity_sha256": source.get("source_identity_sha256"),
+            "source_receipt_sha256": source.get("receipt_sha256"),
+            "source_receipt_file_sha256": expected_source_file,
+            "model_eligible_game_count": source.get("model_eligible_game_count"),
+            "model_eligible_identity_sha256": source.get("model_eligible_identity_sha256"),
+        }
+        variants: dict[str, Any] = {}
+        for variant in VARIANTS:
+            root = _safe_path(directories[variant], f"{variant} snapshot root", directory=True)
+            receipt_path = _safe_path(root / "future-value-snapshot-receipt.json", f"{variant} snapshot receipt")
+            manifest_path = _safe_path(root / "manifest.json", f"{variant} snapshot manifest")
+            receipt = _receipt_hash(receipt_path, f"{variant} snapshot receipt")
+            manifest = _load_json(manifest_path, f"{variant} snapshot manifest")
+            if manifest.get("schema_version") != "scryglass:future-value-snapshot:v1":
+                raise DownstreamRunError(f"{variant} snapshot manifest schema changed")
+            if receipt.get("capability_schema_version") != SNAPSHOT_CAPABILITY_SCHEMA_VERSION:
+                raise DownstreamRunError(f"{variant} snapshot capability schema changed")
+            manifest_hash = _require_hash(manifest.get("manifest_sha256"), f"{variant} snapshot manifest hash")
+            body = dict(manifest)
+            body.pop("manifest_sha256", None)
+            if _sha256_bytes(_canonical(body)) != manifest_hash:
+                raise DownstreamRunError(f"{variant} snapshot manifest hash changed")
+            if receipt.get("variant") != variant or manifest.get("variant") != variant:
+                raise DownstreamRunError(f"{variant} snapshot variant binding changed")
+            blockers: list[str] = []
+            receipt_source = receipt.get("source")
+            if not isinstance(receipt_source, Mapping):
+                raise DownstreamRunError(f"{variant} snapshot source binding is missing")
+            required_source_fields = {
+                "source_as_of",
+                "source_game_count",
+                "source_identity_sha256",
+                "source_receipt_sha256",
+                "model_eligible_game_count",
+                "model_eligible_identity_sha256",
+            }
+            if not required_source_fields.issubset(receipt_source):
+                raise DownstreamRunError(f"{variant} snapshot source binding is incomplete")
+            for field, expected in source_binding.items():
+                if field in receipt_source and receipt_source.get(field) != expected:
+                    raise DownstreamRunError(f"{variant} snapshot source changed: {field}")
+            for field, expected in source_binding.items():
+                if field in manifest and manifest.get(field) != expected:
+                    raise DownstreamRunError(f"{variant} snapshot manifest source changed: {field}")
+            files = manifest.get("files")
+            if not isinstance(files, Mapping):
+                raise DownstreamRunError(f"{variant} snapshot manifest files are missing")
+            required_file_keys = {
+                "player_snapshot",
+                "team_snapshot",
+                "player_rank_diffs",
+                "team_rank_diffs",
+                "receipt",
+            }
+            if not required_file_keys.issubset(files):
+                missing_files = ", ".join(sorted(required_file_keys.difference(files)))
+                raise DownstreamRunError(f"{variant} snapshot manifest files are incomplete: {missing_files}")
+            file_records: dict[str, Any] = {}
+            for name, raw in files.items():
+                # Use the runner's stricter file binding helper.  The local
+                # manifest records are absolute and remain inside the bundle.
+                if not isinstance(raw, Mapping):
+                    raise DownstreamRunError(f"{variant} snapshot file record is invalid: {name}")
+                path = _safe_path(str(raw.get("path") or ""), f"{variant} snapshot {name}")
+                try:
+                    path.relative_to(root.resolve())
+                except ValueError as error:
+                    raise DownstreamRunError(f"{variant} snapshot file escapes root: {name}") from error
+                if int(raw.get("bytes", -1)) != path.stat().st_size or str(raw.get("sha256") or "").lower() != _sha256_path(path):
+                    raise DownstreamRunError(f"{variant} snapshot file changed: {name}")
+                file_records[str(name)] = {"path": str(path), "bytes": path.stat().st_size, "sha256": _sha256_path(path)}
+            capability = manifest.get("capability")
+            if not isinstance(capability, Mapping):
+                capability = receipt.get("capability")
+            if not isinstance(capability, Mapping):
+                raise DownstreamRunError(f"{variant} snapshot capability is missing")
+            if variant == "scaling_curve":
+                for kind in ("player", "team"):
+                    cap = capability.get(f"{kind}_ranks")
+                    coverage = receipt.get("rank_coverage", {}).get(kind, {})
+                    if not isinstance(cap, Mapping) or cap.get("status") != "not_applicable":
+                        raise DownstreamRunError(f"{variant} {kind} capability is not typed N/A")
+                    if not isinstance(coverage, Mapping) or coverage.get("status") != "not_applicable" or coverage.get("row_policy") != "no_rows":
+                        raise DownstreamRunError(f"{variant} {kind} N/A coverage is incomplete")
+            variants[variant] = {
+                "status": receipt.get("status"),
+                "variant": variant,
+                "capability_schema_version": receipt.get("capability_schema_version"),
+                "capability": capability,
+                "blockers": list(receipt.get("blockers", [])) if isinstance(receipt.get("blockers"), list) else blockers,
+                "player_row_count": receipt.get("player_row_count"),
+                "team_row_count": receipt.get("team_row_count"),
+                "player_rank_diff_count": receipt.get("player_rank_diff_count"),
+                "team_rank_diff_count": receipt.get("team_rank_diff_count"),
+                "rank_coverage": receipt.get("rank_coverage", {}),
+                "receipt": {**_file_record(receipt_path), "receipt_sha256": receipt.get("receipt_sha256")},
+                "manifest": {**_file_record(manifest_path), "manifest_sha256": manifest_hash},
+                "files": file_records,
+            }
+        payload: dict[str, Any] = {
+            "schema_version": SNAPSHOT_CAPABILITY_MANIFEST_SCHEMA_VERSION,
+            "capability_schema_version": SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+            "status": "research_only",
+            "authority": dict(AUTHORITY),
+            "source": source_binding,
+            "variants": variants,
+            "capability_matrix": json.loads(json.dumps(SNAPSHOT_CAPABILITY_MATRIX, sort_keys=True)),
+            "blockers": [],
+        }
+        payload["manifest_sha256"] = _sha256_bytes(_canonical(payload))
+        _write_json(args.output.resolve(), payload)
+        print(json.dumps({"status": payload["status"], "variants": list(VARIANTS)}, sort_keys=True))
+        return 0
+    except (DownstreamRunError, OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+        print(f"snapshot capability manifest worker failed: {error}", file=sys.stderr)
+        return 1
+
+
+def _tier_shadow_fourway_worker(argv: Sequence[str]) -> int:
+    """Run the variant-neutral retrospective Tier shadow producer."""
+
+    parser = argparse.ArgumentParser(description="Build a four-way full-census Tier shadow")
+    parser.add_argument("--tier-shadow-fourway-worker", action="store_true")
+    parser.add_argument("--source-root", required=True, type=Path)
+    parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument("--source-receipt-file-sha256", required=True)
+    parser.add_argument("--current-ledger", required=True, type=Path)
+    parser.add_argument("--current-ledger-sha256", required=True)
+    parser.add_argument("--current-receipt", required=True, type=Path)
+    parser.add_argument("--current-receipt-file-sha256", required=True)
+    parser.add_argument("--variant-model", action="append", default=[])
+    parser.add_argument("--scaling-ledger", type=Path)
+    parser.add_argument("--scaling-ledger-sha256")
+    parser.add_argument("--scaling-receipt", type=Path)
+    parser.add_argument("--scaling-receipt-file-sha256")
+    parser.add_argument("--output-root", required=True, type=Path)
+    args = parser.parse_args(list(argv))
+    try:
+        from lol_kills.research.future_value_tier_shadow import build_frozen_fourway_tier_shadow
+
+        models = _variant_directory_arguments(args.variant_model, "--variant-model")
+        model_inputs: dict[str, dict[str, Any]] = {}
+        destinations: dict[str, Path] = {}
+        for ordinal, variant in enumerate(VARIANTS, start=1):
+            root = _safe_path(models[variant], f"{variant} final-fit root", directory=True)
+            model = _safe_path(root / f"final-v{ordinal}-model.json", f"{variant} final-fit model")
+            receipt = _safe_path(root / f"final-v{ordinal}-model-receipt.json", f"{variant} final-fit receipt")
+            run = _safe_path(root / "final-fit-run.json", f"{variant} final-fit run")
+            model_inputs[variant] = {
+                "model_path": model,
+                "model_receipt_path": receipt,
+                "run_receipt_path": run,
+                "expected_model_sha256": _sha256_path(model),
+                "expected_model_receipt_file_sha256": _sha256_path(receipt),
+                "expected_run_receipt_sha256": _sha256_path(run),
+            }
+            destinations[variant] = args.output_root.resolve() / variant
+        results = build_frozen_fourway_tier_shadow(
+            source_root=args.source_root.resolve(),
+            source_receipt_path=args.source_receipt.resolve(),
+            expected_source_receipt_file_sha256=_require_hash(args.source_receipt_file_sha256, "source receipt file hash"),
+            model_inputs=model_inputs,
+            current_ledger_path=args.current_ledger.resolve(),
+            current_receipt_path=args.current_receipt.resolve(),
+            expected_current_ledger_sha256=_require_hash(args.current_ledger_sha256, "current ledger hash"),
+            expected_current_receipt_file_sha256=_require_hash(args.current_receipt_file_sha256, "current receipt file hash"),
+            scaling_ledger_path=args.scaling_ledger.resolve() if args.scaling_ledger else None,
+            scaling_receipt_path=args.scaling_receipt.resolve() if args.scaling_receipt else None,
+            expected_scaling_ledger_sha256=args.scaling_ledger_sha256,
+            expected_scaling_receipt_file_sha256=args.scaling_receipt_file_sha256,
+            destinations=destinations,
+        )
+        output_root = args.output_root.resolve()
+        output_root.mkdir(parents=True, exist_ok=True)
+        source_payload = _load_json(args.source_receipt.resolve(), "Tier shadow source receipt")
+        variants_payload = {
+            variant: {
+                "variant": variant,
+                "ledger": _file_record(result.ledger_path),
+                "receipt": _file_record(result.receipt_path),
+                "game_count": len(result.game_ids),
+                "game_identity_sha256": identity_sha256(result.game_ids),
+                "provenance": dict(result.provenance),
+            }
+            for variant, result in sorted(results.items())
+        }
+        payload: dict[str, Any] = {
+            "schema_version": "scryglass:future-value-tier-shadow-fourway:v1",
+            "status": "research_only",
+            "authority": dict(AUTHORITY),
+            "variants": variants_payload,
+            "source": {
+                "source_as_of": source_payload.get("source_as_of"),
+                "source_game_count": source_payload.get("source_game_count"),
+                "source_identity_sha256": source_payload.get("source_identity_sha256"),
+                "source_receipt_sha256": source_payload.get("receipt_sha256"),
+                "model_eligible_game_count": source_payload.get("model_eligible_game_count"),
+                "model_eligible_identity_sha256": source_payload.get("model_eligible_identity_sha256"),
+                "source_receipt_file_sha256": _sha256_path(args.source_receipt.resolve()),
+            },
+            "blockers": ["retrospective_full_census_model_fit_not_chronological_evaluation"],
+        }
+        payload["manifest_sha256"] = _sha256_bytes(_canonical(payload))
+        _write_json(output_root / "fourway-tier-shadow-manifest.json", payload)
+        print(json.dumps({"status": payload["status"], "variants": list(VARIANTS)}, sort_keys=True))
+        return 0
+    except (DownstreamRunError, OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+        print(f"Tier shadow worker failed: {error}", file=sys.stderr)
+        return 1
+
+
 def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, ...]:
     source = inputs.source_root
     receipt = inputs.source_receipt
     current = _root(config, "current-rating-trust")
     final = _root(config, "final-fit")
-    team = _root(config, "future-team-context")
     snapshots = _root(config, "snapshots")
-    comparison = _root(config, "snapshot-comparison")
+    final_manifest_root = _root(config, "final-fit-manifest")
+    snapshot_manifest_root = _root(config, "snapshot-capabilities")
     current_receipt = current / "current-rating-ledger-receipt.json"
     current_artifact = current / "current-rating-ledger.parquet"
     current_snapshot_receipt = current / "current-rating-snapshot-receipt-v1.json"
-    model = final / "final-v2-model.json"
-    model_receipt = final / "final-v2-model-receipt.json"
     nested_blockers: list[str] = []
     nested = config.nested_selection
     nested_hash = config.nested_selection_sha256
@@ -814,8 +1185,6 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
         nested_blockers.append("nested_selection_input_missing")
     elif not nested.is_file() or nested.is_symlink():
         nested_blockers.append("nested_selection_input_missing")
-    elif config.selected_variant != "future_player_form":
-        nested_blockers.append("final_fit_builder_supports_future_player_form_only")
     else:
         nested_blockers.extend(_nested_selection_blockers(nested, inputs))
     current_stage = Stage(
@@ -837,109 +1206,170 @@ def _core_stage_plan(config: RunConfig, inputs: ResolvedInputs) -> tuple[Stage, 
         output_roots=(current,),
         expected_files=(current_artifact, current_receipt, current_snapshot_receipt),
     )
-    final_job = Job(
-        name="final_fit",
-        command=_python_module(
-            "benchmarks.build_future_value_final_fit",
-            "--source-root", source,
-            "--source-receipt", receipt,
-            "--current-root", current,
-            "--evaluation", inputs.evaluation_paths[config.selected_variant],
-            *( ("--baseline-cache", config.baseline_cache) if config.baseline_cache is not None else () ),
-            "--source-receipt-sha256", inputs.source_receipt_file_sha256,
-            "--current-receipt-sha256", _digest_or_placeholder(current_receipt, "current-receipt-file"),
-            "--current-artifact-sha256", _digest_or_placeholder(current_artifact, "current-artifact"),
-            "--nested-selection", nested or "",
-            "--nested-selection-sha256", nested_hash or "__NESTED_SELECTION_SHA256__",
-            "--output-dir", final,
-        ),
-        output_roots=(final,),
-        expected_files=(model, model_receipt, final / "final-fit-run.json"),
-        input_paths=(source / "maps.parquet", source / "oe_player_games.parquet", source / "oe_team_games.parquet", receipt, current_artifact, current_receipt, inputs.evaluation_paths[config.selected_variant], *( (nested,) if nested is not None else () )),
-        output_dir_policy="absent",
-    )
+    final_jobs: list[Job] = []
+    final_roots: list[Path] = []
+    final_expected: list[Path] = []
+    for ordinal, variant in enumerate(VARIANTS, start=1):
+        variant_root = final / variant
+        model = variant_root / f"final-v{ordinal}-model.json"
+        model_receipt = variant_root / f"final-v{ordinal}-model-receipt.json"
+        run_receipt = variant_root / "final-fit-run.json"
+        command = list(
+            _python_module(
+                "benchmarks.build_future_value_final_fit",
+                "--variant", variant,
+                "--source-root", source,
+                "--source-receipt", receipt,
+                "--current-root", current,
+                "--evaluation", inputs.evaluation_paths[variant],
+                "--evaluation-sha256", _digest_or_placeholder(inputs.evaluation_paths[variant], f"{variant}-evaluation"),
+                *( ("--baseline-cache", config.baseline_cache) if config.baseline_cache is not None else () ),
+                "--source-receipt-sha256", inputs.source_receipt_file_sha256,
+                "--current-receipt-sha256", _digest_or_placeholder(current_receipt, "current-receipt-file"),
+                "--current-artifact-sha256", _digest_or_placeholder(current_artifact, "current-artifact"),
+                "--nested-selection", nested or "",
+                "--nested-selection-sha256", nested_hash or "__NESTED_SELECTION_SHA256__",
+                "--output-dir", variant_root,
+            )
+        )
+        if variant in {"scaling_curve", "both"}:
+            if config.scaling_root is not None:
+                command.extend(("--scaling-root", config.scaling_root))
+            if config.scaling_artifact is not None:
+                command.extend(("--scaling-artifact", config.scaling_artifact))
+            if config.scaling_receipt is not None:
+                command.extend(("--scaling-receipt", config.scaling_receipt))
+            if config.scaling_manifest is not None:
+                command.extend(("--scaling-manifest", config.scaling_manifest))
+            if config.scaling_artifact_sha256 is not None:
+                command.extend(("--scaling-artifact-sha256", config.scaling_artifact_sha256))
+            if config.scaling_receipt_sha256 is not None:
+                command.extend(("--scaling-receipt-sha256", config.scaling_receipt_sha256))
+            if config.scaling_manifest_sha256 is not None:
+                command.extend(("--scaling-manifest-sha256", config.scaling_manifest_sha256))
+        final_jobs.append(
+            Job(
+                name=f"final_fit_{variant}",
+                command=tuple(command),
+                output_roots=(variant_root,),
+                expected_files=(model, model_receipt, run_receipt),
+                input_paths=(
+                    source / "maps.parquet", source / "oe_player_games.parquet",
+                    source / "oe_team_games.parquet", receipt, current_artifact,
+                    current_receipt, inputs.evaluation_paths[variant],
+                    *( (nested,) if nested is not None else () ),
+                    *( (config.scaling_artifact, config.scaling_receipt, config.scaling_manifest)
+                       if variant in {"scaling_curve", "both"}
+                       and config.scaling_artifact is not None
+                       and config.scaling_receipt is not None
+                       and config.scaling_manifest is not None else () ),
+                ),
+                output_dir_policy="absent",
+            )
+        )
+        final_roots.append(variant_root)
+        final_expected.extend((model, model_receipt, run_receipt))
     final_stage = Stage(
         name="final_fit",
-        jobs=() if nested_blockers else (final_job,),
-        output_roots=(final,),
-        expected_files=(model, model_receipt, final / "final-fit-run.json"),
+        jobs=() if nested_blockers else tuple(final_jobs),
+        output_roots=tuple(final_roots),
+        expected_files=tuple(final_expected),
         blockers=tuple(sorted(set(nested_blockers))),
     )
-    dependent_blockers = tuple(sorted(set(nested_blockers)))
-    team_stage = Stage(
-        name="future_team_context",
-        jobs=() if dependent_blockers else (Job(
-            name="future_team_context",
-            command=_python_module(
-                "benchmarks.build_future_team_context",
-                "--source-root", source,
-                "--source-receipt", receipt,
-                "--source-receipt-sha256", inputs.source_receipt_file_sha256,
-                "--model-receipt", model_receipt,
-                "--model-receipt-sha256", _digest_or_placeholder(model_receipt, "model-receipt-file"),
-                "--model-artifact", model,
-                "--model-artifact-sha256", _digest_or_placeholder(model, "model-artifact"),
-                "--output-root", team,
+    manifest_command: list[str] = list(
+        _python_module("benchmarks.run_future_value_downstream", "--final-fit-manifest-worker")
+    ) + ["--source-receipt", receipt, "--source-receipt-file-sha256", inputs.source_receipt_file_sha256]
+    for variant in VARIANTS:
+        manifest_command.extend(("--variant-output", f"{variant}={final / variant}"))
+    final_manifest = final_manifest_root / "final-fit-manifest.json"
+    final_manifest_stage = Stage(
+        name="final_fit_manifest",
+        jobs=(Job(
+            name="final_fit_manifest",
+            command=tuple(manifest_command + ["--output", final_manifest]),
+            output_roots=(final_manifest_root,),
+            expected_files=(final_manifest,),
+            input_paths=tuple(
+                [receipt]
+                + [path for path in final_expected]
             ),
-            output_roots=(team,),
-            expected_files=(team / "future-team-context.json", team / "future-team-context-receipt.json", team / "manifest.json"),
-            input_paths=(source / "maps.parquet", source / "oe_player_games.parquet", source / "oe_team_games.parquet", receipt, model, model_receipt),
-        ),),
-        output_roots=(team,),
-        expected_files=(team / "future-team-context.json", team / "future-team-context-receipt.json", team / "manifest.json"),
-        blockers=dependent_blockers,
-    )
-    snapshot_stage = Stage(
-        name="snapshots",
-        jobs=() if dependent_blockers else (Job(
-            name="snapshots",
-            command=_python_module(
-                "benchmarks.build_future_value_snapshots",
-                "--source-root", source,
-                "--source-receipt", receipt,
-                "--source-receipt-sha256", inputs.source_receipt_file_sha256,
-                "--current-root", current,
-                "--current-receipt", current / "current-rating-snapshot-receipt-v1.json",
-                "--current-receipt-sha256", _digest_or_placeholder(current_snapshot_receipt, "current-snapshot-receipt-file"),
-                "--model-receipt", model_receipt,
-                "--model-artifact", model,
-                "--output-root", snapshots,
-            ),
-            output_roots=(snapshots,),
-            expected_files=(snapshots / "future-value-snapshot-receipt.json", snapshots / "future-player-rank-diffs.json", snapshots / "future-team-rank-diffs.json", snapshots / "manifest.json"),
-            input_paths=(source / "maps.parquet", source / "oe_player_games.parquet", source / "oe_team_games.parquet", receipt, current_snapshot_receipt, current / "player/player_ratings_snapshot.parquet", current / "team/ratings_snapshot.parquet", model, model_receipt),
             output_dir_policy="absent",
         ),),
-        output_roots=(snapshots,),
-        expected_files=(snapshots / "future-value-snapshot-receipt.json", snapshots / "future-player-rank-diffs.json", snapshots / "future-team-rank-diffs.json", snapshots / "manifest.json"),
-        blockers=dependent_blockers,
+        output_roots=(final_manifest_root,),
+        expected_files=(final_manifest,),
     )
-    comparison_stage = Stage(
-        name="snapshot_comparison",
-        jobs=(Job(
-            name="snapshot_comparison",
-            command=(
-                *_python_module(
-                    "benchmarks.run_future_value_downstream",
-                    "--snapshot-comparison-worker",
-                ),
-                "--source-receipt", receipt,
-                "--source-receipt-file-sha256", inputs.source_receipt_file_sha256,
-                "--current-receipt", current_snapshot_receipt,
-                "--future-receipt", snapshots / "future-value-snapshot-receipt.json",
-                "--player-rank-diffs", snapshots / "future-player-rank-diffs.json",
-                "--team-rank-diffs", snapshots / "future-team-rank-diffs.json",
-                "--output", comparison / "snapshot-comparison.json",
+    snapshot_jobs: list[Job] = []
+    snapshot_roots: list[Path] = []
+    snapshot_expected: list[Path] = []
+    for ordinal, variant in enumerate(VARIANTS, start=1):
+        snapshot_root = snapshots / variant
+        snapshot_receipt = snapshot_root / "future-value-snapshot-receipt.json"
+        snapshot_expected_files = (
+            snapshot_receipt,
+            snapshot_root / "future-player-value-snapshot.json",
+            snapshot_root / "future-team-value-snapshot.json",
+            snapshot_root / "future-player-rank-diffs.json",
+            snapshot_root / "future-team-rank-diffs.json",
+            snapshot_root / "manifest.json",
+        )
+        command = list(_python_module(
+            "benchmarks.build_future_value_snapshots",
+            "--variant", variant,
+            "--source-root", source,
+            "--source-receipt", receipt,
+            "--source-receipt-sha256", inputs.source_receipt_file_sha256,
+            "--current-root", current,
+            "--current-receipt", current_snapshot_receipt,
+            "--current-receipt-sha256", _digest_or_placeholder(current_snapshot_receipt, "current-snapshot-receipt-file"),
+            "--output-root", snapshot_root,
+        ))
+        variant_model_root = final / variant
+        model = variant_model_root / f"final-v{ordinal}-model.json"
+        model_receipt = variant_model_root / f"final-v{ordinal}-model-receipt.json"
+        command.extend(("--model-receipt", model_receipt, "--model-artifact", model))
+        snapshot_jobs.append(Job(
+            name=f"snapshot_{variant}",
+            command=tuple(command),
+            output_roots=(snapshot_root,),
+            expected_files=snapshot_expected_files,
+            input_paths=tuple(
+                [source / "maps.parquet", source / "oe_player_games.parquet", source / "oe_team_games.parquet",
+                 receipt, current_snapshot_receipt,
+                 current / "player/player_ratings_snapshot.parquet",
+                 current / "team/ratings_snapshot.parquet"]
+                + [inputs.evaluation_paths[variant], model, model_receipt]
             ),
-            output_roots=(comparison,),
-            expected_files=(comparison / "snapshot-comparison.json",),
-            input_paths=(receipt, current_snapshot_receipt, snapshots / "future-value-snapshot-receipt.json", snapshots / "future-player-rank-diffs.json", snapshots / "future-team-rank-diffs.json"),
-        ),),
-        output_roots=(comparison,),
-        expected_files=(comparison / "snapshot-comparison.json",),
-        blockers=(),
+            output_dir_policy="absent",
+        ))
+        snapshot_roots.append(snapshot_root)
+        snapshot_expected.extend(snapshot_expected_files)
+    snapshot_stage = Stage(
+        name="snapshots",
+        jobs=tuple(snapshot_jobs),
+        output_roots=tuple(snapshot_roots),
+        expected_files=tuple(snapshot_expected),
     )
-    return (current_stage, final_stage, team_stage, snapshot_stage, comparison_stage)
+    capability_manifest = snapshot_manifest_root / "snapshot-capability-manifest.json"
+    capability_command: list[str] = list(
+        _python_module("benchmarks.run_future_value_downstream", "--snapshot-capability-manifest-worker")
+    ) + ["--source-receipt", receipt, "--source-receipt-file-sha256", inputs.source_receipt_file_sha256]
+    for variant in VARIANTS:
+        capability_command.extend(("--variant-output", f"{variant}={snapshots / variant}"))
+    capability_inputs = [receipt]
+    capability_inputs.extend(snapshot_expected)
+    comparison_stage = Stage(
+        name="snapshot_capabilities",
+        jobs=(Job(
+            name="snapshot_capabilities",
+            command=tuple(capability_command + ["--output", capability_manifest]),
+            output_roots=(snapshot_manifest_root,),
+            expected_files=(capability_manifest,),
+            input_paths=tuple(capability_inputs),
+        ),),
+        output_roots=(snapshot_manifest_root,),
+        expected_files=(capability_manifest,),
+    )
+    return (current_stage, final_stage, final_manifest_stage, snapshot_stage, comparison_stage)
 
 
 def build_stage_plan(config: RunConfig, inputs: ResolvedInputs | None = None) -> tuple[Stage, ...]:
@@ -1284,11 +1714,9 @@ def _execute_stage(config: RunConfig, stage: Stage, *, resume: bool) -> dict[str
 def _write_selection(config: RunConfig, inputs: ResolvedInputs, source: Mapping[str, Any]) -> dict[str, Any]:
     root = _root(config, "selection")
     _ensure_empty(root)
-    selected_blockers = (
-        ["final_fit_builder_supports_future_player_form_only"]
-        if config.selected_variant != "future_player_form"
-        else []
-    )
+    # The selection is a manual review annotation.  It never suppresses one
+    # of the four evaluation chains.
+    selected_blockers: list[str] = []
     selected_payload = {
         "schema_version": SELECTION_SCHEMA_VERSION,
         "status": "caller_selected_blocked" if selected_blockers else "caller_selected_research_only",
@@ -1328,11 +1756,7 @@ def _write_selection(config: RunConfig, inputs: ResolvedInputs, source: Mapping[
     receipt_paths: dict[str, Path] = {}
     for variant, artifact in sorted(inputs.evaluation_paths.items()):
         model = _load_json(artifact, f"{variant} evaluation")
-        variant_blockers = (
-            ["final_fit_builder_supports_future_player_form_only"]
-            if variant != "future_player_form"
-            else []
-        )
+        variant_blockers: list[str] = []
         payload = {
             "schema_version": EVALUATION_RECEIPT_SCHEMA_VERSION,
             "status": "blocked" if variant_blockers else "research_only",
@@ -1363,11 +1787,7 @@ def _validate_selection_payload(
         raise DownstreamRunError("selected variant choice changed")
     if value.get("selection_method") != "explicit_caller_choice" or value.get("auto_promotion") is not False:
         raise DownstreamRunError("selected variant was not caller-selected")
-    expected_selection_blockers = (
-        ["final_fit_builder_supports_future_player_form_only"]
-        if config.selected_variant != "future_player_form"
-        else []
-    )
+    expected_selection_blockers: list[str] = []
     if value.get("status") != (
         "caller_selected_blocked" if expected_selection_blockers else "caller_selected_research_only"
     ):
@@ -1427,11 +1847,7 @@ def _validate_selection_payload(
         runtime = _file_record(inputs.evaluation_runtime_paths[variant])
         if receipt.get("artifact") != artifact or receipt.get("runtime") != runtime:
             raise DownstreamRunError(f"selected {variant} evaluation receipt artifacts changed")
-        expected_variant_blockers = (
-            ["final_fit_builder_supports_future_player_form_only"]
-            if variant != "future_player_form"
-            else []
-        )
+        expected_variant_blockers: list[str] = []
         if receipt.get("status") != (
             "blocked" if expected_variant_blockers else "research_only"
         ):
@@ -1504,19 +1920,27 @@ def _downstream_stage(config: RunConfig, inputs: ResolvedInputs, selection: Mapp
     root = _root(config, "downstream-impact")
     output = root / "downstream-impact.json"
     required: list[Path] = list(inputs.evaluation_paths.values()) + list(selection["receipt_paths"].values())
-    required.extend(
-        (
-            inputs.paired_uncertainty,
-            _root(config, "snapshots") / "future-value-snapshot-receipt.json",
-            _root(config, "snapshots") / "manifest.json",
-            _root(config, "snapshot-comparison") / "snapshot-comparison.json",
+    required.append(inputs.paired_uncertainty)
+    required.extend((_root(config, "final-fit-manifest") / "final-fit-manifest.json", _root(config, "snapshot-capabilities") / "snapshot-capability-manifest.json"))
+    for variant in VARIANTS:
+        snapshot_root = _root(config, "snapshots") / variant
+        required.extend(
+            snapshot_root / name
+            for name in (
+                "future-value-snapshot-receipt.json",
+                "future-player-rank-diffs.json",
+                "future-team-rank-diffs.json",
+                "manifest.json",
+            )
         )
-    )
     blockers = list(previous_blockers)
-    tier_diff = _root(config, "tier-diff") / "current-v2-full-census-tier-diff.json"
-    tier_receipt = _root(config, "tier-diff") / "current-v2-full-census-tier-diff-receipt.json"
+    tier_diff = _root(config, "tier-diff") / "current-fourway-full-census-tier-diff.json"
+    tier_receipt = _root(config, "tier-diff") / "current-fourway-full-census-tier-diff-receipt.json"
+    tier_fourway = _root(config, "tier-fourway") / "fourway-tierlist-report.json"
+    tier_fourway_receipt = _root(config, "tier-fourway") / "run-receipt.json"
+    tier_shadow = _root(config, "tier-shadow") / "fourway-tier-shadow-manifest.json"
     draft_report = _root(config, "draft-score") / "fourway-report.json"
-    required.extend((tier_diff, tier_receipt, draft_report))
+    required.extend((tier_diff, tier_receipt, tier_fourway, tier_fourway_receipt, tier_shadow, draft_report))
     if any(not path.is_file() or path.is_symlink() for path in required):
         blockers.append("downstream_impact_required_input_missing")
     eval_args: list[str] = []
@@ -1527,15 +1951,20 @@ def _downstream_stage(config: RunConfig, inputs: ResolvedInputs, selection: Mapp
         "benchmarks.build_future_value_downstream_impact",
         "--source-receipt", inputs.source_receipt,
         *eval_args,
-        "--snapshot-receipt", _root(config, "snapshots") / "future-value-snapshot-receipt.json",
-        "--snapshot-comparison", _root(config, "snapshot-comparison") / "snapshot-comparison.json",
-        "--snapshot-manifest", _root(config, "snapshots") / "manifest.json",
+        "--snapshot-capability-manifest", _root(config, "snapshot-capabilities") / "snapshot-capability-manifest.json",
         "--tier-diff", tier_diff,
         "--tier-receipt", tier_receipt,
+        "--tier-fourway-report", tier_fourway,
+        "--tier-fourway-receipt", tier_fourway_receipt,
+        "--tier-shadow-manifest", tier_shadow,
         "--draft-score-report", draft_report,
         "--paired-uncertainty", inputs.paired_uncertainty,
         "--output", output,
     )
+    for variant in VARIANTS:
+        snapshot_root = _root(config, "snapshots") / variant
+        command += ("--snapshot-variant", f"{variant}={snapshot_root / 'future-value-snapshot-receipt.json'}")
+        command += ("--snapshot-manifest-variant", f"{variant}={snapshot_root / 'manifest.json'}")
     return Stage(name="downstream_impact", jobs=() if blockers else (Job(name="downstream_impact", command=command, output_roots=(root,), expected_files=(output,), input_paths=tuple(required)),), output_roots=(root,), expected_files=(output,), blockers=tuple(sorted(set(blockers))))
 
 
@@ -1546,17 +1975,19 @@ def _optional_stage_plan(
     tier_candidate_sha256: str | None = None,
 ) -> tuple[Stage, ...]:
     final = _root(config, "final-fit")
-    model = final / "final-v2-model.json"
-    model_receipt = final / "final-v2-model-receipt.json"
     current = _root(config, "current-rating-trust")
     stage_list: list[Stage] = []
-
+    tier_source = config.tier_source_root or inputs.freeze_root
+    tier_receipt = (
+        tier_source / "future-value-source-receipt.json"
+        if (tier_source / "future-value-source-receipt.json").is_file()
+        else inputs.source_receipt
+    )
     tier_root = _root(config, "tier-shadow")
-    tier_available = config.tier_source_root is not None
     tier_blockers: list[str] = []
-    if not tier_available:
+    if config.tier_source_root is None or config.tier_trust_manifest is None or config.tier_trust_manifest_sha256 is None:
         tier_blockers.append("tier_shadow_exact_inputs_missing")
-    elif any(
+    if config.tier_source_root is not None and any(
         not path.is_file() or path.is_symlink()
         for path in (
             config.tier_source_root / "source" / "oe_player_games.parquet",
@@ -1564,113 +1995,100 @@ def _optional_stage_plan(
         )
     ):
         tier_blockers.append("tier_shadow_source_files_missing")
-    if config.tier_build_pooled_candidate and (
-        config.tier_trust_manifest is None or config.tier_trust_manifest_sha256 is None
-    ):
-        tier_blockers.append("tier_shadow_pooled_trust_input_missing")
-    tier_expected_files = [
-        tier_root / "v2-tier-offset-ledger.json",
-        tier_root / "v2-tier-offset-ledger-receipt.json",
-        tier_root / "run-receipt.json",
-    ]
-    if config.tier_build_pooled_candidate:
-        tier_expected_files.append(tier_root / "v2-tier-candidate.json")
-    tier_command = _python_module(
-        "benchmarks.build_future_value_v2_tier_shadow",
-        "--repository-root", config.tier_repository_root or config.repository_root,
-        "--source-root", config.tier_source_root or inputs.freeze_root,
-        "--source-receipt", inputs.source_receipt,
-        "--source-receipt-file-sha256", inputs.source_receipt_file_sha256,
-        "--model", model,
-        "--model-sha256", _digest_or_placeholder(model, "model-artifact"),
-        "--model-receipt", model_receipt,
-        "--model-receipt-file-sha256", _digest_or_placeholder(model_receipt, "model-receipt-file"),
-        "--run-receipt", final / "final-fit-run.json",
-        "--run-receipt-sha256", _digest_or_placeholder(final / "final-fit-run.json", "final-fit-run"),
+    if config.scaling_artifact is None or config.scaling_receipt is None or config.scaling_artifact_sha256 is None or config.scaling_receipt_sha256 is None:
+        tier_blockers.append("tier_shadow_scaling_inputs_missing")
+    tier_expected_files: list[Path] = [tier_root / "fourway-tier-shadow-manifest.json"]
+    for variant in VARIANTS:
+        tier_expected_files.extend((
+            tier_root / variant / "tier-offset-ledger.json",
+            tier_root / variant / "tier-offset-ledger-receipt.json",
+        ))
+    tier_command: list[str] = list(
+        _python_module("benchmarks.run_future_value_downstream", "--tier-shadow-fourway-worker")
+    ) + [
+        "--source-root", tier_source,
+        "--source-receipt", tier_receipt,
+        "--source-receipt-file-sha256", _digest_or_placeholder(tier_receipt, "tier-source-receipt-file"),
         "--current-ledger", current / "current-rating-ledger.parquet",
         "--current-ledger-sha256", _digest_or_placeholder(current / "current-rating-ledger.parquet", "current-ledger"),
         "--current-receipt", current / "current-rating-ledger-receipt.json",
         "--current-receipt-file-sha256", _digest_or_placeholder(current / "current-rating-ledger-receipt.json", "current-receipt-file"),
         "--output-root", tier_root,
-    )
-    if config.tier_build_pooled_candidate:
-        tier_command += (
-            "--build-pooled-candidate",
-            "--tier-trust-manifest", config.tier_trust_manifest or "",
-            "--tier-trust-manifest-sha256", config.tier_trust_manifest_sha256 or "",
-        )
-    tier_inputs = [
-        model,
-        model_receipt,
-        final / "final-fit-run.json",
-        current / "current-rating-ledger.parquet",
-        current / "current-rating-ledger-receipt.json",
-        inputs.source_receipt,
     ]
-    if config.tier_trust_manifest is not None:
-        tier_inputs.append(config.tier_trust_manifest)
-    stage_list.append(Stage(name="tier_shadow", jobs=() if tier_blockers else (Job(name="tier_shadow", command=tier_command, output_roots=(tier_root,), expected_files=tuple(tier_expected_files), input_paths=tuple(tier_inputs)),), output_roots=(tier_root,), expected_files=tuple(tier_expected_files), blockers=tuple(sorted(set(tier_blockers)))))
+    for ordinal, variant in enumerate(VARIANTS, start=1):
+        tier_command.extend(("--variant-model", f"{variant}={final / variant}"))
+    if config.scaling_artifact is not None:
+        tier_command.extend(("--scaling-ledger", config.scaling_artifact))
+    if config.scaling_artifact_sha256 is not None:
+        tier_command.extend(("--scaling-ledger-sha256", config.scaling_artifact_sha256))
+    if config.scaling_receipt is not None:
+        tier_command.extend(("--scaling-receipt", config.scaling_receipt))
+    if config.scaling_receipt_sha256 is not None:
+        tier_command.extend(("--scaling-receipt-file-sha256", config.scaling_receipt_sha256))
+    tier_inputs = [tier_receipt, current / "current-rating-ledger.parquet", current / "current-rating-ledger-receipt.json"]
+    tier_inputs.extend(
+        final / variant / name
+        for variant in VARIANTS
+        for name in (f"final-v{VARIANTS.index(variant) + 1}-model.json", f"final-v{VARIANTS.index(variant) + 1}-model-receipt.json", "final-fit-run.json")
+    )
+    tier_inputs.extend(path for path in (config.tier_trust_manifest, config.scaling_artifact, config.scaling_receipt) if path is not None)
+    stage_list.append(Stage(
+        name="tier_shadow",
+        jobs=() if tier_blockers else (Job(name="tier_shadow", command=tuple(tier_command), output_roots=(tier_root,), expected_files=tuple(tier_expected_files), input_paths=tuple(tier_inputs), output_dir_policy="absent"),),
+        output_roots=(tier_root,),
+        expected_files=tuple(tier_expected_files),
+        blockers=tuple(sorted(set(tier_blockers))),
+    ))
+
+    chronological_root = _root(config, "tier-fourway")
+    chronological_report = chronological_root / "fourway-tierlist-report.json"
+    chronological_receipt = chronological_root / "run-receipt.json"
+    chronological_blockers: list[str] = []
+    if config.tier_source_root is None or config.tier_repository_root is None or config.tier_trust_manifest is None or config.tier_trust_manifest_sha256 is None:
+        chronological_blockers.append("tier_fourway_exact_inputs_missing")
+    chronological_command = _python_module(
+        "benchmarks.future_value_tierlist_fourway",
+        "--repo-root", config.tier_repository_root or config.repository_root,
+        "--source-root", tier_source,
+        "--evaluation-root", inputs.fourway_root / "stages/evaluations",
+        "--trust-manifest", config.tier_trust_manifest or "",
+        "--expected-trust-manifest-sha256", config.tier_trust_manifest_sha256 or "",
+        "--output-root", chronological_root,
+        "--workers", config.workers,
+    )
+    chronological_inputs = [tier_receipt, config.tier_trust_manifest] + list(inputs.evaluation_paths.values())
+    stage_list.append(Stage(
+        name="tier_fourway",
+        jobs=() if chronological_blockers else (Job(name="tier_fourway", command=chronological_command, output_roots=(chronological_root,), expected_files=(chronological_report, chronological_receipt), input_paths=tuple(path for path in chronological_inputs if path is not None), output_dir_policy="absent"),),
+        output_roots=(chronological_root,),
+        expected_files=(chronological_report, chronological_receipt),
+        blockers=tuple(sorted(set(chronological_blockers))),
+    ))
 
     diff_root = _root(config, "tier-diff")
-    diff_values = (
-        config.tier_trust_manifest,
-        config.tier_trust_manifest_sha256,
-        config.tier_source_root,
-    )
-    diff_blockers = list(tier_blockers)
-    if any(value is None for value in diff_values):
+    diff_report = diff_root / "current-fourway-full-census-tier-diff.json"
+    diff_receipt = diff_root / "current-fourway-full-census-tier-diff-receipt.json"
+    diff_blockers = list(chronological_blockers)
+    if config.tier_source_root is None or config.tier_trust_manifest is None or config.tier_trust_manifest_sha256 is None:
         diff_blockers.append("tier_diff_exact_inputs_missing")
-    if not config.tier_build_pooled_candidate:
-        diff_blockers.append("tier_diff_pooled_candidate_required")
-    if config.tier_source_root is not None and (
-        not (config.tier_source_root / "future-value-source-receipt.json").is_file()
-        or (config.tier_source_root / "future-value-source-receipt.json").is_symlink()
-    ):
-        diff_blockers.append("tier_diff_source_receipt_missing")
-    diff_command = _python_module(
+    diff_command: list[str] = list(_python_module(
         "benchmarks.future_value_tierlist_full_census_diff",
         "--trust-manifest", config.tier_trust_manifest or "",
         "--expected-trust-manifest-sha256", config.tier_trust_manifest_sha256 or "",
-        "--source-root", config.tier_source_root or inputs.freeze_root,
-        "--v2-candidate", tier_root / "v2-tier-candidate.json",
-        "--expected-v2-candidate-sha256",
-        tier_candidate_sha256
-        or _digest_or_placeholder(tier_root / "v2-tier-candidate.json", "v2-tier-candidate"),
+        "--source-root", tier_source,
         "--output-root", diff_root,
-    )
-    diff_job = Job(
+    ))
+    for variant in VARIANTS:
+        candidate = chronological_root / "candidates" / f"{variant}.json"
+        diff_command.extend(("--variant-candidate", f"{variant}={candidate}", "--expected-variant-candidate-sha256", f"{variant}={_digest_or_placeholder(candidate, f'{variant}-tier-candidate')}"))
+    diff_inputs = [chronological_report, *[chronological_root / "candidates" / f"{variant}.json" for variant in VARIANTS], config.tier_trust_manifest, tier_receipt]
+    stage_list.append(Stage(
         name="tier_diff",
-        command=diff_command,
+        jobs=() if diff_blockers else (Job(name="tier_diff", command=tuple(diff_command), output_roots=(diff_root,), expected_files=(diff_report, diff_receipt), input_paths=tuple(path for path in diff_inputs if path is not None), output_dir_policy="absent"),),
         output_roots=(diff_root,),
-        expected_files=(
-            diff_root / "current-v2-full-census-tier-diff.json",
-            diff_root / "current-v2-full-census-tier-diff-receipt.json",
-        ),
-        input_paths=tuple(
-            path
-            for path in (
-                tier_root / "v2-tier-candidate.json",
-                config.tier_trust_manifest,
-                config.tier_source_root / "future-value-source-receipt.json" if config.tier_source_root is not None else None,
-                config.tier_baseline_candidate,
-                config.tier_production_manifest,
-                config.tier_prospective_evaluation,
-            )
-            if path is not None
-        ),
-    )
-    stage_list.append(
-        Stage(
-            name="tier_diff",
-            jobs=() if diff_blockers else (diff_job,),
-            output_roots=(diff_root,),
-            expected_files=(
-                diff_root / "current-v2-full-census-tier-diff.json",
-                diff_root / "current-v2-full-census-tier-diff-receipt.json",
-            ),
-            blockers=tuple(sorted(set(diff_blockers))),
-        )
-    )
+        expected_files=(diff_report, diff_receipt),
+        blockers=tuple(sorted(set(diff_blockers))),
+    ))
 
     draft_root = _root(config, "draft-score")
     draft_values = (
@@ -1801,6 +2219,13 @@ def _config_payload(config: RunConfig, inputs: ResolvedInputs) -> dict[str, Any]
             "nested_selection": str(config.nested_selection) if config.nested_selection else None,
             "nested_selection_sha256": config.nested_selection_sha256,
             "baseline_cache": str(config.baseline_cache) if config.baseline_cache else None,
+            "scaling_root": str(config.scaling_root) if config.scaling_root else None,
+            "scaling_artifact": str(config.scaling_artifact) if config.scaling_artifact else None,
+            "scaling_artifact_sha256": config.scaling_artifact_sha256,
+            "scaling_receipt": str(config.scaling_receipt) if config.scaling_receipt else None,
+            "scaling_receipt_sha256": config.scaling_receipt_sha256,
+            "scaling_manifest": str(config.scaling_manifest) if config.scaling_manifest else None,
+            "scaling_manifest_sha256": config.scaling_manifest_sha256,
             "tier_source_root": str(config.tier_source_root) if config.tier_source_root else None,
             "tier_repository_root": str(config.tier_repository_root) if config.tier_repository_root else None,
             "tier_trust_manifest": str(config.tier_trust_manifest) if config.tier_trust_manifest else None,
@@ -2063,11 +2488,11 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
     failed_core_stages: set[str] = set()
     core_dependencies = {
         "final_fit": {"current_rating_trust"},
-        "future_team_context": {"current_rating_trust", "final_fit"},
-        "snapshots": {"current_rating_trust", "final_fit"},
-        "snapshot_comparison": {"current_rating_trust", "final_fit", "snapshots"},
+        "final_fit_manifest": {"final_fit"},
+        "snapshots": {"current_rating_trust"},
+        "snapshot_capabilities": set(),
     }
-    for stage_name in ("current_rating_trust", "final_fit", "future_team_context", "snapshots", "snapshot_comparison"):
+    for stage_name in ("current_rating_trust", "final_fit", "final_fit_manifest", "snapshots", "snapshot_capabilities"):
         stage = next(item for item in build_stage_plan(config, inputs) if item.name == stage_name)
         dependency_blockers = [
             f"dependency_{name}_blocked"
@@ -2085,32 +2510,31 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
             failed_core_stages.add(stage_name)
 
     failed_optional_stages: set[str] = set()
-    optional_dependencies = {"tier_diff": {"tier_shadow"}}
-    for optional_name in ("tier_shadow", "tier_diff", "draft_score"):
-        tier_candidate_sha256 = None
-        tier_candidate_path = _root(config, "tier-shadow") / "v2-tier-candidate.json"
-        if optional_name == "tier_diff" and tier_candidate_path.is_file() and not tier_candidate_path.is_symlink():
-            tier_candidate_sha256 = _sha256_path(tier_candidate_path)
+    optional_dependencies = {
+        "tier_shadow": {"current_rating_trust", "final_fit"},
+        "tier_fourway": set(),
+        "tier_diff": {"tier_fourway"},
+        "draft_score": set(),
+    }
+    for optional_name in ("tier_shadow", "tier_fourway", "tier_diff", "draft_score"):
         stage = next(
             item
             for item in _optional_stage_plan(
                 config,
                 inputs,
-                tier_candidate_sha256=tier_candidate_sha256,
+                tier_candidate_sha256=None,
             )
             if item.name == optional_name
         )
-        if stage.name in {"tier_shadow", "tier_diff"}:
+        if stage.name in {"tier_shadow", "tier_fourway", "tier_diff"}:
             stage = _blocked_stage(
                 stage,
                 [
                     f"dependency_{name}_blocked"
                     for name in (
-                        "current_rating_trust",
-                        "final_fit",
                         *sorted(optional_dependencies.get(optional_name, set())),
                     )
-                    if name in failed_core_stages or name in failed_optional_stages
+                    if name in failed_optional_stages or name in failed_core_stages
                 ],
             )
         try:
@@ -2148,6 +2572,13 @@ def _parse_args(argv: Sequence[str] | None = None) -> tuple[RunConfig, bool, boo
     parser.add_argument("--nested-selection", type=Path)
     parser.add_argument("--nested-selection-sha256")
     parser.add_argument("--baseline-cache", type=Path)
+    parser.add_argument("--scaling-root", type=Path)
+    parser.add_argument("--scaling-artifact", type=Path)
+    parser.add_argument("--scaling-artifact-sha256")
+    parser.add_argument("--scaling-receipt", type=Path)
+    parser.add_argument("--scaling-receipt-sha256")
+    parser.add_argument("--scaling-manifest", type=Path)
+    parser.add_argument("--scaling-manifest-sha256")
     parser.add_argument("--tier-source-root", type=Path)
     parser.add_argument("--tier-repository-root", type=Path)
     parser.add_argument("--tier-trust-manifest", type=Path)
@@ -2185,6 +2616,13 @@ def _parse_args(argv: Sequence[str] | None = None) -> tuple[RunConfig, bool, boo
         nested_selection=args.nested_selection.expanduser().resolve() if args.nested_selection else None,
         nested_selection_sha256=args.nested_selection_sha256,
         baseline_cache=args.baseline_cache.expanduser().resolve() if args.baseline_cache else None,
+        scaling_root=args.scaling_root.expanduser().resolve() if args.scaling_root else None,
+        scaling_artifact=args.scaling_artifact.expanduser().resolve() if args.scaling_artifact else None,
+        scaling_artifact_sha256=args.scaling_artifact_sha256,
+        scaling_receipt=args.scaling_receipt.expanduser().resolve() if args.scaling_receipt else None,
+        scaling_receipt_sha256=args.scaling_receipt_sha256,
+        scaling_manifest=args.scaling_manifest.expanduser().resolve() if args.scaling_manifest else None,
+        scaling_manifest_sha256=args.scaling_manifest_sha256,
         tier_source_root=args.tier_source_root.expanduser().resolve() if args.tier_source_root else None,
         tier_repository_root=args.tier_repository_root.expanduser().resolve() if args.tier_repository_root else None,
         tier_trust_manifest=args.tier_trust_manifest.expanduser().resolve() if args.tier_trust_manifest else None,
@@ -2220,6 +2658,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         raw_argv = list(sys.argv[1:] if argv is None else argv)
         if "--snapshot-comparison-worker" in raw_argv:
             return _snapshot_comparison_worker(raw_argv)
+        if "--final-fit-manifest-worker" in raw_argv:
+            return _final_fit_manifest_worker(raw_argv)
+        if "--snapshot-capability-manifest-worker" in raw_argv:
+            return _snapshot_capability_manifest_worker(raw_argv)
+        if "--tier-shadow-fourway-worker" in raw_argv:
+            return _tier_shadow_fourway_worker(raw_argv)
         config, resume, plan_only = _parse_args(argv)
         result = run(config, resume=resume, plan_only=plan_only)
     except DownstreamRunError as error:

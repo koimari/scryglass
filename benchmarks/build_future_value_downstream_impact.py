@@ -9,8 +9,9 @@ The input contract is deliberately explicit:
 
 * one canonical accepted-source receipt;
 * one evaluation model file and optional receipt for each rating variant;
-* a V2 snapshot bundle and its comparison receipt;
-* a full-census Tier comparison and optional receipt;
+* one snapshot capability bundle for each rating variant;
+* a four-way full-census Tier comparison and its optional receipt;
+* the chronological four-way Tier report;
 * a four-way Draft Score report; and
 * a series-cluster bootstrap receipt for paired metric deltas.
 
@@ -43,8 +44,17 @@ SOURCE_SCHEMA_VERSION = "scryglass:future-value-rating-source:v1"
 EVALUATION_SCHEMA_VERSION = "scryglass:future-value-four-variant-evaluation:v1"
 SNAPSHOT_RECEIPT_SCHEMA_VERSION = "scryglass:future-value-snapshot-receipt:v1"
 SNAPSHOT_COMPARISON_SCHEMA_VERSION = "scryglass:future-value-snapshot-comparison:v1"
+SNAPSHOT_CAPABILITY_SCHEMA_VERSION = "scryglass:future-value-snapshot-capability:v1"
+# c44b5019 uses the capability schema for its all-variant manifest.  The
+# bundle spelling is accepted for older runner output during resume checks.
+SNAPSHOT_CAPABILITY_MANIFEST_SCHEMA_VERSION = SNAPSHOT_CAPABILITY_SCHEMA_VERSION
+SNAPSHOT_CAPABILITY_BUNDLE_MANIFEST_SCHEMA_VERSION = "scryglass:future-value-snapshot-capability-manifest:v1"
 TIER_DIFF_SCHEMA_VERSION = "scryglass:future-value-tierlist-full-census-diff:v1"
+TIER_FOURWAY_SCHEMA_VERSION = "scryglass:future-value-tierlist-full-census-fourway:v1"
+TIER_CHRONOLOGICAL_SCHEMA_VERSION = "scryglass:future-value-tierlist-fourway:v1"
 DRAFT_SCHEMA_VERSION = "scryglass:future-value-draft-score-fourway:v1"
+DRAFT_SCHEMA_V1 = "scryglass:future-value-draft-score-fourway:v1"
+DRAFT_SCHEMA_V2 = "scryglass:future-value-draft-score-fourway:v2"
 BOOTSTRAP_SCHEMA_VERSION = "scryglass:future-value-paired-uncertainty:v1"
 VARIANTS = ("current_only", "future_player_form", "scaling_curve", "both")
 BOOTSTRAP_COMPARISONS = (
@@ -687,6 +697,259 @@ def _verify_snapshot_bundle(
     return summary, sorted(set(blockers))
 
 
+def _verify_snapshot_variant(
+    receipt_path_value: Path | str,
+    manifest_path_value: Path | str,
+    *,
+    variant: str,
+    source: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Verify one variant snapshot bundle and preserve typed N/A rows."""
+
+    receipt_path = _safe_file(receipt_path_value, f"{variant} snapshot receipt")
+    manifest_path = _safe_file(manifest_path_value, f"{variant} snapshot manifest")
+    receipt = _read_json(receipt_path, f"{variant} snapshot receipt")
+    manifest = _read_json(manifest_path, f"{variant} snapshot manifest")
+    blockers: list[str] = []
+    if receipt.get("schema_version") != SNAPSHOT_RECEIPT_SCHEMA_VERSION:
+        blockers.append(f"{variant}_snapshot_receipt_schema_invalid")
+    if receipt.get("capability_schema_version") not in {None, SNAPSHOT_CAPABILITY_SCHEMA_VERSION}:
+        blockers.append(f"{variant}_snapshot_capability_schema_invalid")
+    if receipt.get("variant") != variant:
+        blockers.append(f"{variant}_snapshot_variant_mismatch")
+    blockers.extend(_source_match(receipt.get("source", {}), source, f"{variant}_snapshot"))
+    receipt_source = receipt.get("source")
+    if isinstance(receipt_source, Mapping):
+        for field in (
+            "source_as_of",
+            "source_game_count",
+            "source_identity_sha256",
+            "model_eligible_game_count",
+            "model_eligible_identity_sha256",
+            "source_receipt_sha256",
+        ):
+            if field not in receipt_source:
+                blockers.append(f"{variant}_snapshot_{field}_missing")
+    else:
+        blockers.append(f"{variant}_snapshot_source_missing")
+    blockers.extend(_authority_blockers(receipt.get("authority"), f"{variant}_snapshot_receipt"))
+    try:
+        receipt_hash = _hash_self(receipt, "receipt_sha256")
+    except DownstreamImpactError as error:
+        blockers.append(str(error))
+        receipt_hash = None
+    if receipt.get("status") not in {"research_only", "research_only_partial", "research_only_blocked"}:
+        blockers.append(f"{variant}_snapshot_status_invalid")
+    if manifest.get("schema_version") != "scryglass:future-value-snapshot:v1":
+        blockers.append(f"{variant}_snapshot_manifest_schema_invalid")
+    if manifest.get("variant") != variant:
+        blockers.append(f"{variant}_snapshot_manifest_variant_mismatch")
+    blockers.extend(_authority_blockers(manifest.get("authority"), f"{variant}_snapshot_manifest"))
+    try:
+        manifest_hash = _hash_self(manifest, "manifest_sha256")
+    except DownstreamImpactError as error:
+        blockers.append(str(error))
+        manifest_hash = None
+    if manifest.get("source_receipt_sha256") not in {None, source.get("source_receipt_sha256")}:
+        blockers.append(f"{variant}_snapshot_manifest_source_receipt_mismatch")
+    files = manifest.get("files")
+    file_bindings: dict[str, dict[str, Any]] = {}
+    if not isinstance(files, Mapping):
+        blockers.append(f"{variant}_snapshot_manifest_files_missing")
+    else:
+        required_file_keys = {
+            "player_snapshot",
+            "team_snapshot",
+            "player_rank_diffs",
+            "team_rank_diffs",
+            "receipt",
+        }
+        for missing_file in sorted(required_file_keys.difference(files)):
+            blockers.append(f"{variant}_snapshot_manifest_{missing_file}_missing")
+        for name, record in files.items():
+            try:
+                path, binding = _verify_file_record(record, f"{variant} snapshot {name}")
+            except DownstreamImpactError as error:
+                blockers.append(str(error))
+                continue
+            try:
+                path.relative_to(receipt_path.parent.resolve())
+            except ValueError:
+                blockers.append(f"{variant}_snapshot_file_escapes_bundle")
+            file_bindings[str(name)] = binding
+            if name == "receipt" and path != receipt_path:
+                blockers.append(f"{variant}_snapshot_manifest_receipt_path_mismatch")
+    capability = receipt.get("capability")
+    if not isinstance(capability, Mapping):
+        capability = manifest.get("capability")
+    if not isinstance(capability, Mapping):
+        blockers.append(f"{variant}_snapshot_capability_missing")
+        capability = {}
+    expected_component_scope = {
+        "current_only": "current_mu_effective",
+        "future_player_form": "future_player_form_component",
+        "both": "future_player_form_component",
+    }.get(variant)
+    for kind in ("player", "team"):
+        component = capability.get(kind)
+        rank_capability = capability.get(f"{kind}_ranks")
+        if variant == "scaling_curve":
+            if isinstance(component, Mapping) and component.get("status") != "not_applicable":
+                blockers.append(f"{variant}_{kind}_snapshot_component_na_invalid")
+        elif (
+            not isinstance(component, Mapping)
+            or component.get("status") != "available"
+            or component.get("scope") != expected_component_scope
+            or component.get("full_composite_rating") is True
+        ):
+            blockers.append(f"{variant}_{kind}_snapshot_component_scope_invalid")
+        if not isinstance(rank_capability, Mapping):
+            blockers.append(f"{variant}_{kind}_snapshot_rank_capability_missing")
+    rank_movement: dict[str, Any] = {}
+    rank_coverage = receipt.get("rank_coverage")
+    if not isinstance(rank_coverage, Mapping):
+        rank_coverage = {}
+        blockers.append(f"{variant}_snapshot_rank_coverage_missing")
+    for kind, file_key, count_key, identity_key in (
+        ("player", "player_rank_diffs", "player_rank_diff_count", "player_id"),
+        ("team", "team_rank_diffs", "team_rank_diff_count", "team_id"),
+    ):
+        coverage = rank_coverage.get(kind)
+        if not isinstance(coverage, Mapping):
+            coverage = {}
+            blockers.append(f"{variant}_{kind}_snapshot_rank_coverage_missing")
+        status = str(coverage.get("status") or "")
+        if variant == "scaling_curve":
+            # V3 has no intrinsic player or team value at this endpoint.  A
+            # typed N/A is complete evidence and does not create a blocker.
+            if status != "not_applicable" or coverage.get("row_policy") != "no_rows":
+                blockers.append(f"{variant}_{kind}_snapshot_na_contract_invalid")
+            rank_movement[kind] = {
+                "status": "not_applicable",
+                "rows": 0,
+                "changed_rank_count": 0,
+                "mean_absolute_rank_movement": None,
+                "maximum_absolute_rank_movement": None,
+                "rank_universe": coverage.get("rank_universe"),
+                "scope": capability.get(f"{kind}_ranks", {}).get("scope") if isinstance(capability.get(f"{kind}_ranks"), Mapping) else None,
+            }
+            continue
+        record = files.get(file_key) if isinstance(files, Mapping) else None
+        if not isinstance(record, Mapping):
+            blockers.append(f"{variant}_{kind}_snapshot_rank_diff_file_missing")
+            rows: list[Any] = []
+        else:
+            try:
+                rank_path, _ = _verify_file_record(record, f"{variant} snapshot {kind} rank diff")
+                rank_data = _read_json(rank_path, f"{variant} snapshot {kind} rank diff")
+                rows = rank_data.get("rows") if isinstance(rank_data.get("rows"), list) else []
+                if not isinstance(rank_data.get("rows"), list):
+                    blockers.append(f"{variant}_{kind}_snapshot_rank_diff_rows_missing")
+                if rank_data.get("source_receipt_sha256") not in {None, source.get("source_receipt_sha256")}:
+                    blockers.append(f"{variant}_{kind}_snapshot_rank_diff_source_mismatch")
+            except DownstreamImpactError as error:
+                blockers.append(str(error))
+                rows = []
+        if receipt.get(count_key) != len(rows):
+            blockers.append(f"{variant}_{kind}_snapshot_rank_diff_count_mismatch")
+        deltas: list[int] = []
+        ids: list[str] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                blockers.append(f"{variant}_{kind}_snapshot_rank_diff_row_invalid")
+                continue
+            identity = str(row.get(identity_key) or "")
+            if not identity:
+                blockers.append(f"{variant}_{kind}_snapshot_rank_diff_identity_missing")
+            else:
+                ids.append(identity)
+            delta = row.get("rank_delta")
+            if isinstance(delta, bool) or not isinstance(delta, int):
+                blockers.append(f"{variant}_{kind}_snapshot_rank_diff_delta_invalid")
+            else:
+                deltas.append(delta)
+        if len(ids) != len(set(ids)):
+            blockers.append(f"{variant}_{kind}_snapshot_rank_diff_duplicate_identity")
+        rank_movement[kind] = {
+            "status": status or "available",
+            "rows": len(rows),
+            "changed_rank_count": sum(delta != 0 for delta in deltas),
+            "mean_absolute_rank_movement": sum(abs(delta) for delta in deltas) / len(deltas) if deltas else None,
+            "maximum_absolute_rank_movement": max((abs(delta) for delta in deltas), default=None),
+            "identity_sha256": identity_sha256(ids),
+            "rank_universe": coverage.get("rank_universe"),
+            "scope": capability.get(f"{kind}_ranks", {}).get("scope") if isinstance(capability.get(f"{kind}_ranks"), Mapping) else None,
+        }
+    summary = {
+        "variant": variant,
+        "status": receipt.get("status"),
+        "capability": capability,
+        "receipt": {
+            "path": str(receipt_path),
+            "bytes": receipt_path.stat().st_size,
+            "sha256": _sha256_file(receipt_path),
+            "receipt_sha256": receipt_hash,
+        },
+        "manifest": {
+            "path": str(manifest_path),
+            "bytes": manifest_path.stat().st_size,
+            "sha256": _sha256_file(manifest_path),
+            "manifest_sha256": manifest_hash,
+            "files": file_bindings,
+        },
+        "rank_movement": rank_movement,
+        "blockers_from_artifact": receipt.get("blockers", []),
+    }
+    return summary, sorted(set(blockers))
+
+
+def _verify_tier_shadow_manifest(
+    path_value: Path | str,
+    *,
+    source: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    path = _safe_file(path_value, "four-way Tier shadow manifest")
+    value = _read_json(path, "four-way Tier shadow manifest")
+    blockers: list[str] = []
+    if value.get("schema_version") != "scryglass:future-value-tier-shadow-fourway:v1":
+        blockers.append("tier_shadow_manifest_schema_invalid")
+    blockers.extend(_authority_blockers(value.get("authority"), "tier_shadow_manifest"))
+    try:
+        _hash_self(value, "manifest_sha256")
+    except DownstreamImpactError as error:
+        blockers.append(str(error))
+    source_binding = value.get("source")
+    if not isinstance(source_binding, Mapping):
+        blockers.append("tier_shadow_source_binding_missing")
+    else:
+        if source_binding.get("source_receipt_sha256") not in {None, source.get("source_receipt_sha256")}:
+            blockers.append("tier_shadow_source_receipt_mismatch")
+        if source_binding.get("source_identity_sha256") not in {None, source.get("source_identity_sha256")}:
+            blockers.append("tier_shadow_source_identity_mismatch")
+    variants = value.get("variants")
+    if not isinstance(variants, Mapping):
+        blockers.append("tier_shadow_manifest_variants_missing")
+        variants = {}
+    summary: dict[str, Any] = {"artifact": _artifact_binding(path), "status": value.get("status"), "variants": {}}
+    for variant in VARIANTS:
+        record = variants.get(variant)
+        if not isinstance(record, Mapping):
+            blockers.append(f"tier_shadow_{variant}_missing")
+            continue
+        ledger = record.get("ledger")
+        receipt = record.get("receipt")
+        try:
+            ledger_path, ledger_file = _verify_file_record(ledger, f"tier shadow {variant} ledger")
+            receipt_path, receipt_file = _verify_file_record(receipt, f"tier shadow {variant} receipt")
+        except DownstreamImpactError as error:
+            blockers.append(str(error))
+            continue
+        if record.get("game_count") != source.get("model_eligible_game_count") or record.get("game_identity_sha256") != source.get("model_eligible_identity_sha256"):
+            blockers.append(f"tier_shadow_{variant}_universe_mismatch")
+        summary["variants"][variant] = {"ledger": ledger_file, "receipt": receipt_file, "game_count": record.get("game_count"), "game_identity_sha256": record.get("game_identity_sha256"), "path": str(ledger_path), "receipt_path": str(receipt_path)}
+    return summary, sorted(set(blockers))
+
+
 def _verify_tier(
     path_value: Path | str,
     receipt_path_value: Path | str | None,
@@ -696,7 +959,8 @@ def _verify_tier(
     path = _safe_file(path_value, "full-census Tier diff")
     report = _read_json(path, "full-census Tier diff")
     blockers: list[str] = []
-    if report.get("schema_version") != TIER_DIFF_SCHEMA_VERSION:
+    is_fourway = report.get("schema_version") == TIER_FOURWAY_SCHEMA_VERSION
+    if report.get("schema_version") not in {TIER_DIFF_SCHEMA_VERSION, TIER_FOURWAY_SCHEMA_VERSION}:
         blockers.append("tier_diff_schema_invalid")
     blockers.extend(_authority_blockers(report.get("authority"), "tier_diff"))
     report_source = report.get("source", {})
@@ -722,11 +986,18 @@ def _verify_tier(
         report_hash = None
     rows = report.get("rows")
     comparison = report.get("comparison")
-    if not isinstance(rows, list) or not isinstance(comparison, Mapping):
+    comparisons = report.get("comparisons") if is_fourway else None
+    if is_fourway:
+        if not isinstance(comparisons, Mapping) or set(comparisons) != set(VARIANTS):
+            blockers.append("tier_diff_variant_comparisons_missing")
+            comparisons = {}
+        rows = []
+        comparison = report.get("candidate_universe", {})
+    elif not isinstance(rows, list) or not isinstance(comparison, Mapping):
         blockers.append("tier_diff_rows_or_comparison_missing")
         rows = []
         comparison = {}
-    if comparison.get("common_row_count") != len(rows):
+    if not is_fourway and comparison.get("common_row_count") != len(rows):
         blockers.append("tier_diff_common_row_count_mismatch")
     keys: list[str] = []
     key_payloads: list[dict[str, str]] = []
@@ -758,18 +1029,25 @@ def _verify_tier(
         tier_changed += delta.get("tier_changed") is True
     if len(keys) != len(set(keys)):
         blockers.append("tier_diff_duplicate_identity")
-    expected_identity = comparison.get("common_identity_sha256")
-    if isinstance(expected_identity, str) and SHA256_RE.fullmatch(expected_identity):
-        actual_identity = hashlib.sha256(_canonical(key_payloads)).hexdigest()
-        if actual_identity != expected_identity:
-            # Tier identity hashes use canonical JSON row identities in the
-            # producer.  Preserve the mismatch as a blocker instead of
-            # treating a different hashing convention as equivalent.
-            blockers.append("tier_diff_common_identity_hash_mismatch")
-    if comparison.get("changed_rank_count") != rank_changed:
-        blockers.append("tier_diff_changed_rank_count_mismatch")
-    if comparison.get("changed_tier_count") != tier_changed:
-        blockers.append("tier_diff_changed_tier_count_mismatch")
+    if not is_fourway:
+        expected_identity = comparison.get("common_identity_sha256")
+        if isinstance(expected_identity, str) and SHA256_RE.fullmatch(expected_identity):
+            actual_identity = hashlib.sha256(_canonical(key_payloads)).hexdigest()
+            if actual_identity != expected_identity:
+                # Tier identity hashes use canonical JSON row identities in the
+                # producer.  Preserve the mismatch as a blocker instead of
+                # treating a different hashing convention as equivalent.
+                blockers.append("tier_diff_common_identity_hash_mismatch")
+        if comparison.get("changed_rank_count") != rank_changed:
+            blockers.append("tier_diff_changed_rank_count_mismatch")
+        if comparison.get("changed_tier_count") != tier_changed:
+            blockers.append("tier_diff_changed_tier_count_mismatch")
+    else:
+        universe = report.get("candidate_universe")
+        if not isinstance(universe, Mapping) or universe.get("identical") is not True:
+            blockers.append("tier_diff_candidate_universe_not_identical")
+        elif universe.get("game_count") != source.get("model_eligible_game_count") or universe.get("game_identity_sha256") != source.get("model_eligible_identity_sha256"):
+            blockers.append("tier_diff_candidate_universe_source_mismatch")
     receipt_summary = None
     if receipt_path_value is not None:
         receipt_path = _safe_file(receipt_path_value, "Tier diff receipt")
@@ -814,9 +1092,93 @@ def _verify_tier(
             )
             if key in comparison
         },
+        "variants": {
+            variant: dict(comparisons.get(variant, {}))
+            for variant in VARIANTS
+        }
+        if is_fourway and isinstance(comparisons, Mapping)
+        else {},
         "blockers_from_artifact": report.get("blockers", []),
     }
     return summary, sorted(set(blockers))
+
+
+def _verify_tier_chronological(
+    path_value: Path | str,
+    receipt_path_value: Path | str | None,
+    *,
+    source: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Verify the existing chronological four-way Tier report."""
+
+    path = _safe_file(path_value, "chronological four-way Tier report")
+    report = _read_json(path, "chronological four-way Tier report")
+    blockers: list[str] = []
+    if report.get("schema_version") != TIER_CHRONOLOGICAL_SCHEMA_VERSION:
+        blockers.append("tier_fourway_schema_invalid")
+    blockers.extend(_authority_blockers(report.get("authority"), "tier_fourway"))
+    blockers.extend(_source_match(report.get("source", {}), source, "tier_fourway"))
+    try:
+        report_hash = _hash_self(report, "report_sha256")
+    except DownstreamImpactError as error:
+        blockers.append(str(error))
+        report_hash = None
+    universe = report.get("evaluation_universe")
+    if not isinstance(universe, Mapping):
+        blockers.append("tier_fourway_universe_missing")
+        universe = {}
+    if universe.get("game_count") not in {None, source.get("model_eligible_game_count")} or universe.get("game_identity_sha256") not in {None, source.get("model_eligible_identity_sha256")}:
+        blockers.append("tier_fourway_universe_source_mismatch")
+    comparisons = report.get("comparisons")
+    if not isinstance(comparisons, Mapping) or set(comparisons) != set(VARIANTS):
+        blockers.append("tier_fourway_variant_comparisons_missing")
+        comparisons = {}
+    variants: dict[str, Any] = {}
+    for variant in VARIANTS:
+        item = comparisons.get(variant)
+        if not isinstance(item, Mapping):
+            blockers.append(f"tier_fourway_{variant}_comparison_missing")
+            continue
+        variants[variant] = {
+            key: item.get(key)
+            for key in (
+                "reference_variant",
+                "row_count",
+                "changed_rank_count",
+                "changed_tier_count",
+                "mean_absolute_rank_movement",
+                "maximum_absolute_rank_movement",
+                "rank_correlation",
+                "paired_row_digest_sha256",
+            )
+            if key in item
+        }
+    receipt_summary = None
+    if receipt_path_value is not None:
+        receipt_path = _safe_file(receipt_path_value, "chronological Tier receipt")
+        receipt = _read_json(receipt_path, "chronological Tier receipt")
+        blockers.extend(_authority_blockers(receipt.get("authority"), "tier_fourway_receipt"))
+        try:
+            receipt_hash = _hash_self(receipt, "receipt_sha256")
+        except DownstreamImpactError as error:
+            blockers.append(str(error))
+            receipt_hash = None
+        if receipt.get("report_raw_sha256") not in {None, _sha256_file(path)}:
+            blockers.append("tier_fourway_receipt_report_bytes_mismatch")
+        receipt_summary = {
+            "path": str(receipt_path),
+            "bytes": receipt_path.stat().st_size,
+            "sha256": _sha256_file(receipt_path),
+            "receipt_sha256": receipt_hash,
+        }
+    return {
+        "artifact": {**_artifact_binding(path), "report_sha256": report_hash},
+        "receipt": receipt_summary,
+        "status": report.get("status"),
+        "universe": dict(universe),
+        "variants": variants,
+        "blockers_from_artifact": report.get("blockers", []),
+    }, sorted(set(blockers))
 
 
 def _verify_draft(
@@ -827,7 +1189,7 @@ def _verify_draft(
     path = _safe_file(path_value, "Draft Score four-way report")
     report = _read_json(path, "Draft Score four-way report")
     blockers: list[str] = []
-    if report.get("schema_version") != DRAFT_SCHEMA_VERSION:
+    if report.get("schema_version") not in {DRAFT_SCHEMA_V1, DRAFT_SCHEMA_V2}:
         blockers.append("draft_score_schema_invalid")
     blockers.extend(_source_match(report.get("source", {}), source, "draft_score"))
     blockers.extend(_authority_blockers(report.get("authority"), "draft_score"))
@@ -969,12 +1331,18 @@ def build_downstream_impact_report(
     source_receipt: Path | str,
     evaluations: Mapping[str, Path | str],
     evaluation_receipts: Mapping[str, Path | str] | None = None,
-    snapshot_receipt: Path | str,
-    snapshot_comparison: Path | str,
+    snapshot_receipt: Path | str | None = None,
+    snapshot_comparison: Path | str | None = None,
     snapshot_manifest: Path | str | None = None,
-    tier_diff: Path | str,
+    snapshot_variants: Mapping[str, Path | str] | None = None,
+    snapshot_manifests: Mapping[str, Path | str] | None = None,
+    snapshot_capability_manifest: Path | str | None = None,
+    tier_diff: Path | str | None = None,
     tier_receipt: Path | str | None = None,
-    draft_score_report: Path | str,
+    tier_fourway_report: Path | str | None = None,
+    tier_fourway_receipt: Path | str | None = None,
+    tier_shadow_manifest: Path | str | None = None,
+    draft_score_report: Path | str | None = None,
     paired_uncertainty: Path | str | None = None,
 ) -> dict[str, Any]:
     """Read and compare all required downstream artifacts.
@@ -1013,35 +1381,143 @@ def build_downstream_impact_report(
         evaluation_summaries=models,
     )
     all_blockers.extend(bootstrap_blockers)
-    try:
-        snapshots, snapshot_blockers = _verify_snapshot_bundle(
-            snapshot_receipt,
-            snapshot_comparison,
-            snapshot_manifest,
-            source=source,
-        )
-    except DownstreamImpactError as error:
-        snapshots = {"status": "invalid", "error": str(error)}
+    snapshots: dict[str, Any]
+    snapshot_blockers: list[str] = []
+    if snapshot_variants is not None:
+        if set(snapshot_variants) != set(VARIANTS):
+            raise DownstreamImpactError("snapshot variant inputs must cover all four variants")
+        manifests = snapshot_manifests or {}
+        if set(manifests) != set(VARIANTS):
+            raise DownstreamImpactError("snapshot manifest inputs must cover all four variants")
+        variant_snapshots: dict[str, Any] = {}
+        for variant in VARIANTS:
+            try:
+                summary, blockers = _verify_snapshot_variant(
+                    snapshot_variants[variant],
+                    manifests[variant],
+                    variant=variant,
+                    source=source,
+                )
+            except DownstreamImpactError as error:
+                summary, blockers = {"status": "invalid", "error": str(error)}, [
+                    f"{variant}_snapshot_input_validation_failed"
+                ]
+            variant_snapshots[variant] = summary
+            snapshot_blockers.extend(blockers)
+        snapshots = {
+            "status": "research_only" if not snapshot_blockers else "blocked",
+            "variants": variant_snapshots,
+            "capability_manifest": None,
+        }
+        if snapshot_capability_manifest is None:
+            snapshot_blockers.append("snapshot_capability_manifest_missing")
+        else:
+            cap_path = _safe_file(snapshot_capability_manifest, "snapshot capability manifest")
+            cap = _read_json(cap_path, "snapshot capability manifest")
+            try:
+                _hash_self(cap, "manifest_sha256")
+            except DownstreamImpactError as error:
+                snapshot_blockers.append(str(error))
+            snapshot_blockers.extend(_authority_blockers(cap.get("authority"), "snapshot_capability_manifest"))
+            snapshot_cap_source = cap.get("source", {})
+            snapshot_blockers.extend(_source_match(snapshot_cap_source, source, "snapshot_capability_manifest"))
+            if cap.get("schema_version") not in {
+                SNAPSHOT_CAPABILITY_MANIFEST_SCHEMA_VERSION,
+                SNAPSHOT_CAPABILITY_BUNDLE_MANIFEST_SCHEMA_VERSION,
+            }:
+                snapshot_blockers.append("snapshot_capability_manifest_schema_invalid")
+            if cap.get("capability_schema_version") not in {
+                None,
+                SNAPSHOT_CAPABILITY_SCHEMA_VERSION,
+            }:
+                snapshot_blockers.append("snapshot_capability_manifest_capability_schema_invalid")
+            cap_variants = cap.get("variants")
+            if not isinstance(cap_variants, Mapping) or set(cap_variants) != set(VARIANTS):
+                snapshot_blockers.append("snapshot_capability_manifest_variants_missing")
+            else:
+                for variant in VARIANTS:
+                    record = cap_variants.get(variant)
+                    if not isinstance(record, Mapping):
+                        snapshot_blockers.append(f"snapshot_capability_{variant}_missing")
+                        continue
+                    if record.get("variant") not in {None, variant}:
+                        snapshot_blockers.append(f"snapshot_capability_{variant}_variant_mismatch")
+                    if variant == "scaling_curve":
+                        coverage = record.get("rank_coverage", {})
+                        if not isinstance(coverage, Mapping):
+                            coverage = {}
+                        if not coverage:
+                            capability = record.get("capability", {})
+                            if isinstance(capability, Mapping):
+                                coverage = {
+                                    kind: capability.get(f"{kind}_ranks", {})
+                                    for kind in ("player", "team")
+                                }
+                        if not all(isinstance(coverage.get(kind), Mapping) and coverage[kind].get("status") == "not_applicable" and coverage[kind].get("row_policy") == "no_rows" for kind in ("player", "team")):
+                            snapshot_blockers.append("snapshot_capability_scaling_curve_na_missing")
+            snapshots["capability_manifest"] = {"path": str(cap_path), **_artifact_binding(cap_path), "variants": cap_variants if isinstance(cap_variants, Mapping) else {}}
+        snapshots["status"] = "research_only" if not snapshot_blockers else "blocked"
+    elif snapshot_receipt is not None and snapshot_comparison is not None:
+        try:
+            snapshots, snapshot_blockers = _verify_snapshot_bundle(
+                snapshot_receipt,
+                snapshot_comparison,
+                snapshot_manifest,
+                source=source,
+            )
+        except DownstreamImpactError as error:
+            snapshots = {"status": "invalid", "error": str(error)}
+            snapshot_blockers = ["snapshot_input_validation_failed"]
+    else:
+        snapshots = {"status": "invalid", "error": "snapshot inputs are missing"}
         snapshot_blockers = ["snapshot_input_validation_failed"]
     all_blockers.extend(snapshot_blockers)
-    try:
-        tier, tier_blockers = _verify_tier(
-            tier_diff, tier_receipt, source=source
-        )
-    except DownstreamImpactError as error:
-        tier = {"status": "invalid", "error": str(error)}
+    if tier_diff is None:
+        tier = {"status": "invalid", "error": "Tier diff input is missing"}
         tier_blockers = ["tier_input_validation_failed"]
+    else:
+        try:
+            tier, tier_blockers = _verify_tier(tier_diff, tier_receipt, source=source)
+        except DownstreamImpactError as error:
+            tier = {"status": "invalid", "error": str(error)}
+            tier_blockers = ["tier_input_validation_failed"]
     all_blockers.extend(tier_blockers)
-    try:
-        draft, draft_blockers = _verify_draft(draft_score_report, source=source)
-    except DownstreamImpactError as error:
-        draft = {"status": "invalid", "error": str(error)}
+    chronological = None
+    chronological_blockers: list[str] = []
+    if tier_fourway_report is not None:
+        try:
+            chronological, chronological_blockers = _verify_tier_chronological(
+                tier_fourway_report, tier_fourway_receipt, source=source
+            )
+        except DownstreamImpactError as error:
+            chronological = {"status": "invalid", "error": str(error)}
+            chronological_blockers = ["tier_fourway_input_validation_failed"]
+        all_blockers.extend(chronological_blockers)
+    shadow = None
+    shadow_blockers: list[str] = []
+    if tier_shadow_manifest is not None:
+        try:
+            shadow, shadow_blockers = _verify_tier_shadow_manifest(
+                tier_shadow_manifest, source=source
+            )
+        except DownstreamImpactError as error:
+            shadow = {"status": "invalid", "error": str(error)}
+            shadow_blockers = ["tier_shadow_input_validation_failed"]
+        all_blockers.extend(shadow_blockers)
+    if draft_score_report is None:
+        draft = {"status": "invalid", "error": "Draft Score input is missing"}
         draft_blockers = ["draft_score_input_validation_failed"]
+    else:
+        try:
+            draft, draft_blockers = _verify_draft(draft_score_report, source=source)
+        except DownstreamImpactError as error:
+            draft = {"status": "invalid", "error": str(error)}
+            draft_blockers = ["draft_score_input_validation_failed"]
     all_blockers.extend(draft_blockers)
     measured = {
-        "player_rank_movement_available": bool(snapshots.get("rank_movement", {}).get("player")),
-        "team_rank_movement_available": bool(snapshots.get("rank_movement", {}).get("team")),
-        "tier_rank_changes_available": "comparison" in tier,
+        "player_rank_movement_available": bool(snapshots.get("rank_movement", {}).get("player") or snapshots.get("variants")),
+        "team_rank_movement_available": bool(snapshots.get("rank_movement", {}).get("team") or snapshots.get("variants")),
+        "tier_rank_changes_available": bool(tier.get("comparison") or tier.get("variants")),
         "draft_score_changes_available": bool(draft.get("variants")),
     }
     downstream_public_change_flags = {
@@ -1071,13 +1547,49 @@ def build_downstream_impact_report(
             "bootstrap_deltas": bootstrap,
         },
         "snapshots": snapshots,
-        "tierlist": tier,
+        "tierlist": {
+            **tier,
+            "chronological_fourway": chronological,
+            "full_census_shadow": shadow,
+        },
         "draft_score": draft,
         "downstream_public_change_flags": downstream_public_change_flags,
         "blockers": sorted(set(str(item) for item in all_blockers if str(item).strip())),
         "authority": _authority_summary(source_receipt_value.get("authority")),
         "claim_ceiling": "source-bound research impact review; public outputs remain disabled",
     }
+    variant_impact: dict[str, Any] = {}
+    for variant in VARIANTS:
+        snapshot_variant = snapshots.get("variants", {}).get(variant, {}) if isinstance(snapshots.get("variants"), Mapping) else {}
+        snapshot_capability = snapshot_variant.get("capability", {}) if isinstance(snapshot_variant, Mapping) else {}
+        tier_variant = tier.get("variants", {}).get(variant, {}) if isinstance(tier.get("variants"), Mapping) else {}
+        chronological_variant = chronological.get("variants", {}).get(variant, {}) if isinstance(chronological, Mapping) and isinstance(chronological.get("variants"), Mapping) else {}
+        draft_variant = draft.get("variants", {}).get(variant, {}) if isinstance(draft.get("variants"), Mapping) else {}
+        variant_impact[variant] = {
+            "prediction": models.get(variant, {}),
+            "snapshot": {
+                "status": snapshot_variant.get("status"),
+                "capability": snapshot_capability,
+                "reference": {
+                    "player": snapshot_capability.get("player", {}).get("scope") if isinstance(snapshot_capability.get("player"), Mapping) else None,
+                    "team": snapshot_capability.get("team", {}).get("scope") if isinstance(snapshot_capability.get("team"), Mapping) else None,
+                    "rank": snapshot_capability.get("player_ranks", {}).get("scope") if isinstance(snapshot_capability.get("player_ranks"), Mapping) else None,
+                },
+                "player_ranks": snapshot_variant.get("rank_movement", {}).get("player") if isinstance(snapshot_variant.get("rank_movement"), Mapping) else None,
+                "team_ranks": snapshot_variant.get("rank_movement", {}).get("team") if isinstance(snapshot_variant.get("rank_movement"), Mapping) else None,
+                "rank_scope": {
+                    "player": snapshot_capability.get("player", {}).get("scope") if isinstance(snapshot_capability.get("player"), Mapping) else None,
+                    "team": snapshot_capability.get("team", {}).get("scope") if isinstance(snapshot_capability.get("team"), Mapping) else None,
+                },
+                "intrinsic_rank_status": "not_applicable" if variant == "scaling_curve" else "available",
+            },
+            "tier": {
+                "full_census": tier_variant,
+                "chronological": chronological_variant,
+            },
+            "draft": draft_variant,
+        }
+    report["variant_impacts"] = variant_impact
     return report
 
 
@@ -1118,18 +1630,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--source-receipt", required=True, type=Path)
     parser.add_argument("--evaluation", action="append", default=[], metavar="VAR=PATH")
     parser.add_argument("--evaluation-receipt", action="append", default=[], metavar="VAR=PATH")
-    parser.add_argument("--snapshot-receipt", required=True, type=Path)
-    parser.add_argument("--snapshot-comparison", required=True, type=Path)
+    parser.add_argument("--snapshot-receipt", type=Path)
+    parser.add_argument("--snapshot-comparison", type=Path)
     parser.add_argument("--snapshot-manifest", type=Path)
-    parser.add_argument("--tier-diff", required=True, type=Path)
+    parser.add_argument("--snapshot-variant", action="append", default=[], metavar="VAR=PATH")
+    parser.add_argument("--snapshot-manifest-variant", action="append", default=[], metavar="VAR=PATH")
+    parser.add_argument("--snapshot-capability-manifest", type=Path)
+    parser.add_argument("--tier-diff", type=Path)
     parser.add_argument("--tier-receipt", type=Path)
-    parser.add_argument("--draft-score-report", required=True, type=Path)
+    parser.add_argument("--tier-fourway-report", type=Path)
+    parser.add_argument("--tier-fourway-receipt", type=Path)
+    parser.add_argument("--tier-shadow-manifest", type=Path)
+    parser.add_argument("--draft-score-report", type=Path)
     parser.add_argument("--paired-uncertainty", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
         evaluations = _parse_bindings(args.evaluation, "--evaluation")
         evaluation_receipts = _parse_bindings(args.evaluation_receipt, "--evaluation-receipt")
+        snapshot_variants = _parse_bindings(args.snapshot_variant, "--snapshot-variant")
+        snapshot_manifests = _parse_bindings(args.snapshot_manifest_variant, "--snapshot-manifest-variant")
         report = build_downstream_impact_report(
             source_receipt=args.source_receipt,
             evaluations=evaluations,
@@ -1137,8 +1657,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             snapshot_receipt=args.snapshot_receipt,
             snapshot_comparison=args.snapshot_comparison,
             snapshot_manifest=args.snapshot_manifest,
+            snapshot_variants=snapshot_variants or None,
+            snapshot_manifests=snapshot_manifests or None,
+            snapshot_capability_manifest=args.snapshot_capability_manifest,
             tier_diff=args.tier_diff,
             tier_receipt=args.tier_receipt,
+            tier_fourway_report=args.tier_fourway_report,
+            tier_fourway_receipt=args.tier_fourway_receipt,
+            tier_shadow_manifest=args.tier_shadow_manifest,
             draft_score_report=args.draft_score_report,
             paired_uncertainty=args.paired_uncertainty,
         )
