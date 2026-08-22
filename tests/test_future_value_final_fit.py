@@ -348,6 +348,27 @@ def test_final_fit_digests_are_invariant_to_row_order() -> None:
     assert _design_digest(frame, feature_names) == _design_digest(ordered, feature_names)
 
 
+def test_final_fit_design_digest_preserves_pre_imputation_missing_values() -> None:
+    feature_names = tuple((*CURRENT_RATING_SIGNED_MAP_FEATURES, *FUTURE_PLAYER_FORM_SIDE_FEATURES))
+    frame = pd.DataFrame({"game_id": ["g2", "g1"]})
+    for feature in CURRENT_RATING_SIGNED_MAP_FEATURES:
+        frame[feature] = [0.2, -0.1]
+    for feature in FUTURE_PLAYER_FORM_SIDE_FEATURES:
+        frame[feature] = [float("nan"), 0.3]
+
+    ordered = frame.sort_values("game_id", kind="stable").reset_index(drop=True)
+    assert _design_digest(frame, feature_names) == _design_digest(ordered, feature_names)
+
+    invalid = frame.copy()
+    invalid.loc[0, FUTURE_PLAYER_FORM_SIDE_FEATURES[0]] = float("inf")
+    with pytest.raises(FinalFitError, match="non-finite value"):
+        _design_digest(invalid, feature_names)
+
+    missing_target = frame.assign(target=[1.0, float("nan")])
+    with pytest.raises(FinalFitError, match="non-finite value"):
+        _target_digest(missing_target)
+
+
 def test_final_fit_family_digest_mutations_are_isolated() -> None:
     feature_names = tuple(
         (

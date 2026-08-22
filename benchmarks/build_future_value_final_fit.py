@@ -229,11 +229,13 @@ def _canonical_rows_digest(
     columns: tuple[str, ...],
     *,
     label: str,
+    allow_missing: bool = False,
 ) -> str:
-    """Hash finite values after a stable game-ID sort.
+    """Hash numeric values after a stable game-ID sort.
 
     This digest does not depend on parquet row order.  It binds the exact
-    values consumed by the final model.
+    values consumed by the final model.  A design can retain canonical nulls
+    before its declared equal-side imputation step.  Targets remain complete.
     """
 
     if "game_id" not in frame.columns:
@@ -249,10 +251,21 @@ def _canonical_rows_digest(
     for row in work.sort_values("game_id", kind="stable").to_dict("records"):
         output: dict[str, Any] = {"game_id": str(row.pop("game_id"))}
         for column in columns:
-            value = pd.to_numeric(pd.Series([row[column]]), errors="coerce").iloc[0]
-            if not math.isfinite(float(value)):
+            raw_value = row[column]
+            if pd.isna(raw_value):
+                if not allow_missing:
+                    raise FinalFitError(f"{label} contains a non-finite value: {column}")
+                output[column] = None
+                continue
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError) as error:
+                raise FinalFitError(
+                    f"{label} contains a non-numeric value: {column}"
+                ) from error
+            if not math.isfinite(value):
                 raise FinalFitError(f"{label} contains a non-finite value: {column}")
-            output[column] = float(value)
+            output[column] = value
         rows.append(output)
     return hashlib.sha256(_canonical_json_bytes(rows)).hexdigest()
 
@@ -330,6 +343,7 @@ def _design_digest(
         work,
         tuple(column for column in work.columns if column != "game_id"),
         label="design",
+        allow_missing=True,
     )
 
 
