@@ -111,6 +111,25 @@ def test_plan_contains_no_release_command_and_keeps_authority_false(tmp_path: Pa
     assert "--snapshot-comparison-worker" in stages[4].jobs[0].command
 
 
+def test_plan_only_commands_are_canonical_json(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    stages = downstream.build_stage_plan(config, _inputs(tmp_path)) + downstream._optional_stage_plan(config, _inputs(tmp_path))
+
+    payload = {
+        "stages": [
+            {
+                "name": stage.name,
+                "jobs": [list(job.command) for job in stage.jobs],
+                "plan_sha256": downstream._plan_digest(stage),
+            }
+            for stage in stages
+        ]
+    }
+    encoded = json.dumps(payload, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
+    assert encoded
+    assert all(isinstance(token, str) for stage in stages for job in stage.jobs for token in job.command)
+
+
 def test_missing_tier_and_draft_inputs_are_blockers(tmp_path: Path) -> None:
     config = _config(tmp_path)
     stages = downstream._optional_stage_plan(config, _inputs(tmp_path))
@@ -167,6 +186,18 @@ def test_selection_sidecars_bind_exact_artifact_bytes(tmp_path: Path) -> None:
         assert hashlib.sha256(_canonical(body)).hexdigest() == claimed
 
 
+def test_unselected_variant_capability_blocker_does_not_block_selected_chain(tmp_path: Path) -> None:
+    config = _config(tmp_path, variant="future_player_form")
+    inputs = _inputs(tmp_path)
+    selection = downstream._write_selection(config, inputs, {})
+
+    assert downstream._selected_variant_receipt_blockers(config, selection["receipt_paths"]) == []
+    blocked_config = replace(config, selected_variant="current_only")
+    assert downstream._selected_variant_receipt_blockers(blocked_config, selection["receipt_paths"]) == [
+        "selection:current_only:final_fit_builder_supports_future_player_form_only"
+    ]
+
+
 def test_resume_receipt_detects_output_mutation(tmp_path: Path) -> None:
     config = _config(tmp_path)
     output_root = config.output_root / "stages" / "synthetic"
@@ -217,6 +248,23 @@ def test_stub_builder_chain_honors_output_policy_and_semantic_blockers(tmp_path:
     absent_receipt = downstream._execute_stage(config, absent, resume=False)
     assert absent_receipt["status"] == "completed"
     assert downstream._validate_stage_receipt(config, absent)["status"] == "completed"
+
+    research_root = config.output_root / "stages" / "research-only"
+    research_output = research_root / "result.json"
+    research = downstream.Stage(
+        name="research-only",
+        jobs=(downstream.Job(
+            name="stub_research_only",
+            command=(downstream.sys.executable, "-c", writer, str(research_root), "empty", '{"status":"research_only_blocked","blockers":[]}'),
+            output_roots=(research_root,),
+            expected_files=(research_output,),
+        ),),
+        output_roots=(research_root,),
+        expected_files=(research_output,),
+    )
+    research_receipt = downstream._execute_stage(config, research, resume=False)
+    assert research_receipt["status"] == "completed"
+    assert research_receipt["blockers"] == []
 
     blocked_root = config.output_root / "stages" / "semantic-blocked"
     blocked_output = blocked_root / "result.json"

@@ -194,6 +194,10 @@ class Job:
             raise DownstreamRunError(
                 "job output directory policy must be 'empty' or 'absent'"
             )
+        # Builder plans can contain Path values while they are assembled.  A
+        # plan is also a public, canonical JSON record, so freeze every token
+        # as text at the Job boundary.
+        object.__setattr__(self, "command", tuple(str(token) for token in self.command))
 
 
 @dataclass(frozen=True)
@@ -981,7 +985,7 @@ def _plan_digest(stage: Stage) -> str:
         "jobs": [
             {
                 "name": job.name,
-                "command": list(job.command),
+                "command": [str(token) for token in job.command],
                 "output_roots": [str(path) for path in job.output_roots],
                 "expected_files": [str(path) for path in job.expected_files],
                 "input_paths": [str(path) for path in job.input_paths],
@@ -1030,7 +1034,10 @@ def _collect_outputs(roots: Iterable[Path]) -> list[dict[str, Any]]:
 def _semantic_blockers(stage: Stage) -> list[str]:
     """Read producer status fields after a successful child exit."""
 
-    blocked_statuses = {"blocked", "research_only_blocked", "invalid", "failed", "error"}
+    # ``research_only_blocked`` is a valid authority status for a completed
+    # research artifact.  Its semantic blocker list determines computation
+    # availability.  Execution failures use the statuses below.
+    blocked_statuses = {"blocked", "invalid", "failed", "error"}
     blockers: list[str] = []
     for path in stage.expected_files:
         if path.suffix.lower() != ".json" or not path.is_file() or path.is_symlink():
@@ -1434,6 +1441,26 @@ def _validate_selection_payload(
     if value.get("authority") != AUTHORITY:
         raise DownstreamRunError("selected variant authority changed")
     return value
+
+
+def _selected_variant_receipt_blockers(
+    config: RunConfig,
+    receipt_paths: Mapping[str, Path],
+) -> list[str]:
+    """Return blockers for the caller-selected capability receipt only."""
+
+    path = receipt_paths.get(config.selected_variant)
+    if path is None:
+        raise DownstreamRunError("selected variant capability receipt is missing")
+    receipt = _receipt_hash(path, f"selected {config.selected_variant} evaluation receipt")
+    raw = receipt.get("blockers", [])
+    if not isinstance(raw, list):
+        raise DownstreamRunError("selected variant capability receipt blockers are invalid")
+    return [
+        f"selection:{config.selected_variant}:{value}"
+        for value in raw
+        if str(value).strip()
+    ]
 
 
 def _blocked_impact(path: Path, inputs: ResolvedInputs, blockers: Sequence[str]) -> dict[str, Any]:
@@ -1993,16 +2020,14 @@ def run(config: RunConfig, *, resume: bool = False, plan_only: bool = False) -> 
     else:
         selection = _write_selection(config, inputs, source)
     receipts: list[dict[str, Any]] = []
-    blockers: list[str] = []
+    blockers: list[str] = _selected_variant_receipt_blockers(
+        config,
+        selection["receipt_paths"],
+    )
     for variant, receipt_path in sorted(selection["receipt_paths"].items()):
-        variant_receipt = _receipt_hash(
+        _receipt_hash(
             receipt_path,
             f"selected {variant} evaluation receipt",
-        )
-        blockers.extend(
-            f"selection:{variant}:{value}"
-            for value in variant_receipt.get("blockers", [])
-            if str(value).strip()
         )
     selection_stage = _selection_stage(config, inputs, source)
     if resume and _stage_receipt_path(config, selection_stage).exists():
