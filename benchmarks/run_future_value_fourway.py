@@ -29,6 +29,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from lol_kills.research.future_value_rating import (
     FutureValueSourceError,
+    load_verified_leaguepedia_series_crosswalk,
     validate_future_value_source_receipt_payload,
 )
 
@@ -826,34 +827,12 @@ def _validate_source_and_crosswalk(config: RunConfig) -> dict[str, Any]:
         frozen = freeze.get("normalized_source_files", {}).get(label)
         if isinstance(frozen, Mapping) and (actual["bytes"] != frozen.get("bytes") or actual["sha256"] != frozen.get("sha256")):
             raise FourwayRunError(f"source file does not match freeze: {label}")
-    crosswalk_receipt_value = _load_json(crosswalk_receipt, "series crosswalk receipt")
-    crosswalk_hash = _sha256_path(crosswalk)
-    receipt_file_hash = _sha256_path(crosswalk_receipt)
-    if receipt_file_hash != config.crosswalk_receipt_file_sha256:
-        raise FourwayRunError("series crosswalk receipt file hash does not match")
-    if crosswalk_receipt_value.get("crosswalk_sha256") != crosswalk_hash:
-        raise FourwayRunError("series crosswalk artifact hash does not match receipt")
-    crosswalk_receipt_hash = _require_hash(
-        crosswalk_receipt_value.get("receipt_sha256"),
-        "series crosswalk receipt hash",
+    crosswalk_binding = _validate_crosswalk_binding(
+        crosswalk,
+        crosswalk_receipt,
+        source_receipt=receipt,
+        expected_receipt_file_sha256=config.crosswalk_receipt_file_sha256,
     )
-    crosswalk_receipt_body = dict(crosswalk_receipt_value)
-    crosswalk_receipt_body.pop("receipt_sha256", None)
-    if _sha256_bytes(_canonical_bytes(crosswalk_receipt_body)) != crosswalk_receipt_hash:
-        raise FourwayRunError("series crosswalk receipt payload hash changed")
-    artifact = crosswalk_receipt_value.get("artifact")
-    if isinstance(artifact, Mapping):
-        if artifact.get("bytes") != crosswalk.stat().st_size or artifact.get("sha256") != crosswalk_hash:
-            raise FourwayRunError("series crosswalk artifact record does not match")
-        if artifact.get("path") and Path(str(artifact["path"])).resolve() != crosswalk:
-            raise FourwayRunError("series crosswalk artifact path does not match")
-    if crosswalk_receipt_value.get("source_receipt_sha256") != receipt.get("receipt_sha256"):
-        raise FourwayRunError("series crosswalk source receipt binding changed")
-    if crosswalk_receipt_value.get("source_identity_sha256") != receipt.get("source_identity_sha256"):
-        raise FourwayRunError("series crosswalk source identity changed")
-    authority = crosswalk_receipt_value.get("authority")
-    if not isinstance(authority, Mapping) or authority.get("research_only") is not True or any(bool(value) for key, value in authority.items() if key != "research_only"):
-        raise FourwayRunError("series crosswalk receipt grants authority")
     return {
         "source_receipt": _file_record(source_receipt_path),
         "source_receipt_sha256": str(receipt["receipt_sha256"]),
@@ -863,9 +842,58 @@ def _validate_source_and_crosswalk(config: RunConfig) -> dict[str, Any]:
         "source_identity_sha256": receipt["source_identity_sha256"],
         "model_eligible_game_count": receipt["model_eligible_game_count"],
         "model_eligible_identity_sha256": receipt["model_eligible_identity_sha256"],
-        "crosswalk": _file_record(crosswalk),
-        "crosswalk_receipt": _file_record(crosswalk_receipt),
+        "crosswalk": crosswalk_binding["artifact"],
+        "crosswalk_receipt": crosswalk_binding["receipt"],
+        "crosswalk_sha256": crosswalk_binding["crosswalk_sha256"],
         "crosswalk_receipt_file_sha256": config.crosswalk_receipt_file_sha256,
+    }
+
+
+def _validate_crosswalk_binding(
+    crosswalk: Path,
+    crosswalk_receipt: Path,
+    *,
+    source_receipt: Mapping[str, Any],
+    expected_receipt_file_sha256: str,
+) -> dict[str, Any]:
+    """Validate artifact bytes and the artifact's canonical self-hash.
+
+    The receipt has two different SHA-256 fields.  ``artifact.sha256`` hashes
+    the JSON file bytes.  The top-level ``crosswalk_sha256`` hashes the
+    canonical crosswalk payload after its self-hash field is removed.  The
+    repository verifier checks both contracts and all census bindings.
+    """
+
+    artifact_record = _file_record(crosswalk)
+    receipt_record = _file_record(crosswalk_receipt)
+    try:
+        binding = load_verified_leaguepedia_series_crosswalk(
+            crosswalk,
+            crosswalk_receipt,
+            source_receipt=source_receipt,
+            expected_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+            expected_receipt_file_sha256=expected_receipt_file_sha256,
+        )
+    except FutureValueSourceError as error:
+        raise FourwayRunError(f"series crosswalk verification failed: {error}") from error
+    if binding.get("artifact_sha256") != artifact_record["sha256"]:
+        raise FourwayRunError("series crosswalk artifact byte hash changed")
+    if binding.get("crosswalk_sha256") != _load_json(crosswalk, "series crosswalk artifact").get("crosswalk_sha256"):
+        raise FourwayRunError("series crosswalk canonical self-hash changed")
+    receipt_payload = _load_json(crosswalk_receipt, "series crosswalk receipt")
+    receipt_artifact = receipt_payload.get("artifact")
+    if not isinstance(receipt_artifact, Mapping):
+        raise FourwayRunError("series crosswalk artifact receipt binding is missing")
+    if receipt_artifact.get("sha256") != artifact_record["sha256"]:
+        raise FourwayRunError("series crosswalk artifact receipt hash changed")
+    if receipt_payload.get("crosswalk_sha256") != binding.get("crosswalk_sha256"):
+        raise FourwayRunError("series crosswalk receipt self-hash binding changed")
+    return {
+        "artifact": artifact_record,
+        "receipt": receipt_record,
+        "artifact_sha256": binding["artifact_sha256"],
+        "crosswalk_sha256": binding["crosswalk_sha256"],
+        "receipt_sha256": binding["receipt_sha256"],
     }
 
 

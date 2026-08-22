@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+import json
 
 import pytest
 
@@ -172,3 +173,31 @@ def test_resume_rejects_output_without_completed_receipt(tmp_path: Path) -> None
     )
     with pytest.raises(fourway.FourwayRunError, match="output without a valid"):
         fourway._execute_stage(stage, config, resume=True)
+
+
+def test_real_v14_receipt_separates_payload_and_file_hashes() -> None:
+    crosswalk = Path(
+        "/private/tmp/scryglass-leaguepedia-series-2025-2026/"
+        "oe-leaguepedia-series-crosswalk-v14-dedup-portable.json"
+    )
+    crosswalk_receipt = Path(
+        "/private/tmp/scryglass-leaguepedia-series-2025-2026/"
+        "oe-leaguepedia-series-crosswalk-v14-dedup-portable.receipt.json"
+    )
+    source_receipt = Path(
+        "/private/tmp/scryglass-source-verify-dedup-v4/"
+        "future-value-source-receipt.json"
+    )
+    if not all(path.is_file() for path in (crosswalk, crosswalk_receipt, source_receipt)):
+        pytest.skip("v14 local crosswalk fixture is not available")
+
+    receipt = json.loads(crosswalk_receipt.read_text(encoding="utf-8"))
+    assert receipt["crosswalk_sha256"] != receipt["artifact"]["sha256"]
+    binding = fourway._validate_crosswalk_binding(
+        crosswalk,
+        crosswalk_receipt,
+        source_receipt=json.loads(source_receipt.read_text(encoding="utf-8")),
+        expected_receipt_file_sha256=fourway._sha256_path(crosswalk_receipt),
+    )
+    assert binding["artifact_sha256"] == receipt["artifact"]["sha256"]
+    assert binding["crosswalk_sha256"] == receipt["crosswalk_sha256"]
