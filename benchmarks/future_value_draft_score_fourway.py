@@ -51,6 +51,7 @@ CURRENT_SERIES_PARTITION_SOURCES = {
     "conservative_series_superset": (True, False),
     "mixed:leaguepedia_crosswalk+conservative_series_superset": (True, False),
     "verified_grid_series": (False, True),
+    "verified_leaguepedia_series_crosswalk": (False, True),
 }
 VARIANTS = ("current_only", "future_player_form", "scaling_curve", "both")
 BOOTSTRAP_SEED = 20260821

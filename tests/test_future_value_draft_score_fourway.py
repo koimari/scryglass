@@ -936,6 +936,38 @@ def test_current_rating_series_partition_receipt_is_required(tmp_path: Path) -> 
         )
 
 
+def test_current_rating_accepts_verified_leaguepedia_series_partition(
+    tmp_path: Path,
+) -> None:
+    root, game_ids, _ = _write_current_receipt_fixture(tmp_path)
+    receipt_path = root / "current-rating-feature-ledger.receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    partition = dict(receipt["series_partition_receipt"])
+    partition["source_type"] = "verified_leaguepedia_series_crosswalk"
+    partition["conservative"] = False
+    partition["authoritative"] = True
+    partition.pop("receipt_sha256")
+    partition["receipt_sha256"] = hashlib.sha256(_canonical(partition)).hexdigest()
+    receipt["series_partition_source"] = partition["source_type"]
+    receipt["series_partition_receipt"] = partition
+    receipt.pop("receipt_sha256")
+    receipt["receipt_sha256"] = hashlib.sha256(_canonical(receipt)).hexdigest()
+    _write_json(receipt_path, receipt)
+
+    frame, metadata = _load_current(
+        root,
+        train_ids=game_ids,
+        cutoff_text="2025-12-31T00:00:00Z",
+        require_receipt=False,
+    )
+
+    assert len(frame) == len(game_ids)
+    assert metadata["series_partition"]["source_type"] == (
+        "verified_leaguepedia_series_crosswalk"
+    )
+    assert metadata["series_partition"]["authoritative"] is True
+
+
 def test_current_rating_series_assignment_co_mutation_is_rejected_by_trust_root(
     tmp_path: Path,
 ) -> None:
