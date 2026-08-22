@@ -605,8 +605,8 @@ def build_bundle(
         raise FourVariantBundleError("crosswalk inputs must be supplied together")
     source_receipt = _load_json(source_receipt_path, "source receipt")
     validate_future_value_source_receipt_payload(source_receipt)
-    maps = pd.read_parquet(source_root / "maps.parquet")
-    maps = _accepted_map_frame(maps, source_receipt=source_receipt)
+    raw_maps = pd.read_parquet(source_root / "maps.parquet")
+    maps = _accepted_map_frame(raw_maps, source_receipt=source_receipt)
     players = pd.read_parquet(source_root / "oe_player_games.parquet")
     teams = pd.read_parquet(source_root / "oe_team_games.parquet")
     crosswalk_assignments: Sequence[Mapping[str, Any]] = ()
@@ -703,7 +703,7 @@ def build_bundle(
             train_game_ids=train_ids,
             validation_game_ids=validation_ids,
             fit_window_end=fit_window_end,
-            source_frames={"maps": maps, "players": players, "teams": teams},
+            source_frames={"maps": raw_maps, "players": players, "teams": teams},
         )
         if any(
             current_native.get(key) != fold_spec.get(key)
