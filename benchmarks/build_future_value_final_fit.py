@@ -40,6 +40,7 @@ from lol_kills.research.future_value_rating import (
     _role,
     _scaling_native_rows_sha256,
     _sha256_path,
+    _stable_identity,
     _variant_imputation_values,
     build_future_value_design,
     fit_rank3_player_champion_role_atoms,
@@ -96,12 +97,45 @@ def _canonical_sha(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
 
 
+def _resolve_source_file(
+    source_root: Path,
+    label: str,
+    record: Mapping[str, Any],
+) -> Path:
+    locator = record.get("locator") or record.get("path")
+    if not isinstance(locator, str) or not locator.strip():
+        raise FinalFitError(f"source receipt file locator is missing: {label}")
+    relative = Path(locator)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise FinalFitError(f"source receipt file locator is unsafe: {label}")
+    root = source_root.resolve()
+    candidate = root / relative
+    if candidate.is_symlink() or not candidate.is_file():
+        raise FinalFitError(f"source receipt file is missing: {label}")
+    path = candidate.resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as error:
+        raise FinalFitError(f"source receipt file escapes freeze root: {label}") from error
+    declared_bytes = record.get("bytes")
+    if isinstance(declared_bytes, bool) or not isinstance(declared_bytes, int):
+        raise FinalFitError(f"source receipt file bytes are invalid: {label}")
+    if declared_bytes != path.stat().st_size:
+        raise FinalFitError(f"source receipt file bytes changed: {label}")
+    declared_sha = str(record.get("sha256") or "").lower()
+    if declared_sha != _sha256_path(path):
+        raise FinalFitError(f"source receipt file hash changed: {label}")
+    return path
+
+
 def _verify_source_receipt(
     source_receipt: Mapping[str, Any],
     source_receipt_path: Path,
     *,
+    source_root: Path,
     expected_source_receipt_sha256: str | None,
 ) -> None:
+    source_root = Path(source_root).expanduser()
     validate_future_value_source_receipt_payload(source_receipt)
     if not expected_source_receipt_sha256:
         raise FinalFitError("independent source receipt file hash is required")
@@ -109,55 +143,40 @@ def _verify_source_receipt(
     expected_file_sha_from_argument = str(expected_source_receipt_sha256).lower()
     if expected_file_sha != expected_file_sha_from_argument:
         raise FinalFitError("source receipt file hash changed")
-    root = source_receipt_path.parent.resolve()
+    if source_root.is_symlink() or not source_root.is_dir():
+        raise FinalFitError(f"source root is missing or unsafe: {source_root}")
+    root = source_root.resolve()
     source_files = source_receipt.get("source_files")
     if not isinstance(source_files, Mapping):
         raise FinalFitError("source receipt file bindings are missing")
     for label, record in source_files.items():
         if not isinstance(record, Mapping):
             raise FinalFitError(f"source receipt file binding is invalid: {label}")
-        locator = record.get("locator") or record.get("path")
-        if not isinstance(locator, str) or not locator.strip():
-            raise FinalFitError(f"source receipt file locator is missing: {label}")
-        path = Path(locator)
-        if path.is_absolute() or ".." in path.parts:
-            raise FinalFitError(f"source receipt file locator is unsafe: {label}")
-        path = (root / path).resolve()
-        try:
-            path.relative_to(root)
-        except ValueError as error:
-            raise FinalFitError(f"source receipt file escapes freeze root: {label}") from error
-        if path.is_symlink() or not path.is_file():
-            raise FinalFitError(f"source receipt file is missing: {label}")
-        if int(record.get("bytes") or -1) != path.stat().st_size:
-            raise FinalFitError(f"source receipt file bytes changed: {label}")
-        if str(record.get("sha256") or "").lower() != _sha256_path(path):
-            raise FinalFitError(f"source receipt file hash changed: {label}")
+        _resolve_source_file(root, str(label), record)
 
 
 def _verify_source_frames(
     source_root: Path,
     source_receipt: Mapping[str, Any],
-) -> None:
+) -> dict[str, Path]:
     """Verify the exact parquet frames used by the final fit."""
 
     source_files = source_receipt.get("source_files")
     if not isinstance(source_files, Mapping):
         raise FinalFitError("source receipt frame bindings are missing")
-    expected_names = {
-        "maps": "maps.parquet",
-        "players": "oe_player_games.parquet",
-        "teams": "oe_team_games.parquet",
-    }
-    for label, name in expected_names.items():
+    verified: dict[str, Path] = {}
+    root = Path(source_root).expanduser()
+    if root.is_symlink() or not root.is_dir():
+        raise FinalFitError(f"source root is missing or unsafe: {source_root}")
+    for label in ("maps", "players", "teams"):
         record = source_files.get(label)
-        path = source_root / name
-        if not isinstance(record, Mapping) or path.is_symlink() or not path.is_file():
+        if not isinstance(record, Mapping):
             raise FinalFitError(f"frozen source frame is missing: {label}")
-        if int(record.get("bytes") or -1) != path.stat().st_size:
-            raise FinalFitError(f"frozen source frame bytes changed: {label}")
-        if str(record.get("sha256") or "").lower() != _sha256_path(path):
-            raise FinalFitError(f"frozen source frame hash changed: {label}")
+        try:
+            verified[label] = _resolve_source_file(root, label, record)
+        except FinalFitError as error:
+            raise FinalFitError(f"frozen source frame {error}") from error
+    return verified
 
 
 def _resolve_variant(value: RatingVariant | str) -> RatingVariant:
@@ -340,6 +359,46 @@ def _neutral_form_and_atom(
         fit_window_end="neutral_no_form_input",
     )
     return form, atom
+
+
+def _validate_source_stable_ids(
+    players: pd.DataFrame,
+    teams: pd.DataFrame,
+) -> None:
+    """Require non-empty stable OE player and team IDs in every final fit."""
+
+    player_column = next(
+        (column for column in ("playerid", "player_id") if column in players.columns),
+        None,
+    )
+    player_team_column = next(
+        (column for column in ("teamid", "team_id") if column in players.columns),
+        None,
+    )
+    team_column = next(
+        (column for column in ("teamid", "team_id") if column in teams.columns),
+        None,
+    )
+    if (
+        players.empty
+        or teams.empty
+        or player_column is None
+        or player_team_column is None
+        or team_column is None
+    ):
+        raise FinalFitError("source stable player and team ID columns are missing")
+    if not players[player_column].map(
+        lambda value: _stable_identity(value, "oe:player:")
+    ).all():
+        raise FinalFitError("source players contain an invalid stable player ID")
+    if not players[player_team_column].map(
+        lambda value: _stable_identity(value, "oe:team:")
+    ).all():
+        raise FinalFitError("source players contain an invalid stable team ID")
+    if not teams[team_column].map(
+        lambda value: _stable_identity(value, "oe:team:")
+    ).all():
+        raise FinalFitError("source teams contain an invalid stable team ID")
 
 
 def _evaluation_blockers(
@@ -1071,6 +1130,7 @@ def fit_final_variant(
     scaling_manifest_path: Path | None = None,
     expected_source_receipt_sha256: str | None = None,
     expected_evaluation_sha256: str | None = None,
+    expected_evaluation_file_sha256: str | None = None,
     expected_current_receipt_sha256: str | None = None,
     expected_current_artifact_sha256: str | None = None,
     expected_scaling_receipt_sha256: str | None = None,
@@ -1087,16 +1147,29 @@ def fit_final_variant(
     resolved = _resolve_variant(variant)
     dependencies = _variant_dependencies(resolved)
     config = rating_variant_config(resolved)
+    source_root = Path(source_root).expanduser()
     source_receipt = _load_json(source_receipt_path, "source receipt")
     _verify_source_receipt(
         source_receipt,
         source_receipt_path,
+        source_root=source_root,
         expected_source_receipt_sha256=expected_source_receipt_sha256,
     )
-    if expected_evaluation_sha256 is not None:
-        expected_evaluation_hash = str(expected_evaluation_sha256).lower()
-        if re.fullmatch(r"[0-9a-f]{64}", expected_evaluation_hash) is None or _sha256_path(evaluation_path) != expected_evaluation_hash:
-            raise FinalFitError("evaluation evidence file changed")
+    source_root = source_root.resolve()
+    evaluation_hashes = tuple(
+        str(value).lower()
+        for value in (expected_evaluation_sha256, expected_evaluation_file_sha256)
+        if value is not None
+    )
+    if not evaluation_hashes:
+        raise FinalFitError("independent evaluation file hash is required")
+    if len(set(evaluation_hashes)) != 1:
+        raise FinalFitError("evaluation file hash arguments disagree")
+    expected_evaluation_hash = evaluation_hashes[0]
+    if re.fullmatch(r"[0-9a-f]{64}", expected_evaluation_hash) is None:
+        raise FinalFitError("independent evaluation file hash is invalid")
+    if _sha256_path(evaluation_path) != expected_evaluation_hash:
+        raise FinalFitError("evaluation evidence file changed")
     evaluation_blockers = _evaluation_blockers(
         evaluation_path, source_receipt, resolved
     )
@@ -1115,13 +1188,14 @@ def fit_final_variant(
     eligible_ids = tuple(
         sorted(str(value) for value in source_receipt["model_eligible_game_ids"])
     )
-    source_root = source_root.resolve()
-    _verify_source_frames(source_root, source_receipt)
-    source_maps_path = source_root / "maps.parquet"
-    source_players_path = source_root / "oe_player_games.parquet"
-    source_teams_path = source_root / "oe_team_games.parquet"
+    source_frames = _verify_source_frames(source_root, source_receipt)
+    source_maps_path = source_frames["maps"]
+    source_players_path = source_frames["players"]
+    source_teams_path = source_frames["teams"]
     maps = pd.read_parquet(source_maps_path)
     players = pd.read_parquet(source_players_path)
+    teams = pd.read_parquet(source_teams_path)
+    _validate_source_stable_ids(players, teams)
     model_frame = _map_model_frame(maps)
     model_frame = model_frame[
         model_frame["game_id"].astype(str).isin(eligible_ids)
@@ -1575,7 +1649,12 @@ def main() -> int:
         type=Path,
     )
     parser.add_argument("--evaluation", type=Path, default=DEFAULT_EVALUATION)
-    parser.add_argument("--evaluation-sha256")
+    parser.add_argument(
+        "--evaluation-sha256",
+        "--evaluation-file-sha256",
+        dest="evaluation_sha256",
+        required=True,
+    )
     parser.add_argument("--baseline-cache", type=Path, default=DEFAULT_CACHE)
     parser.add_argument("--source-receipt-sha256", required=True)
     parser.add_argument("--current-receipt-sha256", required=True)

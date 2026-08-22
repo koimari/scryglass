@@ -413,7 +413,8 @@ def _role(value: Any) -> str | None:
 
 
 def _stable_identity(value: Any, prefix: str) -> bool:
-    return isinstance(value, str) and value.strip().startswith(prefix)
+    text = value.strip() if isinstance(value, str) else ""
+    return text.startswith(prefix) and len(text) > len(prefix)
 
 
 def _checkpoint_coverage(frame: pd.DataFrame, *, rows_per_map: int) -> dict[str, Any]:

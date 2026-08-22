@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 import pandas as pd
 import pytest
 
+import benchmarks.build_future_value_final_fit as final_fit_module
 from benchmarks.build_future_value_final_fit import (
     VARIANTS,
     FinalFitError,
@@ -15,6 +17,8 @@ from benchmarks.build_future_value_final_fit import (
     _canonical_sha,
     _design_digest,
     _evaluation_blockers,
+    _validate_source_stable_ids,
+    _verify_source_receipt,
     _target_digest,
     _variant_dependencies,
     _variant_feature_order,
@@ -24,6 +28,7 @@ from lol_kills.research.future_value_rating import (
     FUTURE_PLAYER_FORM_SIDE_FEATURES,
     SCALING_CURVE_SIGNED_MAP_FEATURES,
     RatingVariant,
+    _stable_identity,
     rating_feature_values_sha256,
     rating_variant_config,
 )
@@ -357,3 +362,158 @@ def test_final_fit_requires_independent_scaling_receipt_hash(tmp_path) -> None:
             expected_scaling_receipt_sha256=None,
             expected_scaling_artifact_sha256=_sha256_path(artifact_path),
         )
+
+
+def _source_receipt_with_root_files(source_root: Path) -> dict[str, object]:
+    source_root.mkdir(parents=True, exist_ok=True)
+    names = {
+        "maps": "maps.parquet",
+        "players": "oe_player_games.parquet",
+        "teams": "oe_team_games.parquet",
+        "accepted_census": "accepted-census.json",
+    }
+    for label, name in names.items():
+        (source_root / name).write_bytes(f"{label}-source".encode("ascii"))
+    source = _source_receipt(["g1", "g2"])
+    source["source_files"] = {
+        label: {
+            "locator": name,
+            "bytes": (source_root / name).stat().st_size,
+            "sha256": _sha256_path(source_root / name),
+        }
+        for label, name in names.items()
+    }
+    source.pop("receipt_sha256", None)
+    source["receipt_sha256"] = _canonical_sha(source)
+    return source
+
+
+def test_final_fit_resolves_receipt_locators_from_explicit_source_root(tmp_path) -> None:
+    source_root = tmp_path / "source-root"
+    source = _source_receipt_with_root_files(source_root)
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(json.dumps(source, sort_keys=True), encoding="utf-8")
+    # A same-named decoy next to the receipt must not be selected.
+    (tmp_path / "maps.parquet").write_bytes(b"decoy-maps")
+    _verify_source_receipt(
+        source,
+        receipt_path,
+        source_root=source_root,
+        expected_source_receipt_sha256=_sha256_path(receipt_path),
+    )
+    (source_root / "maps.parquet").write_bytes(b"other-bytes")
+    with pytest.raises(FinalFitError, match="source receipt file (bytes|hash) changed"):
+        _verify_source_receipt(
+            source,
+            receipt_path,
+            source_root=source_root,
+            expected_source_receipt_sha256=_sha256_path(receipt_path),
+        )
+
+
+def test_final_fit_rejects_source_locator_outside_explicit_root(tmp_path) -> None:
+    source_root = tmp_path / "source-root"
+    source = _source_receipt_with_root_files(source_root)
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"outside")
+    source["source_files"]["maps"]["locator"] = "../outside.bin"
+    source.pop("receipt_sha256", None)
+    source["receipt_sha256"] = _canonical_sha(source)
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(json.dumps(source, sort_keys=True), encoding="utf-8")
+    with pytest.raises(FinalFitError, match="locator is unsafe"):
+        _verify_source_receipt(
+            source,
+            receipt_path,
+            source_root=source_root,
+            expected_source_receipt_sha256=_sha256_path(receipt_path),
+        )
+
+
+@pytest.mark.parametrize(
+    ("value", "prefix", "valid"),
+    [
+        ("oe:player:", "oe:player:", False),
+        ("oe:team:", "oe:team:", False),
+        ("oe:player:123", "oe:player:", True),
+        ("oe:team:123", "oe:team:", True),
+    ],
+)
+def test_stable_id_helper_rejects_prefix_only_ids(value, prefix, valid) -> None:
+    assert _stable_identity(value, prefix) is valid
+
+
+def test_final_fit_rejects_prefix_only_source_ids() -> None:
+    players = pd.DataFrame(
+        {
+            "playerid": ["oe:player:"],
+            "teamid": ["oe:team:valid"],
+        }
+    )
+    teams = pd.DataFrame({"teamid": ["oe:team:valid"]})
+    with pytest.raises(FinalFitError, match="invalid stable player ID"):
+        _validate_source_stable_ids(players, teams)
+
+
+@pytest.mark.parametrize(
+    ("entrypoint", "variant_kwargs"),
+    [
+        ("fit_final_variant", {"variant": "current_only"}),
+        ("fit_final", {"variant": "current_only"}),
+        ("fit_final_v1", {}),
+        ("fit_final_v2", {}),
+        ("fit_final_v3", {}),
+        ("fit_final_v4", {}),
+    ],
+)
+def test_every_final_fit_path_requires_an_independent_evaluation_hash(
+    tmp_path, monkeypatch, entrypoint, variant_kwargs
+) -> None:
+    source_path = tmp_path / "source-receipt.json"
+    source_path.write_text("{}", encoding="utf-8")
+    evaluation_path = tmp_path / "evaluation.json"
+    evaluation_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(final_fit_module, "_verify_source_receipt", lambda *args, **kwargs: None)
+    common = {
+        "source_root": tmp_path,
+        "source_receipt_path": source_path,
+        "current_root": tmp_path,
+        "evaluation_path": evaluation_path,
+        "output_dir": tmp_path / "output",
+        "expected_source_receipt_sha256": "0" * 64,
+        "nested_selection_path": tmp_path / "nested.json",
+        "expected_nested_selection_sha256": "0" * 64,
+    }
+    with pytest.raises(FinalFitError, match="independent evaluation file hash is required"):
+        getattr(final_fit_module, entrypoint)(**variant_kwargs, **common)
+
+
+def test_final_fit_cli_requires_independent_evaluation_hash(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_future_value_final_fit",
+            "--source-root",
+            str(tmp_path),
+            "--source-receipt",
+            str(tmp_path / "source-receipt.json"),
+            "--current-root",
+            str(tmp_path),
+            "--source-receipt-sha256",
+            "0" * 64,
+            "--current-receipt-sha256",
+            "0" * 64,
+            "--current-artifact-sha256",
+            "0" * 64,
+            "--nested-selection",
+            str(tmp_path / "nested.json"),
+            "--nested-selection-sha256",
+            "0" * 64,
+            "--output-dir",
+            str(tmp_path / "output"),
+        ],
+    )
+    with pytest.raises(SystemExit) as error:
+        final_fit_module.main()
+    assert error.value.code == 2
